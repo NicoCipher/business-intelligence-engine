@@ -1,0 +1,95 @@
+name: Daily intelligence collection
+
+# Runs automatically every day at 06:00 UTC.
+# On Sundays, also generates the weekly intelligence report.
+# Can be triggered manually from the GitHub Actions UI at any time.
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 06:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      generate_report:
+        description: 'Generate weekly report after collection'
+        type: boolean
+        default: false
+      hn_only:
+        description: 'Use HN only (no Reddit credentials required)'
+        type: boolean
+        default: false
+
+jobs:
+  collect:
+    name: Collect · Extract · Detect · (Report on Sundays)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Restore the database from a previous run ────────────────────────
+      # The database accumulates signals across runs. Without this, every run
+      # would start from scratch and lose all historical signals.
+      # Uses GitHub's cache with a prefix restore key so any previous run's
+      # cache is used when no exact match exists (i.e., always on the first
+      # restore after an update).
+      - name: Restore database cache
+        uses: actions/cache@v4
+        with:
+          path: backend/data/bia.db
+          key: bia-database-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            bia-database-${{ runner.os }}-
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      # ── Run the intelligence pipeline ───────────────────────────────────
+      - name: Run collection pipeline
+        run: |
+          # Determine flags
+          FLAGS=""
+
+          # Manual trigger: use workflow input for hn_only
+          if [ "${{ github.event.inputs.hn_only }}" = "true" ]; then
+            FLAGS="$FLAGS --hn-only"
+          fi
+
+          # No Reddit credentials in secrets? Fall back to HN + RSS only.
+          if [ -z "$REDDIT_CLIENT_ID" ] || [ -z "$REDDIT_CLIENT_SECRET" ]; then
+            echo "Reddit credentials not configured — using HN + RSS only"
+            FLAGS="$FLAGS --hn-only"
+          fi
+
+          # Generate report on Sundays or when manually requested
+          DAY_OF_WEEK=$(date +%u)
+          if [ "$DAY_OF_WEEK" = "7" ] || [ "${{ github.event.inputs.generate_report }}" = "true" ]; then
+            FLAGS="$FLAGS --report"
+          fi
+
+          python backend/collect.py $FLAGS
+        env:
+          REDDIT_CLIENT_ID:     ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          BIA_DATA_DIR:         backend/data
+
+      # ── Upload pipeline summary ─────────────────────────────────────────
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## BIA-OS Pipeline Run" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run:** \`${{ github.run_id }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by:** \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Date:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          if [ -f backend/data/bia.db ]; then
+            DB_SIZE=$(du -sh backend/data/bia.db | cut -f1)
+            echo "- **Database size:** $DB_SIZE" >> $GITHUB_STEP_SUMMARY
+          fi
