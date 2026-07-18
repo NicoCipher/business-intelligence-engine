@@ -275,3 +275,28 @@ class Opportunity:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+
+# ── WeeklyReport ──────────────────────────────────────────────────────────
+
+@dataclass
+class WeeklyReport:
+    """
+    The system's primary output artifact.
+
+    Generated once per week (or on demand) by report.generator.ReportGenerator.
+    Stored in the reports table and served via GET /api/v1/reports/latest.
+
+    content is a JSON-serialised dict with the full briefing structure:
+      week_key, period_start, period_end, summary, top_opportunities,
+      key_insights, recommended_actions, entity_intelligence,
+      signal_breakdown, top_tags, generated_at.
+    """
+    week_key:     str
+    period_start: str
+    period_end:   str
+    content:      dict = field(default_factory=dict)
+    opp_count:    int  = 0
+    signal_count: int  = 0
+    id:           str  = field(default_factory=_uuid)
+    created_at:   str  = field(default_factory=_now)

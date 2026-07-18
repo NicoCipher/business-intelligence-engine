@@ -34,7 +34,7 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Full DDL. CREATE IF NOT EXISTS makes this idempotent — safe to call on
 # every startup without worrying about duplicate table errors.
@@ -98,7 +98,8 @@ CREATE TABLE IF NOT EXISTS signals (
     tags          TEXT DEFAULT '[]',   -- JSON: ["demand_signal", "ai", ...]
     raw_metadata  TEXT DEFAULT '{}',   -- JSON: source-specific fields
     collected_at  TEXT NOT NULL,
-    processed     INTEGER DEFAULT 0    -- 0=raw, 1=processed, 2=failed
+    processed     INTEGER DEFAULT 0,   -- 0=raw, 1=processed, 2=failed
+    domain        TEXT NOT NULL DEFAULT 'business'  -- originating domain id
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_dedup     ON signals(source, source_id);
 CREATE        INDEX IF NOT EXISTS idx_signals_source    ON signals(source);
@@ -121,7 +122,8 @@ CREATE TABLE IF NOT EXISTS opportunities (
     status          TEXT DEFAULT 'new', -- new|validated|dismissed|archived
     week_key        TEXT NOT NULL,      -- ISO week: '2026-W28'
     created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL
+    updated_at      TEXT NOT NULL,
+    domain          TEXT NOT NULL DEFAULT 'business'  -- originating domain id
 );
 CREATE INDEX IF NOT EXISTS idx_opp_composite ON opportunities(composite_score DESC);
 CREATE INDEX IF NOT EXISTS idx_opp_status    ON opportunities(status);
@@ -138,7 +140,8 @@ CREATE TABLE IF NOT EXISTS reports (
     content      TEXT DEFAULT '{}',   -- JSON: full report
     opp_count    INTEGER DEFAULT 0,
     signal_count INTEGER DEFAULT 0,
-    created_at   TEXT NOT NULL
+    created_at   TEXT NOT NULL,
+    domain       TEXT NOT NULL DEFAULT 'business'  -- originating domain id
 );
 
 
@@ -183,7 +186,8 @@ def get_connection():
 def initialize() -> None:
     """
     Create all tables and indexes if they do not exist.
-    Record the schema version. Safe to call on every startup.
+    Apply any pending schema migrations.
+    Safe to call on every startup — all operations are idempotent.
     """
     with get_connection() as conn:
         conn.executescript(_SCHEMA_DDL)
@@ -192,15 +196,43 @@ def initialize() -> None:
             "SELECT version FROM schema_info ORDER BY version DESC LIMIT 1"
         ).fetchone()
 
-        if not current or current["version"] < SCHEMA_VERSION:
+        current_version = current["version"] if current else 0
+
+        if current_version < 2:
+            _migrate_v2(conn)
+
+        if current_version < SCHEMA_VERSION:
             conn.execute(
                 "INSERT OR REPLACE INTO schema_info (version, applied_at) VALUES (?, ?)",
                 (SCHEMA_VERSION, _now())
             )
             conn.commit()
-            logger.info(f"Database initialised at schema version {SCHEMA_VERSION} — {DB_PATH}")
+            logger.info(f"Database at schema version {SCHEMA_VERSION} — {DB_PATH}")
         else:
-            logger.debug(f"Database already at schema version {current['version']}")
+            logger.debug(f"Database already at schema version {current_version}")
+
+
+def _migrate_v2(conn) -> None:
+    """
+    Migration v1 → v2: add domain column to signals, opportunities, reports.
+
+    Adds TEXT NOT NULL DEFAULT 'business' so all existing rows are tagged
+    as belonging to the business domain. Safe to run on a fresh database
+    (the column already exists in the DDL) — PRAGMA table_info check prevents
+    duplicate ALTER TABLE errors.
+    """
+    for table in ("signals", "opportunities", "reports"):
+        existing_cols = {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if "domain" not in existing_cols:
+            conn.execute(
+                f"ALTER TABLE {table} "
+                f"ADD COLUMN domain TEXT NOT NULL DEFAULT 'business'"
+            )
+            logger.info("Migration v2: added domain column to %s", table)
+    conn.commit()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────

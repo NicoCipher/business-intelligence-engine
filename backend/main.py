@@ -30,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import database
 from config import API_HOST, API_PORT
 from api import opportunities, signals, reports
+from domains.registry import DomainRegistry
 
 # ── Logging ───────────────────────────────────────────────────────────────
 # Structured logging from day one. Every module uses getLogger(__name__),
@@ -61,6 +62,7 @@ async def lifespan(app: FastAPI):
     """
     logger.info("BIA-OS starting up…")
     database.initialize()
+    DomainRegistry.discover_and_register()
 
     stats = database.get_stats()
     logger.info(

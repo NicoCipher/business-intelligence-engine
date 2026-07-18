@@ -36,6 +36,7 @@ from collectors.rss_collector import RSSCollector
 from knowledge_graph.extractor import EntityExtractor
 from opportunity_engine.detector import PatternDetector
 from report.generator import ReportGenerator
+from domains.registry import DomainRegistry
 
 logging.basicConfig(
     level=logging.INFO,
@@ -174,6 +175,7 @@ def main() -> int:
     try:
         # Stage 0: Ensure database schema exists
         database.initialize()
+        DomainRegistry.discover_and_register()
         stats = database.get_stats()
         logger.info(
             f"Database: {stats['signals']} signals, "
