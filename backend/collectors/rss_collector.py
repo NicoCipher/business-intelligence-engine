@@ -88,7 +88,7 @@ _OPPORTUNITY_MARKERS = [
 _TIMEOUT = 12       # seconds per feed request
 _DELAY   = 0.5      # seconds between feeds (polite but fast)
 _HEADERS = {
-    "User-Agent": "BIA-OS/1.0 RSS reader — business intelligence collector",
+    "User-Agent": "BIA-OS/1.0 RSS reader - business intelligence collector",
     "Accept":     "application/rss+xml, application/atom+xml, application/xml, text/xml",
 }
 
@@ -105,8 +105,20 @@ class RSSCollector(BaseCollector):
     SOURCE_NAME  = "rss"
     DEFAULT_LIMIT = 40
 
-    def __init__(self, feeds: list[tuple[str, str]] | None = None):
-        super().__init__()
+    def __init__(
+        self,
+        feeds: list[tuple[str, str]] | None = None,
+        domain: str = "business",
+    ):
+        """
+        Args:
+            feeds:  (url, description) tuples to monitor. Defaults to
+                    DEFAULT_RSS_FEEDS for backward compatibility. In the real
+                    pipeline this comes from DomainConfig.sources.rss_feeds —
+                    see pipeline.py.
+            domain: The domain these collected signals belong to.
+        """
+        super().__init__(domain=domain)
         self._feeds = feeds or DEFAULT_RSS_FEEDS
 
     def _fetch(self, limit: int) -> Generator[Signal, None, None]:
@@ -124,7 +136,7 @@ class RSSCollector(BaseCollector):
                     if count >= limit:
                         break
                     sig = self._item_to_signal(item, url)
-                    if sig and not self._is_duplicate(sig.source_id):
+                    if sig and not self._is_duplicate(sig.source_id, domain=self.domain):
                         yield sig
                         count += 1
             except RateLimitError:
@@ -234,6 +246,7 @@ class RSSCollector(BaseCollector):
                     "feed_url":    feed_url,
                     "pubdate":     item.get("date", ""),
                 },
+                domain=self.domain,
             )
         except ValueError as e:
             self.logger.debug(f"Skipping item '{title[:40]}': {e}")

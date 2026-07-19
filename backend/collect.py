@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
 """
-collect.py — Standalone intelligence pipeline runner
+collect.py — CLI entry point for the intelligence pipeline
 
-This script runs the full pipeline without requiring the FastAPI server.
-It is the entry point for:
+This script is a thin wrapper around pipeline.run_full_pipeline(). It owns
+CLI concerns only (argument parsing, logging setup, exit codes) — it does
+NOT implement pipeline logic itself. That logic lives in pipeline.py and
+is shared with main.py's /api/v1/pipeline/run endpoint, so the CLI and the
+API are guaranteed to behave identically.
+
+Entry point for:
   - Local cron jobs:   */60 * * * * cd /path/to/bia-os && python backend/collect.py
   - GitHub Actions:    see .github/workflows/collect.yml
   - Manual runs:       python backend/collect.py [--report]
 
-Pipeline stages:
-  1. Collect  — fetch signals from HN, Reddit, RSS
-  2. Extract  — pull entities from signal text → knowledge graph
-  3. Detect   — find opportunity clusters across sources
-  4. Report   — generate weekly intelligence briefing (Sundays or --report flag)
-
 Exit codes:
   0  success (even if nothing new was found)
-  1  critical failure (database unreachable, etc.)
+  1  critical failure (database unreachable, no active domains, etc.)
 """
 
 import argparse
@@ -30,13 +29,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import database
-from collectors.hn_collector import HNCollector
-from collectors.reddit_collector import RedditCollector
-from collectors.rss_collector import RSSCollector
-from knowledge_graph.extractor import EntityExtractor
-from opportunity_engine.detector import PatternDetector
-from report.generator import ReportGenerator
 from domains.registry import DomainRegistry
+from pipeline import run_full_pipeline
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,106 +60,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run_collection(dry_run: bool = False, hn_only: bool = False) -> list:
-    """
-    Stage 1: Collect signals from all configured sources.
-    Returns the list of new Signal objects collected.
-    """
-    collector_classes = [HNCollector, RSSCollector]
-    if not hn_only:
-        collector_classes.append(RedditCollector)
-
-    all_signals = []
-
-    for CollectorClass in collector_classes:
-        name = CollectorClass.SOURCE_NAME
-        try:
-            collector = CollectorClass()
-            signals   = collector.collect()
-            logger.info(f"[{name}] collected {len(signals)} signals")
-
-            if not dry_run and signals:
-                inserted = collector.persist(signals)
-                logger.info(f"[{name}] persisted {inserted} new signals")
-
-            all_signals.extend(signals)
-        except Exception:
-            logger.exception(f"[{name}] collector failed — skipping")
-
-    return all_signals
-
-
-def run_extraction(signals: list, dry_run: bool = False) -> dict:
-    """
-    Stage 2: Extract entities from collected signals, build knowledge graph.
-    """
-    if not signals:
-        logger.info("[extract] No signals to process")
-        return {"entities": 0, "relationships": 0}
-
-    extractor = EntityExtractor()
-    results   = extractor.extract_batch(signals)
-
-    if dry_run:
-        entity_count = sum(len(r.entities) for r in results)
-        rel_count    = sum(len(r.relationships) for r in results)
-        logger.info(f"[extract] DRY RUN — would insert {entity_count} entities, {rel_count} relationships")
-        return {"entities": entity_count, "relationships": rel_count}
-
-    counts = extractor.persist_results(results)
-    logger.info(
-        f"[extract] {counts['entities_inserted']} new entities, "
-        f"{counts['relationships_inserted']} new relationships"
-    )
-    return counts
-
-
-def run_detection(signals: list, dry_run: bool = False) -> int:
-    """
-    Stage 3: Detect opportunity clusters, score and persist.
-    Returns number of new opportunities detected.
-    """
-    if len(signals) < 2:
-        logger.info("[detect] Not enough signals for pattern detection")
-        return 0
-
-    detector = PatternDetector()
-
-    if dry_run:
-        opps = detector.detect(signals)
-        logger.info(f"[detect] DRY RUN — would persist {len(opps)} opportunities")
-        for o in opps[:3]:
-            logger.info(f"  {o.tier.upper():6s} {o.composite_score:.1f}  {o.title}")
-        return len(opps)
-
-    new_opps = detector.detect_and_persist(signals)
-    logger.info(f"[detect] {new_opps} new opportunities persisted")
-    return new_opps
-
-
-def run_report(dry_run: bool = False) -> None:
-    """Stage 4: Generate and persist the weekly intelligence report."""
-    generator = ReportGenerator()
-    report    = generator.generate()
-
-    logger.info(
-        f"[report] Generated {report.week_key} — "
-        f"{report.opp_count} opportunities, {report.signal_count} signals, "
-        f"{len(report.content.get('key_insights', []))} insights"
-    )
-
-    if dry_run:
-        logger.info("[report] DRY RUN — not persisting")
-        return
-
-    generator.persist(report)
-    logger.info(f"[report] Persisted report for {report.week_key}")
-
-
 def main() -> int:
-    args    = parse_args()
-    start   = time.monotonic()
-    today   = datetime.now(timezone.utc)
+    args      = parse_args()
+    start     = time.monotonic()
+    today     = datetime.now(timezone.utc)
     is_sunday = today.weekday() == 6
 
     logger.info(f"BIA-OS pipeline starting ({today.strftime('%Y-%m-%d %H:%M UTC')})")
@@ -173,7 +71,10 @@ def main() -> int:
         logger.info("DRY RUN mode — nothing will be written to the database")
 
     try:
-        # Stage 0: Ensure database schema exists
+        # Stage 0: Ensure database schema exists and domains are registered.
+        # DomainRegistry is the single source of truth for which domains run
+        # — pipeline.py reads it directly, so registration must happen here,
+        # before run_full_pipeline() is called.
         database.initialize()
         DomainRegistry.discover_and_register()
         stats = database.get_stats()
@@ -183,22 +84,28 @@ def main() -> int:
             f"{stats['entities']} entities"
         )
 
-        # Stage 1: Collect
-        signals = run_collection(dry_run=args.dry_run, hn_only=args.hn_only)
-        logger.info(f"Total signals this run: {len(signals)}")
+        result = run_full_pipeline(
+            dry_run=args.dry_run,
+            hn_only=args.hn_only,
+            generate_report=(args.report or is_sunday),
+        )
 
-        # Stage 2: Extract entities
-        run_extraction(signals, dry_run=args.dry_run)
-
-        # Stage 3: Detect opportunities
-        run_detection(signals, dry_run=args.dry_run)
-
-        # Stage 4: Generate report (Sundays automatically, or when --report flag is set)
-        if args.report or is_sunday:
-            run_report(dry_run=args.dry_run)
+        for d in result.domains:
+            logger.info(
+                f"[{d.domain_id}] {d.signals_collected} signals collected, "
+                f"{d.signals_persisted} persisted, "
+                f"{d.entities_inserted} entities, {d.relationships_inserted} relationships, "
+                f"{d.opportunities_detected} opportunities"
+                + (", report generated" if d.report_generated else "")
+            )
 
         elapsed = time.monotonic() - start
-        logger.info(f"Pipeline complete in {elapsed:.1f}s")
+        logger.info(
+            f"Pipeline complete in {elapsed:.1f}s — "
+            f"{result.total_signals} total signals, "
+            f"{result.total_opportunities} total opportunities across "
+            f"{len(result.domains)} domain(s)"
+        )
         return 0
 
     except KeyboardInterrupt:

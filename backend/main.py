@@ -160,7 +160,7 @@ async def run_pipeline(background_tasks: BackgroundTasks):
 
 async def _run_pipeline_task():
     """
-    Full pipeline: collect → detect → persist.
+    Full pipeline: collect → extract → detect → (report), per active domain.
 
     Runs in a background task. Errors are logged but do not crash the server.
     """
@@ -170,28 +170,30 @@ async def _run_pipeline_task():
 
 
 def _pipeline_sync():
-    """Synchronous pipeline execution (runs in thread pool via run_in_executor)."""
-    from collectors.hn_collector import HNCollector
-    from collectors.reddit_collector import RedditCollector
-    from opportunity_engine.detector import PatternDetector
-    import database as db
+    """
+    Synchronous pipeline execution (runs in thread pool via run_in_executor).
+
+    Delegates entirely to pipeline.run_full_pipeline() — the same function
+    collect.py's CLI entry point calls. There is no pipeline logic here;
+    this function only exists to bridge FastAPI's background-task/executor
+    machinery to the synchronous pipeline implementation.
+    """
+    from pipeline import run_full_pipeline
 
     logger.info("Pipeline run started")
-    all_signals = []
+    try:
+        result = run_full_pipeline(generate_report=False)
+    except RuntimeError:
+        logger.exception("Pipeline run aborted")
+        return
 
-    for CollectorClass in [HNCollector, RedditCollector]:
-        try:
-            collector = CollectorClass()
-            collected = collector.collect()
-            count = collector.persist(collected)
-            all_signals.extend(collected)
-            logger.info(f"{CollectorClass.SOURCE_NAME}: {count} new signals")
-        except Exception:
-            logger.exception(f"Collector {CollectorClass.__name__} failed")
-
-    if len(all_signals) >= 2:
-        detector = PatternDetector()
-        new_opps = detector.detect_and_persist(all_signals)
-        logger.info(f"Pipeline complete — {new_opps} new opportunities detected")
-    else:
-        logger.info("Not enough signals for pattern detection this run")
+    for d in result.domains:
+        logger.info(
+            f"[{d.domain_id}] {d.signals_persisted} new signals, "
+            f"{d.opportunities_detected} new opportunities"
+        )
+    logger.info(
+        f"Pipeline complete — {result.total_signals} total signals, "
+        f"{result.total_opportunities} total opportunities across "
+        f"{len(result.domains)} domain(s)"
+    )

@@ -80,9 +80,16 @@ class PatternDetector:
     def __init__(self):
         self._scorer = OpportunityScorer()
 
-    def detect(self, signals: list[Signal]) -> list[Opportunity]:
+    def detect(self, signals: list[Signal], domain: str = "business") -> list[Opportunity]:
         """
         Find and score opportunity clusters in the provided signals.
+
+        Args:
+            signals: Signals to cluster. Callers should pass a domain-scoped
+                     batch — see pipeline.py, which runs detection once per
+                     active domain.
+            domain:  The domain these opportunities belong to. Stamped onto
+                     every Opportunity this call produces.
 
         Returns a list of Opportunity objects, sorted by composite score
         descending. Only opportunities above MIN_COMPOSITE_TO_PERSIST
@@ -91,32 +98,32 @@ class PatternDetector:
         if not signals:
             return []
 
-        logger.info(f"Running pattern detection on {len(signals)} signals")
+        logger.info(f"[{domain}] Running pattern detection on {len(signals)} signals")
 
         fingerprints = {s.id: self._fingerprint(s) for s in signals}
         clusters = self._cluster(signals, fingerprints)
 
-        logger.info(f"Found {len(clusters)} raw clusters before filtering")
+        logger.info(f"[{domain}] Found {len(clusters)} raw clusters before filtering")
 
         opportunities = []
         for cluster in clusters:
-            opp = self._evaluate_cluster(cluster)
+            opp = self._evaluate_cluster(cluster, domain)
             if opp is not None:
                 opportunities.append(opp)
 
         opportunities.sort(key=lambda o: o.composite_score, reverse=True)
         logger.info(
-            f"Produced {len(opportunities)} opportunities "
+            f"[{domain}] Produced {len(opportunities)} opportunities "
             f"(composite ≥ {MIN_COMPOSITE_TO_PERSIST})"
         )
         return opportunities
 
-    def detect_and_persist(self, signals: list[Signal]) -> int:
+    def detect_and_persist(self, signals: list[Signal], domain: str = "business") -> int:
         """
-        Detect opportunities and write them to the database.
+        Detect opportunities for one domain and write them to the database.
         Returns the number of new opportunities persisted.
         """
-        opportunities = self.detect(signals)
+        opportunities = self.detect(signals, domain=domain)
         if not opportunities:
             return 0
 
@@ -129,11 +136,11 @@ class PatternDetector:
                     INSERT OR IGNORE INTO opportunities
                       (id, title, description, signal_ids, entity_ids,
                        scores, composite_score, status, week_key,
-                       created_at, updated_at)
+                       created_at, updated_at, domain)
                     VALUES
                       (:id, :title, :description, :signal_ids, :entity_ids,
                        :scores, :composite_score, :status, :week_key,
-                       :created_at, :updated_at)
+                       :created_at, :updated_at, :domain)
                     """,
                     row,
                 )
@@ -141,7 +148,7 @@ class PatternDetector:
                     inserted += 1
             conn.commit()
 
-        logger.info(f"Persisted {inserted} new opportunities to database")
+        logger.info(f"[{domain}] Persisted {inserted} new opportunities to database")
         return inserted
 
     # ── Fingerprinting ─────────────────────────────────────────────────────
@@ -228,7 +235,7 @@ class PatternDetector:
 
     # ── Cluster evaluation ─────────────────────────────────────────────────
 
-    def _evaluate_cluster(self, cluster: list[Signal]) -> Opportunity | None:
+    def _evaluate_cluster(self, cluster: list[Signal], domain: str) -> Opportunity | None:
         """
         Evaluate one cluster and produce an Opportunity if it qualifies.
 
@@ -266,6 +273,7 @@ class PatternDetector:
             scores=scores,
             signal_ids=[s.id for s in cluster],
             week_key=week_key,
+            domain=domain,
         )
 
     # ── Description synthesis ──────────────────────────────────────────────

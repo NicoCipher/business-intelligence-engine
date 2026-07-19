@@ -73,8 +73,21 @@ class RedditCollector(BaseCollector):
     SOURCE_NAME = "reddit"
     DEFAULT_LIMIT = REDDIT_POST_LIMIT
 
-    def __init__(self):
-        super().__init__()
+    def __init__(
+        self,
+        subreddits: list[str] | None = None,
+        domain: str = "business",
+    ):
+        """
+        Args:
+            subreddits: Subreddits to monitor. Defaults to config.REDDIT_SUBREDDITS
+                        for backward compatibility with callers that don't pass
+                        domain-specific sources. In the real pipeline, this comes
+                        from DomainConfig.sources.reddit_sources — see pipeline.py.
+            domain:     The domain these collected signals belong to.
+        """
+        super().__init__(domain=domain)
+        self._subreddits = subreddits if subreddits is not None else REDDIT_SUBREDDITS
         self._reddit: "praw.Reddit | None" = None
 
     def _get_client(self) -> "praw.Reddit":
@@ -107,10 +120,14 @@ class RedditCollector(BaseCollector):
         return self._reddit
 
     def _fetch(self, limit: int) -> Generator[Signal, None, None]:
-        client = self._get_client()
-        per_sub = max(1, limit // len(REDDIT_SUBREDDITS))
+        if not self._subreddits:
+            self.logger.info("No subreddits configured for this domain — skipping")
+            return
 
-        for sub_name in REDDIT_SUBREDDITS:
+        client = self._get_client()
+        per_sub = max(1, limit // len(self._subreddits))
+
+        for sub_name in self._subreddits:
             self.logger.debug(f"Fetching r/{sub_name} (limit={per_sub})")
             try:
                 yield from self._fetch_subreddit(client, sub_name, per_sub)
@@ -137,13 +154,13 @@ class RedditCollector(BaseCollector):
             # new: recent posts, possibly low engagement but timely
             for submission in sub.new(limit=limit):
                 signal = self._submission_to_signal(submission, sub_name)
-                if signal and not self._is_duplicate(signal.source_id):
+                if signal and not self._is_duplicate(signal.source_id, domain=self.domain):
                     yield signal
 
             # hot: community-validated posts, higher engagement
             for submission in sub.hot(limit=limit // 2):
                 signal = self._submission_to_signal(submission, sub_name)
-                if signal and not self._is_duplicate(signal.source_id):
+                if signal and not self._is_duplicate(signal.source_id, domain=self.domain):
                     yield signal
 
         except RedditAPIException as e:
@@ -195,6 +212,7 @@ class RedditCollector(BaseCollector):
                     "upvote_ratio": round(getattr(submission, "upvote_ratio", 0.5), 2),
                     "created_utc": int(getattr(submission, "created_utc", 0)),
                 },
+                domain=self.domain,
             )
         except Exception as e:
             self.logger.debug(f"Skipping submission {getattr(submission, 'id', '?')}: {e}")

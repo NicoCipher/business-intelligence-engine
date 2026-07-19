@@ -1,0 +1,40 @@
+name: CI
+
+# Runs the test suite on every push and pull request that touches the
+# backend. This is a merge gate — collect.yml (the scheduled data-collection
+# job) does not run pytest at all, so without this workflow a broken build
+# could reach main and run in production undetected.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/ci.yml'
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run test suite
+        working-directory: backend
+        run: pytest

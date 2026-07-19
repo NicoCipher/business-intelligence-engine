@@ -72,7 +72,7 @@ class HNCollector(BaseCollector):
         super().__init__()
         self._session = requests.Session()
         self._session.headers["User-Agent"] = (
-            "BIA-OS/1.0 signal collector — github.com/your-org/bia-os"
+            "BIA-OS/1.0 signal collector - github.com/your-org/bia-os"
         )
 
     def _fetch(self, limit: int) -> Generator[Signal, None, None]:
@@ -176,6 +176,7 @@ class HNCollector(BaseCollector):
                     "category": category,
                     "raw_score": raw_score,
                 },
+                domain=self.domain,
             )
         except ValueError as e:
             self.logger.debug(f"Skipping invalid item {source_id}: {e}")

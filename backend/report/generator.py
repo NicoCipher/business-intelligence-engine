@@ -48,15 +48,21 @@ class ReportGenerator:
         generator.persist(report)
     """
 
-    def generate(self, week_key: Optional[str] = None) -> WeeklyReport:
+    def generate(
+        self,
+        week_key: Optional[str] = None,
+        domain: str = "business",
+    ) -> WeeklyReport:
         """
-        Generate a complete weekly intelligence report.
+        Generate a complete weekly intelligence report for one domain.
 
         Args:
             week_key: ISO week string, e.g. "2026-W28". Defaults to current week.
+            domain:   The domain to report on. Every active domain gets its
+                      own report per week — see pipeline.py.
 
         Returns:
-            WeeklyReport with full structured content.
+            WeeklyReport with full structured content, scoped to `domain`.
         """
         if not week_key:
             now = datetime.now(timezone.utc)
@@ -64,11 +70,11 @@ class ReportGenerator:
 
         period_start, period_end = self._week_bounds(week_key)
 
-        logger.info(f"Generating report for {week_key}")
+        logger.info(f"Generating report for {week_key} [{domain}]")
 
         # Gather all data needed for the report
-        signal_stats  = self._get_signal_stats(week_key)
-        opportunities = self._get_week_opportunities(week_key)
+        signal_stats  = self._get_signal_stats(week_key, domain)
+        opportunities = self._get_week_opportunities(week_key, domain)
         entity_summary = kg.weekly_entity_summary(week_key)
         top_pairs     = kg.co_occurring_pairs(min_weight=1.0, limit=5)
 
@@ -119,6 +125,7 @@ class ReportGenerator:
             content=content,
             opp_count=len(opportunities),
             signal_count=signal_stats["total"],
+            domain=domain,
         )
 
     def persist(self, report: WeeklyReport) -> bool:
@@ -130,14 +137,18 @@ class ReportGenerator:
         """
         with database.get_connection() as conn:
             try:
+                # INSERT OR REPLACE keys off the (week_key, domain) unique
+                # index — see database.py's idx_reports_week_domain. This is
+                # what lets every active domain persist its own report for
+                # the same week without overwriting another domain's report.
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO reports
                       (id, week_key, period_start, period_end, content,
-                       opp_count, signal_count, created_at)
+                       opp_count, signal_count, created_at, domain)
                     VALUES
                       (:id, :week_key, :period_start, :period_end, :content,
-                       :opp_count, :signal_count, :created_at)
+                       :opp_count, :signal_count, :created_at, :domain)
                     """,
                     {
                         "id":           report.id,
@@ -148,10 +159,11 @@ class ReportGenerator:
                         "opp_count":    report.opp_count,
                         "signal_count": report.signal_count,
                         "created_at":   report.created_at,
+                        "domain":       report.domain,
                     }
                 )
                 conn.commit()
-                logger.info(f"Report persisted for {report.week_key}")
+                logger.info(f"Report persisted for {report.week_key} [{report.domain}]")
                 return True
             except Exception as e:
                 logger.error(f"Failed to persist report: {e}")
@@ -273,18 +285,22 @@ class ReportGenerator:
 
     # ── Data queries ──────────────────────────────────────────────────────
 
-    def _get_signal_stats(self, week_key: str) -> dict:
+    def _get_signal_stats(self, week_key: str, domain: str) -> dict:
         with database.get_connection() as conn:
             total = conn.execute(
-                "SELECT COUNT(*) FROM signals"
+                "SELECT COUNT(*) FROM signals WHERE domain = ?", (domain,)
             ).fetchone()[0]
 
             by_source_rows = conn.execute(
-                "SELECT source, COUNT(*) as count FROM signals GROUP BY source"
+                "SELECT source, COUNT(*) as count FROM signals "
+                "WHERE domain = ? GROUP BY source",
+                (domain,),
             ).fetchall()
 
             tag_rows = conn.execute(
-                "SELECT tags FROM signals WHERE collected_at >= datetime('now', '-7 days')"
+                "SELECT tags FROM signals "
+                "WHERE domain = ? AND collected_at >= datetime('now', '-7 days')",
+                (domain,),
             ).fetchall()
 
         by_source = {r["source"]: r["count"] for r in by_source_rows}
@@ -303,17 +319,18 @@ class ReportGenerator:
             "top_tags":   [{"tag": t, "count": c} for t, c in top_tags],
         }
 
-    def _get_week_opportunities(self, week_key: str) -> list[dict]:
+    def _get_week_opportunities(self, week_key: str, domain: str) -> list[dict]:
         with database.get_connection() as conn:
             rows = conn.execute(
                 """
                 SELECT id, title, description, composite_score,
                        status, scores, week_key, created_at
                 FROM   opportunities
-                WHERE  status != 'dismissed'
+                WHERE  status != 'dismissed' AND domain = :domain
                 ORDER  BY composite_score DESC
                 LIMIT  20
                 """,
+                {"domain": domain},
             ).fetchall()
 
         result = []

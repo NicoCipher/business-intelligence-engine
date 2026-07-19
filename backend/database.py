@@ -34,7 +34,7 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Full DDL. CREATE IF NOT EXISTS makes this idempotent — safe to call on
 # every startup without worrying about duplicate table errors.
@@ -101,7 +101,10 @@ CREATE TABLE IF NOT EXISTS signals (
     processed     INTEGER DEFAULT 0,   -- 0=raw, 1=processed, 2=failed
     domain        TEXT NOT NULL DEFAULT 'business'  -- originating domain id
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_dedup     ON signals(source, source_id);
+-- Dedup is scoped per domain: shared collectors (e.g. Hacker News) persist
+-- one independent copy of the same source item for every active domain,
+-- so each domain scores and stores its own row. See pipeline.py.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_dedup     ON signals(source, source_id, domain);
 CREATE        INDEX IF NOT EXISTS idx_signals_source    ON signals(source);
 CREATE        INDEX IF NOT EXISTS idx_signals_collected ON signals(collected_at DESC);
 CREATE        INDEX IF NOT EXISTS idx_signals_processed ON signals(processed);
@@ -132,9 +135,13 @@ CREATE INDEX IF NOT EXISTS idx_opp_week      ON opportunities(week_key DESC);
 
 -- ── Weekly Reports ────────────────────────────────────────────────────────
 
+-- One report per (week_key, domain) — each active domain gets its own
+-- weekly briefing. The uniqueness constraint is a composite index rather
+-- than an inline UNIQUE on week_key so multiple domains can each have a
+-- report for the same week (see idx_reports_week_domain below).
 CREATE TABLE IF NOT EXISTS reports (
     id           TEXT PRIMARY KEY,
-    week_key     TEXT NOT NULL UNIQUE,
+    week_key     TEXT NOT NULL,
     period_start TEXT NOT NULL,
     period_end   TEXT NOT NULL,
     content      TEXT DEFAULT '{}',   -- JSON: full report
@@ -143,6 +150,7 @@ CREATE TABLE IF NOT EXISTS reports (
     created_at   TEXT NOT NULL,
     domain       TEXT NOT NULL DEFAULT 'business'  -- originating domain id
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_week_domain ON reports(week_key, domain);
 
 
 -- ── Schema Version ────────────────────────────────────────────────────────
@@ -201,6 +209,9 @@ def initialize() -> None:
         if current_version < 2:
             _migrate_v2(conn)
 
+        if current_version < 3:
+            _migrate_v3(conn)
+
         if current_version < SCHEMA_VERSION:
             conn.execute(
                 "INSERT OR REPLACE INTO schema_info (version, applied_at) VALUES (?, ?)",
@@ -232,6 +243,84 @@ def _migrate_v2(conn) -> None:
                 f"ADD COLUMN domain TEXT NOT NULL DEFAULT 'business'"
             )
             logger.info("Migration v2: added domain column to %s", table)
+    conn.commit()
+
+
+def _migrate_v3(conn) -> None:
+    """
+    Migration v2 → v3: make uniqueness domain-aware now that the pipeline
+    actually iterates active domains (see pipeline.py).
+
+    signals:
+      Old dedup key was (source, source_id) — one row per source item,
+      globally. That's wrong once multiple domains are active: a shared
+      collector (Hacker News) must be able to persist one independent copy
+      per active domain. Replace the unique index with
+      (source, source_id, domain).
+
+    reports:
+      Old constraint was an inline UNIQUE on week_key alone, so a second
+      domain's report for the same week would silently overwrite the
+      first domain's report (INSERT OR REPLACE keys off week_key). SQLite
+      can't drop an inline column-level UNIQUE without rebuilding the
+      table, so we recreate it with a composite (week_key, domain) index.
+
+    Both operations are idempotent — safe to run against a fresh database
+    (where the final-shape DDL already matches) or an existing v2 database.
+    """
+    # ── signals: rebuild the dedup index to include domain ─────────────
+    existing_indexes = {
+        row["name"]
+        for row in conn.execute("PRAGMA index_list(signals)").fetchall()
+    }
+    if "idx_signals_dedup" in existing_indexes:
+        index_info = conn.execute(
+            "PRAGMA index_info(idx_signals_dedup)"
+        ).fetchall()
+        columns = [row["name"] for row in index_info]
+        if columns != ["source", "source_id", "domain"]:
+            conn.execute("DROP INDEX idx_signals_dedup")
+            conn.execute(
+                "CREATE UNIQUE INDEX idx_signals_dedup "
+                "ON signals(source, source_id, domain)"
+            )
+            logger.info(
+                "Migration v3: rebuilt idx_signals_dedup as "
+                "(source, source_id, domain)"
+            )
+
+    # ── reports: rebuild the table to drop the inline UNIQUE(week_key) ──
+    reports_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'reports'"
+    ).fetchone()
+    if reports_sql and "week_key TEXT NOT NULL UNIQUE" in reports_sql["sql"]:
+        conn.executescript("""
+            CREATE TABLE reports_v3 (
+                id           TEXT PRIMARY KEY,
+                week_key     TEXT NOT NULL,
+                period_start TEXT NOT NULL,
+                period_end   TEXT NOT NULL,
+                content      TEXT DEFAULT '{}',
+                opp_count    INTEGER DEFAULT 0,
+                signal_count INTEGER DEFAULT 0,
+                created_at   TEXT NOT NULL,
+                domain       TEXT NOT NULL DEFAULT 'business'
+            );
+            INSERT INTO reports_v3
+                (id, week_key, period_start, period_end, content,
+                 opp_count, signal_count, created_at, domain)
+            SELECT id, week_key, period_start, period_end, content,
+                   opp_count, signal_count, created_at, domain
+            FROM reports;
+            DROP TABLE reports;
+            ALTER TABLE reports_v3 RENAME TO reports;
+        """)
+        logger.info("Migration v3: rebuilt reports table without inline UNIQUE(week_key)")
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_week_domain "
+        "ON reports(week_key, domain)"
+    )
     conn.commit()
 
 

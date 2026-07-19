@@ -122,6 +122,7 @@ class Signal:
     collected_at: str = field(default_factory=_now)
     processed: int = 0          # 0=raw, 1=processed, 2=failed
     id: str = field(default_factory=_uuid)
+    domain: str = "business"    # originating domain id (see domains/registry.py)
 
     def __post_init__(self):
         if self.source not in VALID_SOURCES:
@@ -154,6 +155,7 @@ class Signal:
             "raw_metadata": json.dumps(self.raw_metadata, default=str),
             "collected_at": self.collected_at,
             "processed": self.processed,
+            "domain": self.domain,
         }
 
 
@@ -245,6 +247,7 @@ class Opportunity:
     id: str = field(default_factory=_uuid)
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
+    domain: str = "business"    # originating domain id (see domains/registry.py)
 
     def __post_init__(self):
         if not self.week_key:
@@ -274,6 +277,7 @@ class Opportunity:
             "week_key": self.week_key,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "domain": self.domain,
         }
 
 
@@ -300,3 +304,4 @@ class WeeklyReport:
     signal_count: int  = 0
     id:           str  = field(default_factory=_uuid)
     created_at:   str  = field(default_factory=_now)
+    domain:       str  = "business"    # originating domain id (see domains/registry.py)
