@@ -65,7 +65,16 @@ class TestBasicExtraction:
 
 class TestEdgeCases:
     def test_empty_title_returns_empty_result(self, extractor, make_signal):
-        sig    = make_signal(title="", content="")
+        # Signal.__post_init__ rejects an empty title at construction time
+        # (a titleless signal isn't a real observed fact — see models.py).
+        # To test the extractor's own empty-text guard (extractor.py's
+        # `if not text: return ExtractionResult()`) in isolation, construct
+        # a valid Signal and then blank it out after construction — this
+        # exercises the extractor's tolerance without weakening the model's
+        # validation, which every collector relies on as its sanity check.
+        sig = make_signal(title="placeholder")
+        sig.title = ""
+        sig.content = ""
         result = extractor.extract(sig)
         assert result.entities == []
         assert result.relationships == []
