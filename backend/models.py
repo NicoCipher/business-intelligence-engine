@@ -159,6 +159,43 @@ class Signal:
         }
 
 
+# ── DimensionExplanation ─────────────────────────────────────────────────
+
+@dataclass
+class DimensionExplanation:
+    """
+    Why one scoring dimension received the value it did.
+
+    Produced by OpportunityScorer alongside the numeric score itself (see
+    scorer.py's "no black boxes" principle). This is the difference between
+    a report saying "Demand: 7" and one saying "Demand: 7/10 — multiple
+    signals use solution-seeking language, evidenced by 3 keyword matches
+    across 5 signals."
+
+    `reason` is one plain-language sentence. `evidence` is the specific
+    measurable fact behind it (counts, keyword hits) — kept separate so a
+    reader can skim reasons and drill into evidence only when they want to.
+    """
+    score: float = 0.0
+    reason: str = ""
+    evidence: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "score": round(self.score, 2),
+            "reason": self.reason,
+            "evidence": self.evidence,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DimensionExplanation":
+        return cls(
+            score=d.get("score", 0.0),
+            reason=d.get("reason", ""),
+            evidence=d.get("evidence", ""),
+        )
+
+
 # ── OpportunityScores ─────────────────────────────────────────────────────
 
 @dataclass
@@ -180,6 +217,11 @@ class OpportunityScores:
     risk: float = 0.0               # inverted: 10 = very low risk
     confidence: float = 0.0         # quality of evidence (count + diversity)
     evidence_count: int = 0         # raw number of signals in the cluster
+    # Per-dimension reason + evidence, keyed by dimension name (e.g. "demand").
+    # Optional: defaults to {} so every existing caller that builds
+    # OpportunityScores with numeric kwargs only (tests, from_dict on old
+    # rows) keeps working unchanged. Populated by OpportunityScorer.score().
+    explanations: dict[str, "DimensionExplanation"] = field(default_factory=dict)
 
     def composite(self) -> float:
         """
@@ -211,6 +253,9 @@ class OpportunityScores:
             "evidence_count":      self.evidence_count,
             "composite":           self.composite(),
             "tier":                self.tier(),
+            "explanations": {
+                dim: exp.to_dict() for dim, exp in self.explanations.items()
+            },
         }
 
     @classmethod
@@ -224,6 +269,10 @@ class OpportunityScores:
             risk=d.get("risk", 0.0),
             confidence=d.get("confidence", 0.0),
             evidence_count=d.get("evidence_count", 0),
+            explanations={
+                dim: DimensionExplanation.from_dict(exp)
+                for dim, exp in d.get("explanations", {}).items()
+            },
         )
 
 

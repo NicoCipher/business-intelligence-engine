@@ -33,12 +33,21 @@ Defaults when evidence is insufficient:
   Most dimensions default to 5.0 (neutral) not 0.
   This prevents the system from penalising unknown factors unfairly.
   Confidence starts at 1.0 and can only rise with evidence.
+
+Explanations:
+  Every dimension method returns (score, reason, evidence) instead of a
+  bare float. `reason` and `evidence` are built from the exact same
+  intermediate values used to compute the score — never recomputed
+  separately — so the explanation can never drift from the number it
+  describes. score() assembles these into OpportunityScores.explanations,
+  keyed by dimension name. This is what lets the report generator answer
+  "why is Demand 7.2?" instead of just stating the number.
 """
 
 import math
 from typing import Sequence
 
-from models import Signal, OpportunityScores
+from models import Signal, OpportunityScores, DimensionExplanation
 from config import (
     DEMAND_KEYWORDS, COMPLAINT_KEYWORDS, WILLINGNESS_TO_PAY,
     LOW_COMPETITION_SIGNALS, RISK_KEYWORDS,
@@ -75,20 +84,39 @@ class OpportunityScorer:
         signals = list(signals)
         blob = self._text_blob(signals)
 
+        demand,      demand_r,      demand_e      = self._demand(signals, blob)
+        competition, competition_r, competition_e = self._competition(blob)
+        revenue,     revenue_r,     revenue_e      = self._revenue_potential(signals, blob)
+        execution,   execution_r,   execution_e    = self._execution_difficulty(blob)
+        ttr,         ttr_r,         ttr_e          = self._time_to_revenue(blob)
+        risk,        risk_r,        risk_e         = self._risk(blob)
+        confidence,  confidence_r,  confidence_e   = self._confidence(signals)
+
+        explanations = {
+            "demand":               DimensionExplanation(demand, demand_r, demand_e),
+            "competition":          DimensionExplanation(competition, competition_r, competition_e),
+            "revenue_potential":    DimensionExplanation(revenue, revenue_r, revenue_e),
+            "execution_difficulty": DimensionExplanation(execution, execution_r, execution_e),
+            "time_to_revenue":      DimensionExplanation(ttr, ttr_r, ttr_e),
+            "risk":                 DimensionExplanation(risk, risk_r, risk_e),
+            "confidence":           DimensionExplanation(confidence, confidence_r, confidence_e),
+        }
+
         return OpportunityScores(
-            demand=               self._demand(signals, blob),
-            competition=          self._competition(blob),
-            revenue_potential=    self._revenue_potential(signals, blob),
-            execution_difficulty= self._execution_difficulty(blob),
-            time_to_revenue=      self._time_to_revenue(blob),
-            risk=                 self._risk(blob),
-            confidence=           self._confidence(signals),
+            demand=               demand,
+            competition=          competition,
+            revenue_potential=    revenue,
+            execution_difficulty= execution,
+            time_to_revenue=      ttr,
+            risk=                 risk,
+            confidence=           confidence,
             evidence_count=       len(signals),
+            explanations=         explanations,
         )
 
     # ── Dimension calculations ────────────────────────────────────────────
 
-    def _demand(self, signals: list[Signal], blob: str) -> float:
+    def _demand(self, signals: list[Signal], blob: str) -> tuple[float, str, str]:
         """
         Demand = evidence that people are actively seeking a solution.
 
@@ -112,9 +140,23 @@ class OpportunityScorer:
         total_eng = sum(s.engagement for s in signals)
         engagement = min(3.0, math.log10(total_eng + 1) * 1.0)
 
-        return round(min(10.0, freq + keywords + engagement), 2)
+        score = round(min(10.0, freq + keywords + engagement), 2)
 
-    def _competition(self, blob: str) -> float:
+        if hits >= 3:
+            reason = ("Multiple signals use explicit demand or solution-seeking "
+                       "language, and engagement suggests real reader interest.")
+        elif hits >= 1:
+            reason = ("Some signals use demand-seeking language, but explicit "
+                       "requests for a solution are limited.")
+        else:
+            reason = ("No explicit demand-seeking language was detected; this "
+                       "score rests mainly on how often the topic recurred and "
+                       "how much engagement it drew, not on stated intent.")
+        evidence = (f"{n} signal(s) in cluster, {hits} demand-keyword match(es), "
+                    f"{total_eng} combined upvotes/comments.")
+        return score, reason, evidence
+
+    def _competition(self, blob: str) -> tuple[float, str, str]:
         """
         Competition = inverse of market saturation.
         10 means no quality solution exists. 1 means the market is mature/crowded.
@@ -128,9 +170,23 @@ class OpportunityScorer:
         base = 5.5
         hits = sum(1 for kw in LOW_COMPETITION_SIGNALS if kw in blob)
         bonus = min(4.5, hits * 1.5)
-        return round(min(10.0, base + bonus), 2)
+        score = round(min(10.0, base + bonus), 2)
 
-    def _revenue_potential(self, signals: list[Signal], blob: str) -> float:
+        if hits >= 2:
+            reason = ("Multiple signals explicitly describe a market gap or the "
+                       "absence of a good existing solution.")
+        elif hits == 1:
+            reason = ("One signal suggests an underserved market, but this is "
+                       "not yet corroborated by other signals.")
+        else:
+            reason = ("No explicit evidence of a market gap was found; this score "
+                       "reflects the conservative default assumption of moderate "
+                       "competition, not a confirmed crowded market.")
+        evidence = (f"{hits} low-competition phrase match(es) "
+                    f"(e.g. \"no good alternative\", \"nothing exists\").")
+        return score, reason, evidence
+
+    def _revenue_potential(self, signals: list[Signal], blob: str) -> tuple[float, str, str]:
         """
         Revenue potential = evidence people will pay money for a solution.
 
@@ -153,9 +209,27 @@ class OpportunityScorer:
         b2b_bonus = min(3.0, b2b_count * 0.6)
 
         floor = 2.0 if len(signals) >= 3 else 1.0
-        return round(min(10.0, floor + direct + b2b_bonus), 2)
+        score = round(min(10.0, floor + direct + b2b_bonus), 2)
 
-    def _execution_difficulty(self, blob: str) -> float:
+        if pay_hits >= 1 and b2b_count >= 1:
+            reason = ("Direct willingness-to-pay language is present, and the "
+                       "context is business/B2B-facing — typically the strongest "
+                       "combination for revenue potential.")
+        elif pay_hits >= 1:
+            reason = "Direct willingness-to-pay language is present in the signals."
+        elif b2b_count >= 1:
+            reason = ("No explicit pricing language, but the context is "
+                       "business/B2B-facing, which usually supports higher "
+                       "willingness to pay than consumer contexts.")
+        else:
+            reason = ("No pricing or B2B language was found; this score rests on "
+                       "the floor granted for a repeated demand pattern, not on "
+                       "direct evidence people will pay.")
+        evidence = (f"{pay_hits} willingness-to-pay phrase match(es), "
+                    f"{b2b_count}/{len(signals)} signal(s) with business/B2B context.")
+        return score, reason, evidence
+
+    def _execution_difficulty(self, blob: str) -> tuple[float, str, str]:
         """
         Execution difficulty (inverted): 10 = anyone can start today.
 
@@ -180,10 +254,24 @@ class OpportunityScorer:
         easy = sum(1 for t in easy_terms if t in blob)
         hard = sum(1 for t in hard_terms if t in blob)
 
-        score = 6.0 + (easy * 0.25) - (hard * 0.8)
-        return round(min(10.0, max(1.0, score)), 2)
+        raw = 6.0 + (easy * 0.25) - (hard * 0.8)
+        score = round(min(10.0, max(1.0, raw)), 2)
 
-    def _time_to_revenue(self, blob: str) -> float:
+        if hard > 0:
+            reason = ("Signals reference hardware, biotech, or regulatory-gated "
+                       "work — these categories take materially longer to execute.")
+        elif easy >= 3:
+            reason = ("Signals reference service, content, or no-code/automation "
+                       "work — categories that can typically be started with free "
+                       "or low-cost tools.")
+        else:
+            reason = ("No strong easy or hard markers were found; this score "
+                       "reflects the default assumption for an unspecified "
+                       "software/service opportunity.")
+        evidence = f"{easy} easy-execution term match(es), {hard} hard-execution term match(es)."
+        return score, reason, evidence
+
+    def _time_to_revenue(self, blob: str) -> tuple[float, str, str]:
         """
         Time to revenue (inverted): 10 = can earn this week.
 
@@ -193,15 +281,37 @@ class OpportunityScorer:
         Default: 5.5 (a few weeks, which is realistic for most opportunities
         that reach the scoring stage).
         """
-        if any(t in blob for t in ["freelance", "consulting", "service", "agency", "coaching"]):
-            return 8.5
-        if any(t in blob for t in ["saas", "app", "product", "software", "tool"]):
-            return 6.0
-        if any(t in blob for t in ["marketplace", "platform", "community", "network"]):
-            return 3.5
-        return 5.5
+        service_terms = ["freelance", "consulting", "service", "agency", "coaching"]
+        product_terms = ["saas", "app", "product", "software", "tool"]
+        platform_terms = ["marketplace", "platform", "community", "network"]
 
-    def _risk(self, blob: str) -> float:
+        if any(t in blob for t in service_terms):
+            hit = next(t for t in service_terms if t in blob)
+            return (8.5,
+                    "Signals describe a service-style offering (e.g. freelance, "
+                    "consulting) — these can typically generate revenue almost "
+                    "immediately, without a build phase.",
+                    f"Matched service-category term: \"{hit}\".")
+        if any(t in blob for t in product_terms):
+            hit = next(t for t in product_terms if t in blob)
+            return (6.0,
+                    "Signals describe a software product (e.g. SaaS, app) — these "
+                    "usually need a build phase before the first sale.",
+                    f"Matched product-category term: \"{hit}\".")
+        if any(t in blob for t in platform_terms):
+            hit = next(t for t in platform_terms if t in blob)
+            return (3.5,
+                    "Signals describe a marketplace or platform model — these "
+                    "typically need to reach critical mass on both sides before "
+                    "generating revenue, which takes longer.",
+                    f"Matched platform-category term: \"{hit}\".")
+        return (5.5,
+                "No service, product, or platform category language was "
+                "detected; this score reflects the default assumption of a "
+                "few weeks to first revenue.",
+                "0 category-term matches.")
+
+    def _risk(self, blob: str) -> tuple[float, str, str]:
         """
         Risk (inverted): 10 = very low risk.
 
@@ -213,9 +323,20 @@ class OpportunityScorer:
         """
         hits = sum(1 for kw in RISK_KEYWORDS if kw in blob)
         penalty = min(6.0, hits * 1.2)
-        return round(max(1.0, 7.0 - penalty), 2)
+        score = round(max(1.0, 7.0 - penalty), 2)
 
-    def _confidence(self, signals: list[Signal]) -> float:
+        if hits >= 2:
+            reason = ("Multiple risk indicators were found — regulatory exposure, "
+                       "incumbent big-tech entrants, or hype/fad language.")
+        elif hits == 1:
+            reason = "One risk indicator was found; treat this as a moderate flag, not a dealbreaker."
+        else:
+            reason = ("No risk indicators were detected; this score reflects the "
+                       "moderate-low default, not a confirmed absence of risk.")
+        evidence = f"{hits} risk-keyword match(es) (regulation, incumbent entry, or hype language)."
+        return score, reason, evidence
+
+    def _confidence(self, signals: list[Signal]) -> tuple[float, str, str]:
         """
         Confidence = how much we should trust the other scores.
 
@@ -234,7 +355,8 @@ class OpportunityScorer:
         n = len(signals)
 
         # 1. Source diversity (0–4 points). Max bonus at 3+ distinct sources.
-        source_count = len(set(s.source for s in signals))
+        sources = set(s.source for s in signals)
+        source_count = len(sources)
         diversity = min(4.0, source_count * 1.5)
 
         # 2. Evidence count (0–3.5 points). log₄: 1→0, 4→1.7, 16→3.5
@@ -244,7 +366,22 @@ class OpportunityScorer:
         high_quality = sum(1 for s in signals if s.engagement > 10)
         quality = min(2.5, (high_quality / n) * 2.5) if n > 0 else 0.0
 
-        return round(min(10.0, diversity + count_score + quality), 2)
+        score = round(min(10.0, diversity + count_score + quality), 2)
+
+        if source_count >= 3:
+            reason = ("This pattern was corroborated by 3 or more independent "
+                       "sources — the strongest form of evidence this system "
+                       "recognises.")
+        elif source_count == 2:
+            reason = "This pattern was corroborated by 2 independent sources."
+        else:
+            reason = (f"This pattern was only observed on a single source "
+                       f"({next(iter(sources)) if sources else 'unknown'}); "
+                       f"treat the other scores with more caution until a second "
+                       f"source confirms it.")
+        evidence = (f"{source_count} distinct source(s), {n} signal(s), "
+                    f"{high_quality}/{n} with engagement above 10.")
+        return score, reason, evidence
 
     # ── Utilities ─────────────────────────────────────────────────────────
 

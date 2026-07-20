@@ -28,11 +28,21 @@ Design constraint:
   This module must be replaceable. The contract is:
     detect(signals: list[Signal]) → list[Opportunity]
   Any algorithm that satisfies this signature can replace this one.
+
+Diagnostics:
+  detect() only returns clusters that qualified as opportunities — anything
+  filtered out (too small, single-source, below score threshold) is simply
+  gone, which is fine for the pipeline but not enough to explain "why zero
+  opportunities were found" in a report. diagnose() is a read-only twin of
+  detect() that keeps every cluster, tagged with why it was rejected. It
+  changes nothing about detect()/detect_and_persist() — see explainer.py
+  for how the report generator uses this.
 """
 
 import logging
 import re
 from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import database
@@ -41,6 +51,30 @@ from opportunity_engine.scorer import OpportunityScorer
 from config import MIN_CLUSTER_SIZE, MIN_COMPOSITE_TO_PERSIST
 
 logger = logging.getLogger(__name__)
+
+
+# ── Diagnostics ───────────────────────────────────────────────────────────
+
+@dataclass
+class RejectedCluster:
+    """
+    A cluster that was considered but did not become an Opportunity.
+
+    This is the raw material for explaining "why zero (or few) opportunities
+    were found" instead of just reporting a count — see
+    opportunity_engine/explainer.py.
+    """
+    signals: list[Signal]
+    reason: str            # "too_small" | "single_source" | "below_threshold"
+    summary: str            # one human-readable sentence explaining the rejection
+    scores: OpportunityScores | None = None   # populated only if scoring ran
+
+
+@dataclass
+class DetectionDiagnostics:
+    """Full picture of one diagnose() run: what qualified and what didn't."""
+    accepted: list[Opportunity] = field(default_factory=list)
+    rejected: list[RejectedCluster] = field(default_factory=list)
 
 # Common English stop words that carry no topical meaning.
 # Excluded from keyword fingerprints.
@@ -150,6 +184,84 @@ class PatternDetector:
 
         logger.info(f"[{domain}] Persisted {inserted} new opportunities to database")
         return inserted
+
+    def diagnose(self, signals: list[Signal], domain: str = "business") -> DetectionDiagnostics:
+        """
+        Run the same clustering as detect(), but keep every cluster —
+        including ones that didn't qualify — with a documented rejection
+        reason. Read-only: nothing is persisted.
+
+        This exists purely to support explanation (see explainer.py's
+        explain_zero_opportunities()). detect() and detect_and_persist()
+        are completely unaffected by this method — they still use their
+        own evaluation path (_evaluate_cluster) exactly as before.
+        """
+        if not signals:
+            return DetectionDiagnostics()
+
+        fingerprints = {s.id: self._fingerprint(s) for s in signals}
+        clusters = self._cluster(signals, fingerprints)
+
+        accepted: list[Opportunity] = []
+        rejected: list[RejectedCluster] = []
+        now = datetime.now(timezone.utc)
+        week_key = f"{now.isocalendar().year}-W{now.isocalendar().week:02d}"
+
+        for cluster in clusters:
+            if len(cluster) < MIN_CLUSTER_SIZE:
+                rejected.append(RejectedCluster(
+                    signals=cluster,
+                    reason="too_small",
+                    summary=(
+                        f"Only {len(cluster)} signal(s) — needs at least "
+                        f"{MIN_CLUSTER_SIZE} to form a pattern worth evaluating."
+                    ),
+                ))
+                continue
+
+            sources = set(s.source for s in cluster)
+            if len(sources) == 1 and len(cluster) < 5:
+                rejected.append(RejectedCluster(
+                    signals=cluster,
+                    reason="single_source",
+                    summary=(
+                        f"All {len(cluster)} signal(s) came from a single source "
+                        f"({next(iter(sources))}) — needs either a second source "
+                        f"or 5+ mentions to rule out a source-specific echo."
+                    ),
+                ))
+                continue
+
+            scores = self._scorer.score(cluster)
+            if scores.composite() < MIN_COMPOSITE_TO_PERSIST:
+                rejected.append(RejectedCluster(
+                    signals=cluster,
+                    reason="below_threshold",
+                    scores=scores,
+                    summary=(
+                        f"Scored {scores.composite():.1f}/10, below the "
+                        f"{MIN_COMPOSITE_TO_PERSIST:.1f} persistence threshold."
+                    ),
+                ))
+                continue
+
+            title = self._synthesise_title(cluster)
+            description = self._synthesise_description(cluster, scores)
+            accepted.append(Opportunity(
+                title=title,
+                description=description,
+                scores=scores,
+                signal_ids=[s.id for s in cluster],
+                week_key=week_key,
+                domain=domain,
+            ))
+
+        accepted.sort(key=lambda o: o.composite_score, reverse=True)
+        rejected.sort(
+            key=lambda r: r.scores.composite() if r.scores else -1,
+            reverse=True,
+        )
+        return DetectionDiagnostics(accepted=accepted, rejected=rejected)
 
     # ── Fingerprinting ─────────────────────────────────────────────────────
 
