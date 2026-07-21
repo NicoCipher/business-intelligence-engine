@@ -61,6 +61,7 @@ DISPLAY_NAMES: dict[str, str] = {
     "dsa":          "DSA",
     "aws":          "AWS",
     "gcp":          "GCP",
+    "github":       "GitHub",
     "rag":          "RAG",
     "n8n":          "n8n",
     "ux":           "UX",

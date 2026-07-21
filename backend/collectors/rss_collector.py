@@ -160,6 +160,22 @@ class RSSCollector(BaseCollector):
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 raise RateLimitError(f"RSS 429 from {url}")
+            if e.code == 403:
+                # Not a header/config problem on our side. Several feed
+                # hosts (Stack Overflow/Stack Exchange in particular) run
+                # bot-protection (e.g. Cloudflare) that inspects more than
+                # headers — TLS/HTTP fingerprinting that a stdlib
+                # urllib.request client can't replicate. We could spoof a
+                # browser User-Agent to get past it, but that's
+                # circumventing their access control, not fixing a bug —
+                # this collector stays stdlib-only and honest about what
+                # it is (see _HEADERS). Surface this distinctly so it
+                # reads as "expected external block", not "broken feed".
+                raise CollectorError(
+                    f"{url} returned 403 (likely external bot protection, "
+                    f"not a request/header problem on our end) — skipping "
+                    f"this feed for this run"
+                )
             raise CollectorError(f"HTTP {e.code} fetching {url}")
         except urllib.error.URLError as e:
             raise CollectorError(f"URL error for {url}: {e.reason}")
@@ -192,7 +208,7 @@ class RSSCollector(BaseCollector):
                 "content": self._text(item, f"{{{_RSS_NS['content']}}}encoded"),
                 "date":    self._text(item, "pubDate"),
                 "score":   0,
-                "comments": int(self._text(item, "comments") or 0),
+                "comments": self._safe_int(self._text(item, "comments")),
             })
         return items
 
@@ -259,6 +275,27 @@ class RSSCollector(BaseCollector):
         if child is None:
             return ""
         return (child.text or "").strip()
+
+    @staticmethod
+    def _safe_int(text: str, default: int = 0) -> int:
+        """
+        Parse an integer, defaulting rather than raising on anything else.
+
+        RSS 2.0's <comments> element is spec-defined as "the URL of the
+        comments page for this item" (rssboard.org/rss-specification),
+        NOT a numeric count. hnrss.org correctly follows the spec and
+        always puts a URL there (e.g. "https://news.ycombinator.com/
+        item?id=..."). This collector has no reliable numeric comment
+        count from standard RSS 2.0 feeds, so this always returns the
+        default for spec-compliant feeds — that's expected, not a bug.
+        A bare int(text) here would raise ValueError on every hnrss.org
+        item and silently drop the whole feed via the caller's
+        try/except.
+        """
+        try:
+            return int(text)
+        except (TypeError, ValueError):
+            return default
 
     @staticmethod
     def _extract_tags(title: str, content: str, feed_url: str) -> list[str]:

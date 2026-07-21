@@ -103,7 +103,7 @@ class ReportGenerator:
         logger.info(f"Generating report for {week_key} [{domain}]")
 
         # Gather all data needed for the report
-        signal_stats  = self._get_signal_stats(week_key, domain)
+        signal_stats  = self._get_signal_stats(week_key, domain, period_start, period_end)
         opportunities = self._get_week_opportunities(week_key, domain)
         entity_summary = kg.weekly_entity_summary(week_key)
         top_pairs     = kg.co_occurring_pairs(min_weight=1.0, limit=5)
@@ -194,7 +194,7 @@ class ReportGenerator:
                 "top_markets":      self._top_by_type(entity_summary, "market"),
                 "top_technologies": self._top_by_type(entity_summary, "technology"),
                 "top_problems":     self._top_by_type(entity_summary, "problem"),
-                "strongest_pairs":  top_pairs,
+                "strongest_pairs":  _enrich_pairs_with_recurrence(top_pairs, previous_pairs),
                 "narrative_connections": narrative_connections,
             },
             "signal_breakdown": signal_stats["by_source"],
@@ -285,22 +285,34 @@ class ReportGenerator:
 
     # ── Data queries ──────────────────────────────────────────────────────
 
-    def _get_signal_stats(self, week_key: str, domain: str) -> dict:
+    def _get_signal_stats(self, week_key: str, domain: str, period_start: str, period_end: str) -> dict:
+        """
+        Signal stats scoped to this report's actual period, not all-time.
+
+        Bug fixed here: this used to run `WHERE domain = ?` with no date
+        filter at all (week_key was accepted but never used), so every
+        report showed the cumulative all-time signal count instead of
+        that period's count. top_tags had a *different* bug on top of
+        that — a rolling "last 7 days from right now" window, which is
+        wrong for any report generated for a past week. Both now use the
+        same period_start/period_end already computed in generate().
+        """
         with database.get_connection() as conn:
             total = conn.execute(
-                "SELECT COUNT(*) FROM signals WHERE domain = ?", (domain,)
+                "SELECT COUNT(*) FROM signals WHERE domain = ? AND collected_at BETWEEN ? AND ?",
+                (domain, period_start, period_end),
             ).fetchone()[0]
 
             by_source_rows = conn.execute(
                 "SELECT source, COUNT(*) as count FROM signals "
-                "WHERE domain = ? GROUP BY source",
-                (domain,),
+                "WHERE domain = ? AND collected_at BETWEEN ? AND ? GROUP BY source",
+                (domain, period_start, period_end),
             ).fetchall()
 
             tag_rows = conn.execute(
                 "SELECT tags FROM signals "
-                "WHERE domain = ? AND collected_at >= datetime('now', '-7 days')",
-                (domain,),
+                "WHERE domain = ? AND collected_at BETWEEN ? AND ?",
+                (domain, period_start, period_end),
             ).fetchall()
 
         by_source = {r["source"]: r["count"] for r in by_source_rows}
@@ -320,17 +332,28 @@ class ReportGenerator:
         }
 
     def _get_week_opportunities(self, week_key: str, domain: str) -> list[dict]:
+        """
+        Opportunities scoped to this specific week.
+
+        Bug fixed here: week_key was accepted and even selected as a
+        column, but never used in the WHERE clause — every report's
+        opportunity list was actually "top 20 opportunities of all time,"
+        not that week's. This is what made week-over-week comparison
+        unreliable: two reports for different weeks were both drawing
+        from the same unscoped all-time set, so almost everything looked
+        "recurring" regardless of whether it actually was.
+        """
         with database.get_connection() as conn:
             rows = conn.execute(
                 """
                 SELECT id, title, description, composite_score,
                        status, scores, week_key, created_at, signal_ids
                 FROM   opportunities
-                WHERE  status != 'dismissed' AND domain = :domain
+                WHERE  status != 'dismissed' AND domain = :domain AND week_key = :week_key
                 ORDER  BY composite_score DESC
                 LIMIT  20
                 """,
-                {"domain": domain},
+                {"domain": domain, "week_key": week_key},
             ).fetchall()
 
         result = []
@@ -428,3 +451,35 @@ class ReportGenerator:
         except (ValueError, AttributeError):
             now = datetime.now(timezone.utc)
             return now.strftime("%Y-%m-%dT00:00:00Z"), now.strftime("%Y-%m-%dT23:59:59Z")
+
+
+# ── Module-level helpers ──────────────────────────────────────────────────
+
+def _enrich_pairs_with_recurrence(top_pairs: list[dict], previous_pairs) -> list[dict]:
+    """
+    Attach a real weekly recurrence signal to each pair for the report's
+    output content (entity_intelligence.strongest_pairs).
+
+    Fixes issue: `weight` alone was being shown to report readers as if it
+    conveyed recurrence, when it's actually a lifetime cumulative
+    co-occurrence count (relationships.weight) that has no notion of
+    weekly cadence at all — and now that real week-over-week recurrence
+    is computed separately (explainer.pair_recurrence, used by
+    build_trend_analysis), the two could disagree, which is misleading.
+
+    `weight` is kept, unchanged, on each pair — knowledge_graph.insights
+    .explain_pair() and explainer._trend_confidence() both read it
+    directly and are unaffected by this. This function only adds fields;
+    it never removes or renames the existing ones, preserving
+    compatibility for both internal callers and anything already
+    persisted in past reports.
+    """
+    enriched = []
+    for pair in top_pairs:
+        recurrence = explainer.pair_recurrence(pair, previous_pairs)
+        enriched.append({
+            **pair,
+            "recurring_from_last_period": recurrence["recurring"],
+            "recurrence_note": recurrence["label"],
+        })
+    return enriched

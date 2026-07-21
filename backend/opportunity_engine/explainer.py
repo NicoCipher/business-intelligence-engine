@@ -432,6 +432,31 @@ _WHO_CARES = {
 }
 
 
+def _pair_key(pair: dict) -> frozenset:
+    return frozenset({pair["from"]["name"], pair["to"]["name"]})
+
+
+def pair_recurrence(pair: dict, previous_pairs: list[dict] | None) -> dict:
+    """
+    Whether this entity pair also showed up in the previous period's
+    top pairs — a real week-over-week recurrence signal, distinct from
+    relationships.weight (a lifetime cumulative co-occurrence count that
+    doesn't know or care about weekly cadence).
+
+    Returns {"recurring": bool | None, "label": str}. `recurring` is None
+    when there's no previous period to compare against at all (as opposed
+    to False, which means "we checked, and it's new this period").
+    """
+    if previous_pairs is None:
+        return {"recurring": None, "label": "no prior period to compare against"}
+    previous_keys = {_pair_key(p) for p in previous_pairs}
+    is_recurring = _pair_key(pair) in previous_keys
+    return {
+        "recurring": is_recurring,
+        "label": "recurring from last period" if is_recurring else "new this period",
+    }
+
+
 def build_trend_analysis(
     signals: list[Signal],
     top_pairs: list[dict],
@@ -443,11 +468,6 @@ def build_trend_analysis(
     with a "so what" narrative: why it's emerging, who benefits, and
     whether it looks like a one-off or an early shift (when history exists).
     """
-    previous_names = set()
-    if previous_pairs:
-        for p in previous_pairs:
-            previous_names.add(frozenset({p["from"]["name"], p["to"]["name"]}))
-
     trends = []
     for pair in top_pairs[:limit]:
         a, b = pair["from"], pair["to"]
@@ -461,10 +481,10 @@ def build_trend_analysis(
             for s in sorted(supporting, key=lambda s: s.engagement, reverse=True)[:2]
         ]
 
-        is_recurring = frozenset({a["name"], b["name"]}) in previous_names
-        if previous_pairs is None:
+        recurrence = pair_recurrence(pair, previous_pairs)
+        if recurrence["recurring"] is None:
             temporal = "There isn't yet enough history to say whether this is a lasting shift — worth tracking over the next few weeks."
-        elif is_recurring:
+        elif recurrence["recurring"]:
             temporal = "This connection also appeared last period, which suggests a developing pattern rather than a one-off discussion."
         else:
             temporal = "This is the first period this connection has appeared — treat it as an early signal until it recurs."

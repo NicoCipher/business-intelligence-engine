@@ -119,8 +119,21 @@ class EntityExtractor:
         """
         Write extracted entities and relationships to the database.
 
-        Uses INSERT OR IGNORE for entities (deduplicated by type + name).
-        Relationships use INSERT OR IGNORE on (from_id, to_id, type).
+        Entities: INSERT OR IGNORE, deduplicated by the (type, name)
+        unique index (see database.py's _migrate_v4). Relationships:
+        upserted on (from_id, to_id, type) — weight accumulates rather
+        than each co-occurrence creating another row.
+
+        Entity id resolution: every Entity object built by extract() has
+        a fresh random id (models.py), generated before we know whether
+        that entity already exists in the database. When it does, the
+        INSERT is correctly ignored — but any Relationship referencing
+        that fresh, never-persisted id would then violate the foreign
+        key. So after each entity insert attempt, we resolve its
+        original in-memory id to whatever id is *actually* persisted
+        (the fresh one if this was genuinely new, or the pre-existing
+        one if it was a duplicate) and remap relationships through that
+        before inserting them.
 
         Returns counts of what was inserted.
         """
@@ -133,6 +146,9 @@ class EntityExtractor:
 
         with database.get_connection() as conn:
             for result in results:
+                # in-memory Entity.id -> actual persisted entities.id
+                id_map: dict[str, str] = {}
+
                 for entity in result.entities:
                     try:
                         conn.execute(
@@ -154,23 +170,39 @@ class EntityExtractor:
                         )
                         if conn.execute("SELECT changes()").fetchone()[0] > 0:
                             entity_inserts += 1
+                            id_map[entity.id] = entity.id
+                        else:
+                            # Already existed under a different id — resolve it.
+                            existing = conn.execute(
+                                "SELECT id FROM entities WHERE type = ? AND name = ?",
+                                (entity.type, entity.name),
+                            ).fetchone()
+                            id_map[entity.id] = existing["id"] if existing else entity.id
                     except sqlite3.Error as e:
                         logger.warning(f"Failed to insert entity {entity.name}: {e}")
+                        id_map[entity.id] = entity.id  # best effort — don't silently drop relationships
 
                 for rel in result.relationships:
+                    from_id = id_map.get(rel.from_id, rel.from_id)
+                    to_id   = id_map.get(rel.to_id, rel.to_id)
+                    if from_id == to_id:
+                        continue  # would-be self-loop after id resolution — not a real relationship
                     try:
                         conn.execute(
                             """
-                            INSERT OR IGNORE INTO relationships
+                            INSERT INTO relationships
                               (id, from_id, to_id, type, weight, metadata, created_at, updated_at)
                             VALUES
                               (:id, :from_id, :to_id, :type, :weight, :metadata,
                                :created_at, :updated_at)
+                            ON CONFLICT(from_id, to_id, type) DO UPDATE SET
+                              weight     = MIN(10.0, weight + excluded.weight),
+                              updated_at = excluded.updated_at
                             """,
                             {
                                 "id":         rel.id,
-                                "from_id":    rel.from_id,
-                                "to_id":      rel.to_id,
+                                "from_id":    from_id,
+                                "to_id":      to_id,
                                 "type":       rel.type,
                                 "weight":     rel.weight,
                                 "metadata":   json.dumps(rel.metadata),

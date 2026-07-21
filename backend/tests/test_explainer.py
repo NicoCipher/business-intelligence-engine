@@ -305,6 +305,38 @@ class TestBuildExecutiveSummary:
 
 # ── match_previous_opportunity / build_historical_comparison ─────────────
 
+class TestPairRecurrence:
+    def _pair(self, a_name, a_type, b_name, b_type, weight=3.0):
+        return {
+            "from": {"id": "e1", "name": a_name, "type": a_type},
+            "to":   {"id": "e2", "name": b_name, "type": b_type},
+            "weight": weight,
+        }
+
+    def test_no_previous_pairs_returns_none_not_false(self):
+        pair = self._pair("Claude", "technology", "Rust", "technology")
+        result = explainer.pair_recurrence(pair, None)
+        assert result["recurring"] is None
+
+    def test_matching_pair_is_recurring(self):
+        pair = self._pair("Claude", "technology", "Rust", "technology")
+        result = explainer.pair_recurrence(pair, [pair])
+        assert result["recurring"] is True
+
+    def test_non_matching_pair_is_not_recurring(self):
+        pair = self._pair("Claude", "technology", "Rust", "technology")
+        other = self._pair("Notion", "technology", "Stripe", "technology")
+        result = explainer.pair_recurrence(pair, [other])
+        assert result["recurring"] is False
+
+    def test_reversed_from_to_order_still_matches(self):
+        """A <-> B should match B <-> A across weeks — order shouldn't matter."""
+        pair = self._pair("Claude", "technology", "Rust", "technology")
+        reversed_pair = self._pair("Rust", "technology", "Claude", "technology")
+        result = explainer.pair_recurrence(pair, [reversed_pair])
+        assert result["recurring"] is True
+
+
 class TestMatchPreviousOpportunity:
     def test_similar_titles_match(self):
         previous = [{"title": "AI note-taking software for therapists", "composite_score": 7.0}]

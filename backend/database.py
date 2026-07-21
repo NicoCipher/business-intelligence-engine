@@ -34,7 +34,7 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Full DDL. CREATE IF NOT EXISTS makes this idempotent — safe to call on
 # every startup without worrying about duplicate table errors.
@@ -57,6 +57,11 @@ CREATE TABLE IF NOT EXISTS entities (
 );
 CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
 CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name COLLATE NOCASE);
+-- NOTE: the UNIQUE(type, name) index is created at the end of
+-- _migrate_v4(), not here. Creating it unconditionally in this DDL block
+-- (which runs on every startup, before migrations) would fail immediately
+-- against any existing database that still has duplicate rows — the
+-- migration needs to run first to clean those up.
 
 
 -- ── Knowledge Graph: Relationships ───────────────────────────────────────
@@ -74,6 +79,8 @@ CREATE TABLE IF NOT EXISTS relationships (
     updated_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rel_from   ON relationships(from_id);
+-- NOTE: the UNIQUE(from_id, to_id, type) index is created at the end of
+-- _migrate_v4(), not here — same reasoning as idx_entities_type_name above.
 CREATE INDEX IF NOT EXISTS idx_rel_to     ON relationships(to_id);
 CREATE INDEX IF NOT EXISTS idx_rel_type   ON relationships(type);
 
@@ -212,6 +219,9 @@ def initialize() -> None:
         if current_version < 3:
             _migrate_v3(conn)
 
+        if current_version < 4:
+            _migrate_v4(conn)
+
         if current_version < SCHEMA_VERSION:
             conn.execute(
                 "INSERT OR REPLACE INTO schema_info (version, applied_at) VALUES (?, ?)",
@@ -321,6 +331,138 @@ def _migrate_v3(conn) -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_week_domain "
         "ON reports(week_key, domain)"
     )
+    conn.commit()
+
+
+def _migrate_v4(conn) -> None:
+    """
+    Migration v3 → v4: real entity/relationship deduplication.
+
+    Root cause: Entity.id and Relationship.id are random UUIDs
+    (models.py), and neither table had a unique constraint on anything
+    else. persist_results()'s "INSERT OR IGNORE ... (deduplicated by
+    type + name)" could therefore never actually ignore a true duplicate
+    — id never collides — so every extraction run added another row for
+    the same conceptual entity ("AI", "AI", "AI", ...), and every
+    co-occurrence added another weight=1.0 relationship row instead of
+    the weight ever accumulating as graph.py's docstring claims.
+
+    This migration is a one-time cleanup of existing duplicates. Going
+    forward, the real fix is the unique indexes added in the DDL above
+    (idx_entities_type_name, idx_rel_from_to_type) plus the upsert logic
+    in extractor.py's persist_results() — this migration exists only to
+    bring pre-v4 databases in line with what those enforce from here on.
+
+    Steps, in dependency order:
+      1. Group entities by (type, LOWER(TRIM(name))) — case-insensitive,
+         since duplicates included casing drift (e.g. "Github" vs
+         "GitHub"). Within each group, keep the earliest-created row as
+         canonical (deterministic tie-break: earliest created_at, then
+         lowest id).
+      2. Repoint every relationship's from_id/to_id from a duplicate's id
+         to its group's canonical id. This MUST happen before deleting
+         the duplicate entities — they're referenced with
+         ON DELETE CASCADE, so deleting first would silently destroy the
+         co-occurrence data instead of preserving it under the survivor.
+      3. Delete the now-unreferenced duplicate entity rows.
+      4. Drop any relationship that became a self-loop (from_id == to_id)
+         as a result of merging two entities that had previously been
+         recorded as co-occurring with each other.
+      5. Merge any relationships that now collide on
+         (from_id, to_id, type) after remapping — keep one row, sum the
+         others' weight into it (capped at 10.0, matching
+         Relationship.__post_init__'s validated range), delete the rest.
+      6. The unique indexes themselves are created unconditionally by the
+         DDL at the top of this file (CREATE UNIQUE INDEX IF NOT EXISTS),
+         so no explicit index-creation step is needed here — by the time
+         this function runs, steps 1-5 have already made the data safe
+         for those constraints to hold.
+
+    Idempotent: safe to run against an already-migrated or fresh database
+    (every step is a no-op when there's nothing left to merge).
+    """
+    # ── 1. Find duplicate entity groups ─────────────────────────────────
+    rows = conn.execute(
+        "SELECT id, type, name, created_at FROM entities ORDER BY created_at, id"
+    ).fetchall()
+
+    groups: dict[tuple[str, str], list[sqlite3.Row]] = {}
+    for row in rows:
+        key = (row["type"], row["name"].strip().lower())
+        groups.setdefault(key, []).append(row)
+
+    remap: dict[str, str] = {}   # duplicate entity id -> canonical entity id
+    for key, group_rows in groups.items():
+        if len(group_rows) <= 1:
+            continue
+        canonical = group_rows[0]   # already sorted by created_at, id
+        for dup in group_rows[1:]:
+            remap[dup["id"]] = canonical["id"]
+
+    if remap:
+        # ── 2. Repoint relationships to the canonical entity ────────────
+        for dup_id, canonical_id in remap.items():
+            conn.execute(
+                "UPDATE relationships SET from_id = ? WHERE from_id = ?",
+                (canonical_id, dup_id),
+            )
+            conn.execute(
+                "UPDATE relationships SET to_id = ? WHERE to_id = ?",
+                (canonical_id, dup_id),
+            )
+
+        # ── 3. Delete the now-redundant duplicate entities ──────────────
+        conn.executemany(
+            "DELETE FROM entities WHERE id = ?",
+            [(dup_id,) for dup_id in remap.keys()],
+        )
+        logger.info(f"Migration v4: merged {len(remap)} duplicate entity row(s)")
+
+    # ── 4. Drop relationships that became self-loops from merging ───────
+    self_loops = conn.execute(
+        "SELECT COUNT(*) FROM relationships WHERE from_id = to_id"
+    ).fetchone()[0]
+    if self_loops:
+        conn.execute("DELETE FROM relationships WHERE from_id = to_id")
+        logger.info(f"Migration v4: removed {self_loops} self-loop relationship(s)")
+
+    # ── 5. Merge relationships that now collide on (from_id, to_id, type) ─
+    dupe_rel_groups = conn.execute(
+        """
+        SELECT from_id, to_id, type, COUNT(*) as n, SUM(weight) as total_weight,
+               MIN(id) as keep_id
+        FROM   relationships
+        GROUP  BY from_id, to_id, type
+        HAVING COUNT(*) > 1
+        """
+    ).fetchall()
+
+    for grp in dupe_rel_groups:
+        merged_weight = min(10.0, grp["total_weight"])
+        conn.execute(
+            "UPDATE relationships SET weight = ? WHERE id = ?",
+            (merged_weight, grp["keep_id"]),
+        )
+        conn.execute(
+            "DELETE FROM relationships WHERE from_id = ? AND to_id = ? AND type = ? AND id != ?",
+            (grp["from_id"], grp["to_id"], grp["type"], grp["keep_id"]),
+        )
+    if dupe_rel_groups:
+        logger.info(f"Migration v4: merged {len(dupe_rel_groups)} duplicate relationship group(s)")
+
+    # ── 6. Now safe to create the unique indexes ────────────────────────
+    # Deliberately NOT in the unconditional DDL block at the top of this
+    # file — creating them there would run on every startup, before this
+    # migration's cleanup, and fail immediately against any pre-existing
+    # duplicate rows. By this point steps 1-5 have already guaranteed the
+    # data satisfies both constraints.
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_type_name ON entities(type, name)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_from_to_type ON relationships(from_id, to_id, type)"
+    )
+
     conn.commit()
 
 
