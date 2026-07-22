@@ -30,7 +30,7 @@ Used by report/generator.py to build the "intelligence brief" content.
 
 from collections import defaultdict
 
-from config import MIN_COMPOSITE_TO_PERSIST
+from config import MIN_COMPOSITE_TO_PERSIST, DEMAND_KEYWORDS, COMPLAINT_KEYWORDS, WILLINGNESS_TO_PAY
 from knowledge_graph.insights import explain_pair
 from knowledge_graph.schema import ENTITY_TYPES, display_name
 from models import Signal
@@ -57,9 +57,9 @@ _B2B_TERMS = [
 _SOLO_TERMS = ["freelance", "freelancer", "solo", "independent", "individual", "consultant"]
 
 _REJECTION_LABELS = {
-    "too_small": "the pattern only appeared a handful of times",
-    "single_source": "the pattern was confined to a single source",
-    "below_threshold": "the evidence, once scored, was too weak overall",
+    "too_small": "insufficient mention volume to qualify as a pattern",
+    "single_source": "corroboration from only one source, not yet cross-validated",
+    "below_threshold": "evidence quality fell short of the investment-grade bar once scored",
 }
 
 _TITLE_STOPWORDS = {
@@ -129,6 +129,246 @@ def _distinguishing_terms(cluster_signals: list[Signal], limit: int = 3) -> list
     return found
 
 
+_WHY_MATTERS_TEMPLATES: dict[tuple[str, str], str] = {
+    ("technology", "technology"): (
+        "Two tools converging like this often signals an emerging technical stack. "
+        "Builders who move early on the combination can establish a positioning "
+        "advantage before it becomes conventional wisdom."
+    ),
+    ("technology", "problem"): (
+        "When a technology repeatedly appears next to a named problem, it signals "
+        "the market is actively searching for that technology as the solution — "
+        "a timing signal for anyone building in the space."
+    ),
+    ("technology", "market"): (
+        "Adoption signals within a specific market segment are an early indicator "
+        "of where budget and attention are shifting."
+    ),
+    ("market", "problem"): (
+        "A recurring pain point within a defined market is exactly the kind of "
+        "evidence that de-risks a build decision — a named audience with a named problem."
+    ),
+    ("technology", "skill"): (
+        "Rising demand for a skill/technology combination points to a services or "
+        "education opportunity, independent of any single product."
+    ),
+    ("regulation", "market"): (
+        "Regulatory pressure on a market segment creates urgency — compliance-driven "
+        "purchases tend to move faster than discretionary ones."
+    ),
+}
+_WHY_MATTERS_DEFAULT = (
+    "Recurring co-occurrence between two concepts is a leading indicator worth "
+    "tracking, even before it's clear which side of the pairing ends up mattering more."
+)
+
+
+def _why_it_matters(a: dict, b: dict) -> str:
+    key, rkey = (a["type"], b["type"]), (b["type"], a["type"])
+    return _WHY_MATTERS_TEMPLATES.get(key) or _WHY_MATTERS_TEMPLATES.get(rkey) or _WHY_MATTERS_DEFAULT
+
+
+# ── Founder action recommendations ────────────────────────────────────────
+# A fixed, shared vocabulary used everywhere the report tells a reader what
+# to actually do: Build, Validate, Research, Monitor, Ignore. Kept as a
+# small closed set deliberately — a founder scanning many reports over time
+# should be able to pattern-match the label without reading the justification
+# every time, the same way "Buy/Hold/Sell" works in an analyst note.
+
+def _build_verdict(tier: str, recurrence: dict | None, confidence_score: float, evidence_count: int) -> dict:
+    """
+    The single most decision-relevant field on an opportunity: what would
+    a founder actually do with this? Fixed vocabulary: Build, Validate
+    First, Monitor, Ignore — deliberately small so it reads at a glance
+    across many reports over time, the same way "Buy/Hold/Sell" works in
+    an analyst note.
+    """
+    growing = bool(recurrence and recurrence.get("direction") == "growing" and recurrence.get("weeks_seen", 1) >= 2)
+
+    if tier == "gold" and confidence_score >= 7.0:
+        return {"label": "Build", "justification": (
+            "Evidence is strong enough across independent sources to justify a "
+            "minimum build this period rather than waiting for more signal."
+        )}
+    if tier == "gold" or growing or (tier == "silver" and confidence_score >= 6.0):
+        return {"label": "Validate First", "justification": (
+            "The pattern is promising but should be validated directly — user "
+            "interviews and a pricing test — before committing build time."
+        )}
+    if tier == "silver" or confidence_score >= 4.0 or evidence_count >= 3:
+        return {"label": "Monitor", "justification": (
+            "Evidence is present but not yet strong enough to act on — worth "
+            "tracking to see whether it strengthens over the coming periods."
+        )}
+    return {"label": "Ignore", "justification": (
+        "Evidence is too thin relative to the likely payoff — not worth "
+        "spending founder time on unless the pattern strengthens materially."
+    )}
+
+
+_MARKET_TYPE = "market"
+
+
+def _market_size(cluster_signals: list[Signal], target_group: str) -> dict:
+    """
+    A deliberately rough Small/Medium/Large read on addressable market
+    breadth, derived only from what's actually detectable in the evidence
+    — the number of distinct market-type terms mentioned and how broad
+    vs. niche the primary target group reads. This is NOT a substitute
+    for real market sizing research (TAM/SAM/SOM with actual data) — it's
+    a fast, evidence-grounded triage signal, and is explicitly labelled
+    as such in the explanation text so it's never mistaken for verified
+    market data.
+    """
+    blob = " ".join(s.full_text for s in cluster_signals) if cluster_signals else ""
+    market_type = ENTITY_TYPES.get(_MARKET_TYPE)
+    matched_markets: list[str] = []
+    if market_type:
+        for kw in market_type.keywords:
+            if kw in blob:
+                name = display_name(kw)
+                if name not in matched_markets:
+                    matched_markets.append(name)
+
+    is_broad_group = target_group in (
+        "business and team users",
+        "the professionals discussed in these signals",
+    )
+    adjacent = [m for m in matched_markets if m.lower() not in target_group.lower()][:3]
+    n_adjacent = len(adjacent)
+
+    # Branches are ordered so the explanation text can never claim an
+    # adjacent segment exists unless `adjacent` is actually non-empty —
+    # that mismatch was a real bug caught in review (Medium used to say
+    # "at least one adjacent segment visible" while adjacent_markets was []).
+    if is_broad_group and n_adjacent >= 2:
+        size = "Large"
+        explanation = (
+            f"The audience reads broadly (business/team users) and multiple distinct "
+            f"market segments appear in the evidence ({', '.join(adjacent)}) — this "
+            f"could extend well beyond the initial niche if the core problem generalises."
+        )
+    elif n_adjacent >= 1:
+        size = "Medium"
+        explanation = (
+            f"At least one adjacent market segment is visible in the evidence "
+            f"({', '.join(adjacent)}) — a real market, but likely requiring expansion "
+            f"beyond the initial niche to reach significant scale."
+        )
+    elif is_broad_group:
+        size = "Medium"
+        explanation = (
+            "The audience reads broadly (business/team users), though no distinct "
+            "adjacent market segments were detected in the evidence yet — likely a "
+            "real market, but breadth beyond the initial niche isn't yet confirmed."
+        )
+    else:
+        size = "Small"
+        explanation = (
+            "The evidence points to a narrow, specific niche with no adjacent "
+            "segments detected yet — a real but likely small addressable market "
+            "unless it can be shown to generalise."
+        )
+
+    return {
+        "size": size,
+        "explanation": explanation,
+        "adjacent_markets": adjacent,
+    }
+
+
+def _action_plan(tier: str, target_group: str, explanations: dict, verdict_label: str) -> dict:
+    """
+    A concrete five-stage execution plan, in place of a generic action
+    list — every founder-facing report should answer "what do I actually
+    do, and when do I stop."
+    """
+    competition_evidence = explanations.get("competition", {}).get("evidence", "")
+    pay_confirmed = "0 willingness-to-pay" not in explanations.get("revenue_potential", {}).get("evidence", "")
+
+    if verdict_label == "Ignore":
+        return {
+            "validate": "Not recommended — evidence is too thin to justify the time cost of formal validation right now.",
+            "build_mvp": "Do not build. Revisit only if this pattern resurfaces with materially stronger evidence.",
+            "acquire_first_users": "N/A at this stage.",
+            "success_criteria": f"Would need 3+ independent, corroborated signals from {target_group} before reconsidering.",
+            "kill_criteria": "Already below the bar — no further action needed unless new evidence appears.",
+        }
+
+    validate_step = f"Interview 3–5 people from {target_group} to confirm the pain point is real and prioritised."
+    if "0 low-competition" in competition_evidence:
+        validate_step += " Also map existing alternatives directly — the assumed gap hasn't been confirmed."
+
+    if verdict_label == "Build":
+        build_step = "Ship a minimum version this period — evidence is strong enough to skip further validation delay."
+    else:
+        build_step = "Hold off on building until validation (above) confirms demand and pricing."
+
+    if pay_confirmed:
+        acquire_step = "Reach out directly to the people already expressing this need in the collected signals — they're the fastest first users."
+    else:
+        acquire_step = "Test willingness to pay first (landing page or pre-order) before investing in user acquisition."
+
+    success_criteria = (
+        f"3+ people from {target_group} confirm they'd pay for this, and at least "
+        f"one commits to a paid pilot within the next 2–3 weeks."
+    )
+    kill_criteria = (
+        f"Fewer than 2 of 5 interviewed {target_group} confirm the pain point, or "
+        f"no one commits to a paid pilot within 3 weeks of asking — deprioritise "
+        f"and return this to the watch list."
+    )
+
+    return {
+        "validate": validate_step,
+        "build_mvp": build_step,
+        "acquire_first_users": acquire_step,
+        "success_criteria": success_criteria,
+        "kill_criteria": kill_criteria,
+    }
+
+
+def _watch_list_recommendation(rejection_reason: str, composite_score) -> dict:
+    """
+    Watch-list items have NOT cleared the threshold, so "Build" is never
+    appropriate here — the question is whether it's worth continuing to
+    track at all.
+    """
+    if rejection_reason == "below_threshold" and composite_score is not None and composite_score >= 4.0:
+        return {"label": "Research", "justification": (
+            "Close to the threshold — worth a closer look at what's missing "
+            "before dismissing it."
+        )}
+    if rejection_reason == "single_source":
+        return {"label": "Monitor", "justification": (
+            "A second independent source would meaningfully change the picture — "
+            "worth watching for corroboration."
+        )}
+    if rejection_reason == "too_small":
+        return {"label": "Monitor", "justification": (
+            "Too early to act on — revisit if mention volume increases."
+        )}
+    return {"label": "Ignore", "justification": (
+        "Evidence is too thin relative to the likely payoff to justify continued "
+        "tracking at this time."
+    )}
+
+
+def _trend_recommendation(confidence_label: str, recurring: bool | None) -> dict:
+    if confidence_label == "High" or recurring:
+        return {"label": "Research", "justification": (
+            "A strongly-weighted, recurring connection is worth deeper research "
+            "into how to position around it."
+        )}
+    if confidence_label == "Medium":
+        return {"label": "Monitor", "justification": (
+            "A moderate signal — worth watching for recurrence before acting on it."
+        )}
+    return {"label": "Monitor", "justification": (
+        "Early and lightly weighted — track for a few more periods before drawing conclusions."
+    )}
+
+
 # ── Opportunity analysis ─────────────────────────────────────────────────
 
 def explain_opportunity(
@@ -151,8 +391,10 @@ def explain_opportunity(
              None means "no history available" (e.g. first tracked week).
 
     Returns a dict with the opportunity's identity, a narrative `analysis`,
-    concrete `recommended_actions`, and `supporting_data` for anyone who
-    wants to drill into the numbers (kept, but deliberately not the focus).
+    `market_size` (Small/Medium/Large with adjacent markets), a
+    `build_verdict` (Build/Validate First/Monitor/Ignore), a concrete
+    `action_plan`, and `supporting_data` for anyone who wants to drill
+    into the numbers (kept, but deliberately not the focus).
     """
     scores = opp.get("scores", {}) or {}
     explanations = scores.get("explanations", {}) or {}
@@ -191,12 +433,19 @@ def explain_opportunity(
         for key, label in _DIMENSION_LABELS
     ]
 
+    verdict = _build_verdict(
+        tier, recurrence, scores.get("confidence", 0.0),
+        scores.get("evidence_count", len(cluster_signals)),
+    )
+
     return {
         "title": opp.get("title", ""),
         "tier": tier,
         "composite_score": opp.get("composite_score", 0.0),
+        "market_size": _market_size(cluster_signals, target_group),
+        "build_verdict": verdict,
         "analysis": analysis,
-        "recommended_actions": _recommended_actions(tier, target_group, explanations),
+        "action_plan": _action_plan(tier, target_group, explanations, verdict["label"]),
         "supporting_data": {
             "evidence": evidence,
             "evidence_count": scores.get("evidence_count", len(cluster_signals)),
@@ -293,34 +542,79 @@ def _confidence_narrative(explanations: dict, recurrence: dict | None) -> str:
     return f"{base} This is the first week this pattern has been observed, so persistence across future weeks hasn't been confirmed yet."
 
 
-def _recommended_actions(tier: str, target_group: str, explanations: dict) -> list[str]:
-    actions: list[str] = []
-    actions.append(f"Interview 3–5 people from {target_group} to validate this specific pain point before building anything.")
-
-    competition_evidence = explanations.get("competition", {}).get("evidence", "")
-    if "0 low-competition" in competition_evidence:
-        actions.append("Spend an hour mapping existing alternatives — the assumed market gap hasn't been directly confirmed.")
-    else:
-        actions.append("Review the named alternatives directly to confirm where the real gap is.")
-
-    revenue_evidence = explanations.get("revenue_potential", {}).get("evidence", "")
-    if "0 willingness-to-pay" in revenue_evidence:
-        actions.append("Willingness to pay hasn't been directly confirmed — test pricing with a simple landing page before writing code.")
-    else:
-        actions.append("Estimate pricing and test it with a simple landing page or pre-order page.")
-
-    if tier == "gold":
-        actions.append("If validation holds up, build a minimum viable version this week rather than waiting for more signal.")
-    elif tier == "silver":
-        actions.append("Hold off on building until the competitive picture and pricing are validated.")
-    else:
-        actions.append("Keep this on a light watch rather than prioritising it yet — evidence is present but not yet strong.")
-
-    actions.append("Monitor next week's signals to see whether this pattern recurs, grows, or fades.")
-    return actions
-
-
 # ── Zero / near-miss opportunity explanation ─────────────────────────────
+
+def _is_business_signal(rejected) -> bool:
+    """
+    Filters out clusters that read as pure news/announcements rather than
+    a potential business opportunity — e.g. a product-launch announcement
+    with no demand or willingness-to-pay language anywhere in it. The
+    Watch List should only ever surface things a founder might plausibly
+    act on, not general industry news that happened to cluster together.
+
+    Below-threshold clusters were actually scored, so this uses the
+    scorer's own demand/revenue-potential evidence directly — the same
+    real signal the scoring engine already computed, not a new check.
+    too_small/single_source clusters were never scored (too small to
+    evaluate), so this falls back to the same keyword vocabulary the
+    scorer itself uses, applied directly to the cluster's text.
+    """
+    if rejected.scores and rejected.scores.explanations:
+        demand_exp = rejected.scores.explanations.get("demand")
+        revenue_exp = rejected.scores.explanations.get("revenue_potential")
+        no_demand = demand_exp is None or "0 demand-keyword" in demand_exp.evidence
+        no_pay = revenue_exp is None or "0 willingness-to-pay" in revenue_exp.evidence
+        return not (no_demand and no_pay)
+
+    blob = " ".join(s.full_text for s in rejected.signals)
+    return (
+        any(kw in blob for kw in DEMAND_KEYWORDS)
+        or any(kw in blob for kw in WILLINGNESS_TO_PAY)
+        or any(kw in blob for kw in COMPLAINT_KEYWORDS)
+    )
+
+
+def build_watch_list(rejected: list, limit: int = 5) -> list[dict]:
+    """
+    Promising-but-below-threshold themes — always available regardless of
+    whether real opportunities exist this period. This is what lets a
+    reader see what's "on deck": patterns worth watching even though
+    nothing here has cleared the investment bar yet.
+
+    Pure news/announcement clusters (no demand or complaint language
+    detected — see _is_business_signal) are excluded entirely: this list
+    is for potential business opportunities, not general industry news.
+
+    Args: rejected = list of opportunity_engine.detector.RejectedCluster
+    (from PatternDetector.diagnose()).
+    """
+    business_candidates = [r for r in rejected if _is_business_signal(r)]
+    if not business_candidates:
+        return []
+
+    ranked = sorted(
+        business_candidates,
+        key=lambda r: (r.scores.composite() if r.scores else -1.0, len(r.signals)),
+        reverse=True,
+    )[:limit]
+
+    watch_list = []
+    for r in ranked:
+        anchor = max(r.signals, key=lambda s: s.engagement)
+        composite = r.scores.composite() if r.scores else None
+        watch_list.append({
+            "title": anchor.title,
+            "signal_count": len(r.signals),
+            "sources": sorted(set(s.source for s in r.signals)),
+            "total_engagement": sum(s.engagement for s in r.signals),
+            "composite_score": composite,
+            "status": r.summary,
+            "why_it_failed": r.summary,
+            "missing_evidence": _missing_evidence(r),
+            "recommended_action": _watch_list_recommendation(r.reason, composite),
+        })
+    return watch_list
+
 
 def explain_zero_opportunities(rejected: list, total_signals: int) -> dict:
     """
@@ -330,34 +624,19 @@ def explain_zero_opportunities(rejected: list, total_signals: int) -> dict:
     if total_signals == 0:
         return {
             "reason": ("No signals were collected for this domain in this period, "
-                       "so there was nothing to evaluate."),
+                       "so there is nothing yet to evaluate against the investment bar."),
             "candidates": [],
         }
 
     if not rejected:
         return {
-            "reason": ("No repeated pattern formed at all this period — the collected "
-                       "signals were too varied in topic to group into anything worth evaluating."),
+            "reason": ("No investment-grade opportunities met the threshold this period — "
+                       "collected signals were too dispersed across topics to form a "
+                       "coherent pattern worth underwriting."),
             "candidates": [],
         }
 
-    ranked = sorted(
-        rejected,
-        key=lambda r: (r.scores.composite() if r.scores else -1.0, len(r.signals)),
-        reverse=True,
-    )[:5]
-
-    candidates = []
-    for r in ranked:
-        anchor = max(r.signals, key=lambda s: s.engagement)
-        candidates.append({
-            "title": anchor.title,
-            "signal_count": len(r.signals),
-            "sources": sorted(set(s.source for s in r.signals)),
-            "composite_score": r.scores.composite() if r.scores else None,
-            "why_it_failed": r.summary,
-            "missing_evidence": _missing_evidence(r),
-        })
+    candidates = build_watch_list(rejected)
 
     reason_counts: dict[str, int] = defaultdict(int)
     for r in rejected:
@@ -367,8 +646,9 @@ def explain_zero_opportunities(rejected: list, total_signals: int) -> dict:
 
     theme = _weak_dimension_theme(rejected)
     reason = (
-        f"Nothing reached the confidence bar this period — {dominant_label} across "
-        f"{len(rejected)} candidate pattern(s) that were considered.{theme}"
+        f"No investment-grade opportunities met the threshold this period — the "
+        f"limiting factor was {dominant_label}, across {len(rejected)} candidate "
+        f"pattern(s) evaluated.{theme}"
     )
     return {"reason": reason, "candidates": candidates}
 
@@ -381,7 +661,7 @@ def _missing_evidence(rejected) -> str:
     if rejected.reason == "below_threshold" and rejected.scores and rejected.scores.explanations:
         dim, exp = min(rejected.scores.explanations.items(), key=lambda kv: kv[1].score)
         return f"The weakest factor was {dim.replace('_', ' ')} — {exp.reason.lower() if exp.reason else 'insufficient evidence.'}"
-    return "Overall evidence was too thin to justify tracking this further."
+    return "Insufficient corroborating evidence at this stage to justify continued tracking."
 
 
 def _weak_dimension_theme(rejected: list) -> str:
@@ -465,8 +745,10 @@ def build_trend_analysis(
 ) -> list[dict]:
     """
     Build named trends from the strongest entity co-occurrence pairs, each
-    with a "so what" narrative: why it's emerging, who benefits, and
-    whether it looks like a one-off or an early shift (when history exists).
+    with: what co-occurred, why it matters to a founder, who should care,
+    the evidence behind it (with engagement and persistence, not just
+    titles), how confident we are and why, and a concrete recommended
+    action from the report's shared vocabulary.
     """
     trends = []
     for pair in top_pairs[:limit]:
@@ -476,9 +758,15 @@ def build_trend_analysis(
         supporting = _signals_mentioning_both(signals, a["name"], b["name"])
         if not supporting:
             supporting = _signals_mentioning_any(signals, [a["name"], b["name"]])
+
         evidence = [
-            f'"{s.title[:100]}" ({_SOURCE_LABELS.get(s.source, s.source)})'
-            for s in sorted(supporting, key=lambda s: s.engagement, reverse=True)[:2]
+            {
+                "title": s.title,
+                "source": s.source,
+                "source_label": _SOURCE_LABELS.get(s.source, s.source),
+                "engagement": s.engagement,
+            }
+            for s in sorted(supporting, key=lambda s: s.engagement, reverse=True)[:3]
         ]
 
         recurrence = pair_recurrence(pair, previous_pairs)
@@ -492,14 +780,51 @@ def build_trend_analysis(
         who = _who_might_care(a, b)
         so_what = f"{explain_pair(pair)} This is particularly relevant to {who}. {temporal}"
 
+        confidence_label = _trend_confidence(weight, len(supporting))
+        confidence_reason = _trend_confidence_reason(weight, len(supporting), confidence_label)
+
         trends.append({
             "name": _trend_name(a, b),
             "so_what": so_what,
+            "why_it_matters": _why_it_matters(a, b),
+            "who_should_care": who,
             "entities": [a["name"], b["name"]],
             "evidence": evidence,
-            "confidence": _trend_confidence(weight, len(supporting)),
+            "evidence_strength": _evidence_strength_narrative(supporting, recurrence),
+            "confidence": confidence_label,
+            "confidence_reason": confidence_reason,
+            "recommended_action": _trend_recommendation(confidence_label, recurrence.get("recurring")),
         })
     return trends
+
+
+def _evidence_strength_narrative(supporting: list[Signal], recurrence: dict) -> str:
+    """
+    Turns raw evidence into a sentence about how strong that evidence
+    actually is — source diversity, engagement magnitude, and persistence
+    across periods — instead of leaving a reader to infer strength from a
+    bare list of titles.
+    """
+    if not supporting:
+        return "No individual signals could be directly matched as supporting evidence for this connection."
+
+    sources = sorted({s.source for s in supporting})
+    source_phrase = (
+        _SOURCE_LABELS.get(sources[0], sources[0]) if len(sources) == 1
+        else f"{len(sources)} independent sources"
+    )
+    total_engagement = sum(s.engagement for s in supporting)
+
+    persistence = ""
+    if recurrence.get("recurring") is True:
+        persistence = ", and it persisted from the previous period"
+    elif recurrence.get("recurring") is False:
+        persistence = ", though this is its first appearance so persistence is unconfirmed"
+
+    return (
+        f"Backed by {len(supporting)} signal(s) across {source_phrase}, with "
+        f"{total_engagement} combined engagement points{persistence}."
+    )
 
 
 def _trend_name(a: dict, b: dict) -> str:
@@ -525,6 +850,35 @@ def _trend_confidence(weight: float, supporting_count: int) -> str:
     if weight >= 2 or supporting_count >= 2:
         return "Medium"
     return "Low"
+
+
+def _trend_confidence_reason(weight: float, supporting_count: int, label: str) -> str:
+    """
+    Explains why the confidence label was assigned, using the exact same
+    weight/supporting_count values _trend_confidence used — so the
+    explanation can never drift from the label it justifies.
+
+    Deliberately doesn't repeat the label itself (it's already available
+    separately via the "confidence" field) — a renderer combining both,
+    e.g. "Confidence: {confidence} — {confidence_reason}", would otherwise
+    show a redundant "Low — Low — ...".
+    """
+    if label == "High":
+        return (
+            f"This connection has been observed repeatedly (co-occurrence "
+            f"weight {weight:.1f}) across {supporting_count} matched signal(s)."
+        )
+    if label == "Medium":
+        return (
+            f"Some repetition is present (co-occurrence weight {weight:.1f}, "
+            f"{supporting_count} matched signal(s)), but it hasn't yet reached a "
+            f"strong, repeated pattern."
+        )
+    return (
+        f"Only observed once or twice so far (co-occurrence weight "
+        f"{weight:.1f}, {supporting_count} matched signal(s)) — treat as an early "
+        f"signal, not a confirmed trend."
+    )
 
 
 def _signals_mentioning_both(signals: list[Signal], name_a: str, name_b: str) -> list[Signal]:
@@ -661,9 +1015,12 @@ def build_executive_summary(
     comparison: dict | None,
 ) -> str:
     """
-    A short analyst-briefing paragraph: what happened, why it matters, and
-    whether anything is worth attention — leading with business meaning,
-    not measurements. Every claim traces back to real computed data.
+    3-4 sentences, maximum. Leads immediately with the strongest
+    opportunity (or the honest absence of one) — an executive should get
+    the headline in the first sentence, not after context-setting.
+    Trend and week-over-week detail deliberately live in their own
+    sections (trend_analysis, comparison_to_last_period) rather than
+    being repeated here.
     """
     n_signals = signal_stats.get("total", 0)
     if n_signals == 0:
@@ -674,37 +1031,92 @@ def build_executive_summary(
     silver = [o for o in explained_opportunities if o.get("tier") == "silver"]
     bronze = [o for o in explained_opportunities if o.get("tier") == "bronze"]
 
-    if gold or silver:
-        top = (gold or silver)[0]
-        confidence_word = "strong" if gold else "moderate"
-        parts = [
-            f"This period we identified an emerging opportunity around {top['title'].rstrip('.')}."
-        ]
-        market_context = top["analysis"]["market_context"]
-        parts.append(market_context)
-        gap = top["analysis"]["market_gap"]
-        parts.append(gap)
-        parts.append(
-            f"Evidence is {confidence_word} enough to be worth attention, though it should still be validated "
-            f"before committing significant time or money."
+    if gold or silver or bronze:
+        top = (gold or silver or bronze)[0]
+        headline = (
+            f"Strongest opportunity: {top['title'].rstrip('.')} "
+            f"({top['tier']}-tier, {top['composite_score']:.1f}/10)."
         )
-    elif bronze:
-        top = bronze[0]
-        parts = [
-            f"This period surfaced a possible pattern around {top['title'].rstrip('.')}, "
-            f"but evidence is thin enough that it's worth a light watch rather than immediate attention."
-        ]
-        parts.append(top["analysis"]["market_context"])
-    elif zero_opps_explanation:
-        parts = [zero_opps_explanation["reason"]]
-    else:
-        parts = [f"{n_signals} signals were collected this period but no clear pattern emerged worth flagging."]
+        why = top["analysis"]["market_context"].split(". ")[0].rstrip(".") + "."
+        verdict = top["build_verdict"]
+        verdict_line = f"Verdict: {verdict['label']} — {verdict['justification']}"
+        return " ".join([headline, why, verdict_line])
 
+    if zero_opps_explanation:
+        return zero_opps_explanation["reason"]
+
+    return f"{n_signals} signals were collected this period, none forming a pattern strong enough to underwrite yet."
+
+
+# ── Closing synthesis ─────────────────────────────────────────────────────
+
+_VERDICT_PRIORITY = {"Build": 0, "Validate First": 1, "Monitor": 2, "Ignore": 3}
+
+
+def build_closing_synthesis(
+    explained_opportunities: list[dict],
+    trends: list[dict],
+    watch_list: list[dict],
+    comparison: dict | None,
+    zero_opps_explanation: dict | None,
+) -> dict:
+    """
+    The mandatory closing of every report, framed as a direct analyst
+    recommendation rather than a repeated summary: if you could only
+    pursue one opportunity this week, which one and why — plus what to
+    explicitly deprioritise and what's still worth watching. Every field
+    is deterministically derived from content already built elsewhere in
+    this module (build_verdict, analysis, watch list) — nothing new is
+    introduced here, only prioritised and summarised.
+    """
+    ranked = sorted(
+        explained_opportunities,
+        key=lambda o: (_VERDICT_PRIORITY.get(o["build_verdict"]["label"], 9), -o["composite_score"]),
+    )
+    best = ranked[0] if ranked else None
+    best_is_actionable = bool(best) and best["build_verdict"]["label"] != "Ignore"
+
+    return {
+        "if_i_could_only_pursue_one": _closing_single_best_bet(best, best_is_actionable),
+        "why": _closing_why(best, best_is_actionable),
+        "what_id_ignore": _closing_what_to_ignore(explained_opportunities, watch_list),
+        "what_id_keep_monitoring": _closing_what_to_monitor(explained_opportunities, watch_list, trends),
+    }
+
+
+def _closing_single_best_bet(best: dict | None, actionable: bool) -> str:
+    if not best or not actionable:
+        return (
+            "None — nothing this period clears the bar for a confident pick. "
+            "Best use of the coming week is broadening signal collection rather "
+            "than committing to a specific opportunity."
+        )
+    return f"{best['title'].rstrip('.')} ({best['tier']}-tier, {best['composite_score']:.1f}/10)."
+
+
+def _closing_why(best: dict | None, actionable: bool) -> str:
+    if not best or not actionable:
+        return "No opportunity this period has strong enough evidence to justify committing a week of founder time."
+    return f"{best['build_verdict']['justification']} {best['analysis']['business_potential']}"
+
+
+def _closing_what_to_ignore(explained_opportunities: list[dict], watch_list: list[dict]) -> list[str]:
+    ignored = [o["title"] for o in explained_opportunities if o["build_verdict"]["label"] == "Ignore"]
+    ignored += [w["title"] for w in watch_list if w["recommended_action"]["label"] == "Ignore"]
+    if not ignored:
+        return ["Nothing this period — everything evaluated is either worth pursuing or worth continued monitoring."]
+    return ignored[:5]
+
+
+def _closing_what_to_monitor(
+    explained_opportunities: list[dict],
+    watch_list: list[dict],
+    trends: list[dict],
+) -> list[str]:
+    items = [o["title"] for o in explained_opportunities if o["build_verdict"]["label"] == "Monitor"]
+    items += [w["title"] for w in watch_list if w["recommended_action"]["label"] in ("Monitor", "Research")]
     if trends:
-        names = ", ".join(t["name"] for t in trends[:2])
-        parts.append(f"Separately, {names} showed up as a recurring theme worth keeping an eye on.")
-
-    if comparison:
-        parts.append(comparison["narrative"])
-
-    return " ".join(parts)
+        items.append(f"{trends[0]['name']} (emerging trend)")
+    if not items:
+        return ["Nothing specific — revisit with fresh signal collection next period."]
+    return items[:5]

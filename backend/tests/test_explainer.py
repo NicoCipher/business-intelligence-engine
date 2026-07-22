@@ -57,7 +57,7 @@ class TestExplainOpportunityShape:
         scores = scorer.score(demand_signals)
         opp = _opp_dict(scores)
         result = explainer.explain_opportunity(opp, demand_signals)
-        required = {"title", "tier", "composite_score", "analysis", "recommended_actions", "supporting_data"}
+        required = {"title", "tier", "composite_score", "market_size", "build_verdict", "analysis", "action_plan", "supporting_data"}
         assert required.issubset(result.keys())
 
     def test_analysis_has_five_narrative_sections(self, scorer, demand_signals):
@@ -98,15 +98,59 @@ class TestExplainOpportunityShape:
         assert evidence_titles.issubset(signal_titles)
         assert len(result["supporting_data"]["evidence"]) > 0
 
-    def test_recommended_actions_are_concrete_and_plural(self, scorer, demand_signals):
+    def test_action_plan_has_five_concrete_stages(self, scorer, demand_signals):
         scores = scorer.score(demand_signals)
         opp = _opp_dict(scores)
         result = explainer.explain_opportunity(opp, demand_signals)
-        actions = result["recommended_actions"]
-        assert len(actions) >= 4
-        assert all(isinstance(a, str) and a.strip() for a in actions)
-        # Must not be the old generic placeholder.
-        assert not any(a.strip().lower() == "add to watch list." for a in actions)
+        plan = result["action_plan"]
+        required_stages = {"validate", "build_mvp", "acquire_first_users", "success_criteria", "kill_criteria"}
+        assert required_stages.issubset(plan.keys())
+        for stage, text in plan.items():
+            assert isinstance(text, str) and text.strip() != "", f"{stage} must not be empty"
+
+    def test_action_plan_kill_criteria_present_for_every_verdict(self, scorer, make_signal):
+        """Every opportunity — including a weak, likely-Ignore one — must
+        still get a kill_criteria, since that's the whole point of a kill
+        criterion: knowing when to stop even on marginal candidates."""
+        weak_signals = [make_signal(title="A generic product update", score=1, comments=0) for _ in range(3)]
+        scores = scorer.score(weak_signals)
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, weak_signals)
+        assert result["action_plan"]["kill_criteria"].strip() != ""
+
+    def test_market_size_shape(self, scorer, demand_signals):
+        scores = scorer.score(demand_signals)
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, demand_signals)
+        market_size = result["market_size"]
+        assert market_size["size"] in {"Small", "Medium", "Large"}
+        assert market_size["explanation"].strip() != ""
+        assert isinstance(market_size["adjacent_markets"], list)
+
+    def test_market_size_explanation_never_claims_adjacent_market_when_list_is_empty(self, scorer, make_signal):
+        """Regression: 'Medium' used to say 'at least one adjacent segment
+        visible' even when adjacent_markets was []. The explanation must
+        never claim something the accompanying data contradicts."""
+        b2b_signals = [
+            make_signal(title="Enterprise B2B SaaS tool for business teams", source="hn")
+            for _ in range(3)
+        ]
+        scores = scorer.score(b2b_signals)
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, b2b_signals)
+        market_size = result["market_size"]
+        if not market_size["adjacent_markets"]:
+            assert "adjacent segment" not in market_size["explanation"].lower() or "no distinct" in market_size["explanation"].lower()
+
+    def test_market_size_never_invents_dollar_figures(self, scorer, demand_signals):
+        """This is explicitly a rough triage signal, not verified market
+        research — the explanation text must not claim a specific dollar
+        TAM, which would misrepresent what was actually measured."""
+        scores = scorer.score(demand_signals)
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, demand_signals)
+        explanation = result["market_size"]["explanation"]
+        assert "$" not in explanation
 
     def test_target_group_language_reflects_b2b_signals(self, scorer, make_signal):
         b2b_signals = [
@@ -151,14 +195,14 @@ class TestExplainZeroOpportunities:
     def test_signals_but_no_clusters_at_all(self):
         result = explainer.explain_zero_opportunities([], total_signals=42)
         assert result["candidates"] == []
-        assert "no repeated pattern" in result["reason"].lower()
+        assert "no investment-grade opportunities" in result["reason"].lower()
 
     def test_real_rejected_clusters_from_detector(self, detector, make_signal):
         weak_signals = [
-            make_signal(title="Google announced a new AI feature today", score=5, comments=1)
+            make_signal(title="Looking for a better way to track compliance", score=5, comments=1)
             for _ in range(3)
         ] + [
-            make_signal(title="OpenAI announced a new AI feature today", score=3, comments=0, source="reddit")
+            make_signal(title="Looking for a compliance tracking alternative", score=3, comments=0, source="reddit")
             for _ in range(3)
         ]
         diagnostics = detector.diagnose(weak_signals, domain="business")
@@ -169,11 +213,12 @@ class TestExplainZeroOpportunities:
         assert result["candidates"]
         for c in result["candidates"]:
             assert set(c.keys()) == {
-                "title", "signal_count", "sources", "composite_score",
-                "why_it_failed", "missing_evidence",
+                "title", "signal_count", "sources", "total_engagement", "composite_score",
+                "status", "why_it_failed", "missing_evidence", "recommended_action",
             }
             assert c["why_it_failed"].strip() != ""
             assert c["missing_evidence"].strip() != ""
+            assert c["recommended_action"]["label"] in {"Monitor", "Research", "Ignore"}
 
     def test_candidates_capped_and_ranked_by_score(self, detector, make_signal):
         signals = []
@@ -187,11 +232,14 @@ class TestExplainZeroOpportunities:
         assert len(result["candidates"]) <= 5
 
     def test_below_threshold_missing_evidence_names_weakest_dimension(self, scorer, make_signal):
-        # Build a cluster whose weakest dimension is unambiguous: no demand
-        # language, no pay language, single source -> demand/revenue will
-        # be the weakest factors, and the sentence should name one of them.
+        # Build a cluster whose weakest dimension is unambiguous: minimal
+        # demand language, no pay language, single source -> demand/revenue
+        # will be the weakest factors, and the sentence should name one of
+        # them. Needs at least some demand language so it passes the
+        # is_business_signal filter (pure news gets excluded from the
+        # watch list entirely, which would make candidates empty here).
         signals = [
-            make_signal(title="A generic product update announcement", score=1, comments=0)
+            make_signal(title="Looking for a generic product alternative", score=1, comments=0)
             for _ in range(3)
         ]
         scores = scorer.score(signals)
@@ -295,12 +343,48 @@ class TestBuildExecutiveSummary:
         summary = explainer.build_executive_summary(stats, [], [], zero, None)
         assert "evidence was thin" in summary
 
-    def test_comparison_narrative_included_when_present(self):
+    def test_comparison_narrative_excluded_from_summary(self):
+        """Comparison detail now lives only in comparison_to_last_period —
+        repeating it in the executive summary would work against the
+        3-4 sentence cap and duplicate content that has its own section."""
         stats = {"total": 10, "sources": ["hn"]}
         zero = {"reason": "Nothing qualified.", "candidates": []}
         comparison = {"narrative": "Signal volume is up compared with last period (+40%)."}
         summary = explainer.build_executive_summary(stats, [], [], zero, comparison)
-        assert "Signal volume is up" in summary
+        assert "Signal volume is up" not in summary
+
+    def test_summary_is_at_most_four_sentences(self, scorer, demand_signals):
+        scores = scorer.score(demand_signals)
+        scores.demand = scores.competition = scores.revenue_potential = 9.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = scores.confidence = 9.0
+        opp = _opp_dict(scores, title="AI note-taking software for therapists")
+        explained = explainer.explain_opportunity(opp, demand_signals)
+        stats = {"total": 8, "sources": ["hn", "reddit"]}
+        summary = explainer.build_executive_summary(stats, [explained], [], None, None)
+        sentence_count = summary.count(". ") + 1
+        assert sentence_count <= 4
+
+    def test_summary_leads_with_strongest_opportunity_immediately(self, scorer, demand_signals):
+        scores = scorer.score(demand_signals)
+        scores.demand = scores.competition = scores.revenue_potential = 9.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = scores.confidence = 9.0
+        opp = _opp_dict(scores, title="AI note-taking software for therapists")
+        explained = explainer.explain_opportunity(opp, demand_signals)
+        stats = {"total": 8, "sources": ["hn", "reddit"]}
+        summary = explainer.build_executive_summary(stats, [explained], [], None, None)
+        assert summary.startswith("Strongest opportunity:")
+        assert "AI note-taking software for therapists" in summary.split(".")[0]
+
+    def test_summary_includes_build_verdict(self, scorer, demand_signals):
+        scores = scorer.score(demand_signals)
+        scores.demand = scores.competition = scores.revenue_potential = 9.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = scores.confidence = 9.0
+        opp = _opp_dict(scores, title="AI note-taking software for therapists")
+        explained = explainer.explain_opportunity(opp, demand_signals)
+        stats = {"total": 8, "sources": ["hn", "reddit"]}
+        summary = explainer.build_executive_summary(stats, [explained], [], None, None)
+        assert "Verdict:" in summary
+        assert explained["build_verdict"]["label"] in summary
 
 
 # ── match_previous_opportunity / build_historical_comparison ─────────────
@@ -335,6 +419,244 @@ class TestPairRecurrence:
         reversed_pair = self._pair("Rust", "technology", "Claude", "technology")
         result = explainer.pair_recurrence(pair, [reversed_pair])
         assert result["recurring"] is True
+
+
+class TestWatchList:
+    def test_empty_rejected_produces_empty_watch_list(self):
+        assert explainer.build_watch_list([]) == []
+
+    def test_watch_list_shape(self, make_signal):
+        signals = [make_signal(title="Looking for a better product alternative", score=1, comments=0) for _ in range(3)]
+        rejected = RejectedCluster(signals=signals, reason="too_small", summary="Too small.")
+        watch_list = explainer.build_watch_list([rejected])
+        assert len(watch_list) == 1
+        item = watch_list[0]
+        required = {
+            "title", "signal_count", "sources", "total_engagement", "composite_score",
+            "status", "why_it_failed", "missing_evidence", "recommended_action",
+        }
+        assert required.issubset(item.keys())
+
+    def test_pure_news_excluded_from_watch_list(self, make_signal):
+        """The core new requirement: pure news/announcements with no
+        demand, complaint, or willingness-to-pay language must never
+        appear on the Watch List, even if they clustered together."""
+        news_signals = [
+            make_signal(title="Google announced a new AI feature today", score=50, comments=10)
+            for _ in range(3)
+        ]
+        rejected = RejectedCluster(signals=news_signals, reason="too_small", summary="Too small.")
+        assert explainer.build_watch_list([rejected]) == []
+
+    def test_mixed_news_and_business_signals_only_keeps_business_ones(self, make_signal):
+        news = RejectedCluster(
+            signals=[make_signal(title="Google announced a new AI feature today", score=50, comments=10) for _ in range(2)],
+            reason="too_small", summary="x",
+        )
+        business = RejectedCluster(
+            signals=[make_signal(title="Looking for a compliance tracking alternative", score=5, comments=1) for _ in range(2)],
+            reason="too_small", summary="x",
+        )
+        watch_list = explainer.build_watch_list([news, business])
+        titles = [w["title"] for w in watch_list]
+        assert "Google announced a new AI feature today" not in titles
+        assert "Looking for a compliance tracking alternative" in titles
+
+    def test_watch_list_never_recommends_build(self, make_signal):
+        """Watch-list items haven't cleared the threshold — Build is never
+        an appropriate label for them."""
+        signals = [make_signal(title="Looking for a solution to this problem", score=5, comments=1) for _ in range(2)]
+        for reason in ("too_small", "single_source", "below_threshold"):
+            rejected = RejectedCluster(signals=signals, reason=reason, summary="x")
+            watch_list = explainer.build_watch_list([rejected])
+            assert watch_list[0]["recommended_action"]["label"] != "Build"
+
+    def test_watch_list_respects_limit(self, make_signal):
+        clusters = []
+        for i in range(8):
+            signals = [make_signal(title=f"Looking for a solution to topic {i}", score=1, comments=0)]
+            clusters.append(RejectedCluster(signals=signals, reason="too_small", summary="x"))
+        watch_list = explainer.build_watch_list(clusters, limit=3)
+        assert len(watch_list) == 3
+
+    def test_watch_list_ranked_by_composite_score(self, scorer, make_signal):
+        weak_signals = [make_signal(title="Looking for a weak topic solution", score=1, comments=0) for _ in range(3)]
+        strong_signals = [make_signal(title="Looking for a stronger topic solution", score=100, comments=50) for _ in range(3)]
+        weak_scores = scorer.score(weak_signals)
+        strong_scores = scorer.score(strong_signals)
+        weak_rejected = RejectedCluster(signals=weak_signals, reason="below_threshold", scores=weak_scores, summary="x")
+        strong_rejected = RejectedCluster(signals=strong_signals, reason="below_threshold", scores=strong_scores, summary="x")
+        watch_list = explainer.build_watch_list([weak_rejected, strong_rejected])
+        assert watch_list[0]["composite_score"] >= watch_list[1]["composite_score"]
+
+
+class TestRecommendationVocabulary:
+    _OPPORTUNITY_VOCAB = {"Build", "Validate First", "Monitor", "Ignore"}
+    _TREND_VOCAB = {"Build", "Validate", "Research", "Monitor", "Ignore"}
+
+    def test_build_verdict_uses_allowed_vocabulary(self, scorer, demand_signals):
+        scores = scorer.score(demand_signals)
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, demand_signals)
+        assert result["build_verdict"]["label"] in self._OPPORTUNITY_VOCAB
+        assert result["build_verdict"]["justification"].strip() != ""
+
+    def test_weak_bronze_opportunity_can_reach_ignore(self, scorer, make_signal):
+        """Unlike the prior design, Build Verdict now allows Ignore for
+        opportunities too — a weak bronze-tier cluster with low confidence
+        and minimal evidence should be able to reach it."""
+        weak_signals = [make_signal(title="Looking for a solution", score=1, comments=0) for _ in range(2)]
+        scores = scorer.score(weak_signals)
+        scores.demand = scores.confidence = 2.0
+        scores.competition = scores.revenue_potential = 3.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = 3.0
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, weak_signals)
+        assert result["tier"] == "bronze"
+        assert result["build_verdict"]["label"] == "Ignore"
+
+    def test_gold_high_confidence_recommends_build(self, scorer, demand_signals):
+        scores = scorer.score(demand_signals)
+        scores.demand = scores.competition = scores.revenue_potential = 9.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = scores.confidence = 9.0
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, demand_signals)
+        assert result["tier"] == "gold"
+        assert result["build_verdict"]["label"] == "Build"
+
+    def test_trend_recommendation_uses_allowed_vocabulary(self, make_signal):
+        signals = [make_signal(title="Using Claude with Rust for a fast AI coding agent")]
+        pairs = [{
+            "from": {"id": "e1", "name": "Claude", "type": "technology"},
+            "to":   {"id": "e2", "name": "Rust", "type": "technology"},
+            "weight": 3.0,
+        }]
+        trends = explainer.build_trend_analysis(signals, pairs)
+        assert trends[0]["recommended_action"]["label"] in self._TREND_VOCAB
+
+
+class TestClosingSynthesis:
+    def test_all_four_required_sections_present(self, scorer, demand_signals):
+        scores = scorer.score(demand_signals)
+        scores.demand = scores.competition = scores.revenue_potential = 9.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = scores.confidence = 9.0
+        opp = _opp_dict(scores)
+        explained = explainer.explain_opportunity(opp, demand_signals)
+        synthesis = explainer.build_closing_synthesis(
+            explained_opportunities=[explained], trends=[], watch_list=[],
+            comparison=None, zero_opps_explanation=None,
+        )
+        required = {"if_i_could_only_pursue_one", "why", "what_id_ignore", "what_id_keep_monitoring"}
+        assert required.issubset(synthesis.keys())
+        assert synthesis["if_i_could_only_pursue_one"].strip() != ""
+        assert synthesis["why"].strip() != ""
+        assert isinstance(synthesis["what_id_ignore"], list) and len(synthesis["what_id_ignore"]) > 0
+        assert isinstance(synthesis["what_id_keep_monitoring"], list) and len(synthesis["what_id_keep_monitoring"]) > 0
+
+    def test_closing_synthesis_with_nothing_at_all(self):
+        """Even an empty report must produce a coherent, non-empty closing —
+        never crash, never leave a section blank."""
+        synthesis = explainer.build_closing_synthesis(
+            explained_opportunities=[], trends=[], watch_list=[],
+            comparison=None, zero_opps_explanation=None,
+        )
+        assert synthesis["if_i_could_only_pursue_one"].strip() != ""
+        assert synthesis["why"].strip() != ""
+        assert len(synthesis["what_id_ignore"]) > 0
+        assert len(synthesis["what_id_keep_monitoring"]) > 0
+
+    def test_strong_opportunity_is_named_as_the_single_best_bet(self, scorer, demand_signals):
+        scores = scorer.score(demand_signals)
+        scores.demand = scores.competition = scores.revenue_potential = 9.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = scores.confidence = 9.0
+        opp = _opp_dict(scores, title="AI note-taking software for therapists")
+        explained = explainer.explain_opportunity(opp, demand_signals)
+        synthesis = explainer.build_closing_synthesis(
+            explained_opportunities=[explained], trends=[], watch_list=[],
+            comparison=None, zero_opps_explanation=None,
+        )
+        assert "AI note-taking software for therapists" in synthesis["if_i_could_only_pursue_one"]
+        assert explained["build_verdict"]["label"] in ("Build", "Validate First")
+
+    def test_weak_opportunities_produce_honest_none_pick(self, scorer, make_signal):
+        """If the only opportunity available is an Ignore-verdict one, the
+        report should say so honestly rather than naming it anyway."""
+        weak_signals = [make_signal(title="Looking for a solution", score=1, comments=0) for _ in range(2)]
+        scores = scorer.score(weak_signals)
+        scores.demand = scores.confidence = 2.0
+        scores.competition = scores.revenue_potential = 3.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = 3.0
+        opp = _opp_dict(scores)
+        explained = explainer.explain_opportunity(opp, weak_signals)
+        assert explained["build_verdict"]["label"] == "Ignore"
+
+        synthesis = explainer.build_closing_synthesis(
+            explained_opportunities=[explained], trends=[], watch_list=[],
+            comparison=None, zero_opps_explanation=None,
+        )
+        assert synthesis["if_i_could_only_pursue_one"].startswith("None")
+
+    def test_ignored_items_appear_in_what_id_ignore(self, scorer, make_signal):
+        weak_signals = [make_signal(title="Looking for a solution", score=1, comments=0) for _ in range(2)]
+        scores = scorer.score(weak_signals)
+        scores.demand = scores.confidence = 2.0
+        scores.competition = scores.revenue_potential = 3.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = 3.0
+        opp = _opp_dict(scores, title="Weak niche idea")
+        explained = explainer.explain_opportunity(opp, weak_signals)
+
+        synthesis = explainer.build_closing_synthesis(
+            explained_opportunities=[explained], trends=[], watch_list=[],
+            comparison=None, zero_opps_explanation=None,
+        )
+        assert "Weak niche idea" in synthesis["what_id_ignore"]
+
+    def test_monitored_items_appear_in_what_id_keep_monitoring(self, scorer, demand_signals):
+        scores = scorer.score(demand_signals)
+        # Deliberately mid-range so it lands on Monitor, not Build/Ignore.
+        scores.demand = scores.confidence = 5.0
+        scores.competition = scores.revenue_potential = 5.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = 5.0
+        opp = _opp_dict(scores, title="Moderate signal idea")
+        explained = explainer.explain_opportunity(opp, demand_signals)
+        assert explained["build_verdict"]["label"] == "Monitor"
+
+        synthesis = explainer.build_closing_synthesis(
+            explained_opportunities=[explained], trends=[], watch_list=[],
+            comparison=None, zero_opps_explanation=None,
+        )
+        assert "Moderate signal idea" in synthesis["what_id_keep_monitoring"]
+
+
+class TestNegativeWordingRemoved:
+    """
+    Regression guard for the analyst-language rewrite — these specific
+    flat, database-export-style phrases must never appear in generated
+    narrative again.
+    """
+    _FORBIDDEN_PHRASES = [
+        "no repeated pattern formed",
+        "nothing reached the confidence bar",
+        "no clear pattern emerged worth flagging",
+    ]
+
+    def test_zero_opportunities_no_signals_case(self):
+        result = explainer.explain_zero_opportunities([], total_signals=0)
+        for phrase in self._FORBIDDEN_PHRASES:
+            assert phrase not in result["reason"].lower()
+
+    def test_zero_opportunities_no_clusters_case(self):
+        result = explainer.explain_zero_opportunities([], total_signals=50)
+        for phrase in self._FORBIDDEN_PHRASES:
+            assert phrase not in result["reason"].lower()
+        assert "investment-grade" in result["reason"].lower()
+
+    def test_zero_opportunities_with_rejected_clusters_case(self, detector, make_signal):
+        weak_signals = [make_signal(title=f"Announcement {i}", score=1, comments=0) for i in range(3)]
+        diagnostics = detector.diagnose(weak_signals)
+        result = explainer.explain_zero_opportunities(diagnostics.rejected, total_signals=len(weak_signals))
+        for phrase in self._FORBIDDEN_PHRASES:
+            assert phrase not in result["reason"].lower()
 
 
 class TestMatchPreviousOpportunity:

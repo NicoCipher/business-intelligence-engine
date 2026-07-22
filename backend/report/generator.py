@@ -143,11 +143,16 @@ class ReportGenerator:
             explained["supporting_data"]["recurrence"] = recurrence
             explained_opportunities.append(explained)
 
-        # If nothing qualified this period, explain why instead of just
-        # reporting zero.
+        # Diagnose is always run now (not just when opportunities is empty):
+        # the Watch List should surface promising-but-below-threshold themes
+        # every period, not only on a zero-opportunity week. diagnose() is
+        # read-only and doesn't persist anything, so running it unconditionally
+        # doesn't change what's stored — only what the report can explain.
+        diagnostics = PatternDetector().diagnose(week_signals, domain=domain)
+        watch_list = explainer.build_watch_list(diagnostics.rejected)
+
         zero_explanation = None
         if not opportunities:
-            diagnostics = PatternDetector().diagnose(week_signals, domain=domain)
             zero_explanation = explainer.explain_zero_opportunities(
                 diagnostics.rejected, total_signals=signal_stats["total"],
             )
@@ -170,6 +175,14 @@ class ReportGenerator:
             comparison=comparison,
         )
 
+        closing_synthesis = explainer.build_closing_synthesis(
+            explained_opportunities=explained_opportunities,
+            trends=trend_analysis,
+            watch_list=watch_list,
+            comparison=comparison,
+            zero_opps_explanation=zero_explanation,
+        )
+
         narrative_connections = [explain_pair(pair) for pair in top_pairs[:5]]
 
         content = {
@@ -179,9 +192,11 @@ class ReportGenerator:
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "executive_summary": executive_summary,
             "opportunities":     explained_opportunities,
+            "watch_list":        watch_list,
             "zero_opportunities_explanation": zero_explanation,
             "trend_analysis":    trend_analysis,
             "comparison_to_last_period": comparison,
+            "closing_synthesis": closing_synthesis,
             "summary": {
                 "total_signals":     signal_stats["total"],
                 "sources_active":    signal_stats["sources"],

@@ -97,6 +97,76 @@ class TestStrongestPairsRecurrence:
             explainer.explain_pair(p)
 
 
+class TestWatchListAndClosingSynthesis:
+    def test_watch_list_present_even_when_opportunities_exist(self, fresh_db, make_signal):
+        """The Watch List must surface below-threshold themes every period,
+        not only on a zero-opportunity week."""
+        qualifying = _make_qualifying_signals(make_signal)
+        weak = [
+            make_signal(title="Unrelated weak announcement one", score=1, comments=0, source="rss"),
+            make_signal(title="Unrelated weak announcement two", score=1, comments=0, source="rss"),
+        ]
+        persist_signals(qualifying + weak)
+        inserted = PatternDetector().detect_and_persist(qualifying + weak, domain="business")
+        assert inserted >= 1  # qualifying cluster should still form an opportunity
+
+        report = ReportGenerator().generate(week_key=_current_week_key(), domain="business")
+        assert len(report.content["opportunities"]) >= 1
+        assert "watch_list" in report.content
+        # Not asserting non-empty here (clustering may or may not group the
+        # weak signals into a rejected cluster depending on similarity),
+        # but the key must always be present and be a list.
+        assert isinstance(report.content["watch_list"], list)
+
+    def test_closing_synthesis_always_present_and_complete(self, fresh_db, make_signal):
+        signals = _make_qualifying_signals(make_signal)
+        persist_signals(signals)
+        PatternDetector().detect_and_persist(signals, domain="business")
+
+        report = ReportGenerator().generate(week_key=_current_week_key(), domain="business")
+        closing = report.content["closing_synthesis"]
+        required = {"if_i_could_only_pursue_one", "why", "what_id_ignore", "what_id_keep_monitoring"}
+        assert required.issubset(closing.keys())
+        assert closing["if_i_could_only_pursue_one"].strip() != ""
+        assert closing["why"].strip() != ""
+        assert len(closing["what_id_ignore"]) > 0
+        assert len(closing["what_id_keep_monitoring"]) > 0
+
+    def test_closing_synthesis_present_on_zero_opportunity_week(self, fresh_db, make_signal):
+        weak_signals = [
+            make_signal(title="Weak announcement", score=1, comments=0, source="hn"),
+            make_signal(title="Weak announcement", score=1, comments=0, source="reddit"),
+        ]
+        persist_signals(weak_signals)
+        PatternDetector().detect_and_persist(weak_signals, domain="business")
+
+        report = ReportGenerator().generate(week_key=_current_week_key(), domain="business")
+        closing = report.content["closing_synthesis"]
+        assert closing["if_i_could_only_pursue_one"].strip() != ""
+        assert closing["why"].strip() != ""
+
+    def test_no_forbidden_phrases_anywhere_in_generated_report(self, fresh_db, make_signal):
+        """End-to-end regression guard: the old flat, database-export
+        phrasing must not survive anywhere in a real generated report."""
+        import json
+        weak_signals = [
+            make_signal(title="Weak announcement", score=1, comments=0, source="hn"),
+            make_signal(title="Weak announcement", score=1, comments=0, source="reddit"),
+        ]
+        persist_signals(weak_signals)
+        PatternDetector().detect_and_persist(weak_signals, domain="business")
+
+        report = ReportGenerator().generate(week_key=_current_week_key(), domain="business")
+        full_text = json.dumps(report.content).lower()
+        forbidden = [
+            "no repeated pattern formed",
+            "nothing reached the confidence bar",
+            "no clear pattern emerged worth flagging",
+        ]
+        for phrase in forbidden:
+            assert phrase not in full_text
+
+
 class TestReportWithOpportunities:
     def test_report_content_has_analyst_briefing_shape(self, fresh_db, make_signal):
         signals = _make_qualifying_signals(make_signal)
@@ -128,10 +198,12 @@ class TestReportWithOpportunities:
 
         assert len(report.content["opportunities"]) >= 1
         for opp in report.content["opportunities"]:
-            required_opp_keys = {"title", "tier", "composite_score", "analysis", "recommended_actions", "supporting_data"}
+            required_opp_keys = {"title", "tier", "composite_score", "market_size", "build_verdict", "analysis", "action_plan", "supporting_data"}
             assert required_opp_keys.issubset(opp.keys())
             assert len(opp["supporting_data"]["score_breakdown"]) == 7
-            assert len(opp["recommended_actions"]) >= 4
+            assert opp["build_verdict"]["label"] in {"Build", "Validate First", "Monitor", "Ignore"}
+            required_plan_stages = {"validate", "build_mvp", "acquire_first_users", "success_criteria", "kill_criteria"}
+            assert required_plan_stages.issubset(opp["action_plan"].keys())
 
         assert "narrative_connections" in report.content["entity_intelligence"]
 
