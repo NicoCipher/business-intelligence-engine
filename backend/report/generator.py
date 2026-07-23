@@ -121,6 +121,7 @@ class ReportGenerator:
         previous_content = self._get_previous_report(week_key, domain)
         previous_opportunities = (previous_content or {}).get("opportunities", [])
         previous_pairs = (previous_content or {}).get("entity_intelligence", {}).get("strongest_pairs")
+        previous_watch_list = (previous_content or {}).get("watch_list", [])
 
         # Explain each top opportunity as an analyst would: narrative
         # analysis + concrete next actions, with recurrence context when
@@ -149,12 +150,13 @@ class ReportGenerator:
         # read-only and doesn't persist anything, so running it unconditionally
         # doesn't change what's stored — only what the report can explain.
         diagnostics = PatternDetector().diagnose(week_signals, domain=domain)
-        watch_list = explainer.build_watch_list(diagnostics.rejected)
+        watch_list = explainer.build_watch_list(diagnostics.rejected, previous_watch_list=previous_watch_list)
 
         zero_explanation = None
         if not opportunities:
             zero_explanation = explainer.explain_zero_opportunities(
                 diagnostics.rejected, total_signals=signal_stats["total"],
+                previous_watch_list=previous_watch_list,
             )
 
         trend_analysis = explainer.build_trend_analysis(

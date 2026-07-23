@@ -52,6 +52,107 @@ def _opp_dict(scores: OpportunityScores, title="Test opportunity", signal_ids=No
 
 # ── explain_opportunity ────────────────────────────────────────────────
 
+class TestFounderIntelligence:
+    _REQUIRED_QUESTIONS = {
+        "who_is_the_customer", "why_do_they_pay", "existing_competitors",
+        "market_gap", "fastest_mvp", "first_distribution_channel",
+        "time_to_first_revenue",
+    }
+
+    def test_all_seven_questions_answered(self, scorer, demand_signals):
+        scores = scorer.score(demand_signals)
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, demand_signals)
+        fi = result["founder_intelligence"]
+        assert self._REQUIRED_QUESTIONS.issubset(fi.keys())
+        for question, answer in fi.items():
+            assert isinstance(answer, str) and answer.strip() != "", f"{question} must not be empty"
+
+    def test_market_gap_reuses_analysis_text_exactly(self, scorer, demand_signals):
+        """The one deliberate exception to no-repetition — market_gap in
+        founder_intelligence should be the identical string as
+        analysis.market_gap, not a second independently-generated one."""
+        scores = scorer.score(demand_signals)
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, demand_signals)
+        assert result["founder_intelligence"]["market_gap"] == result["analysis"]["market_gap"]
+
+    def test_existing_competitors_names_known_products_when_present(self, scorer, make_signal):
+        signals = [
+            make_signal(title="Looking for a Zapier alternative for e-commerce", source="hn", score=100, comments=20)
+            for _ in range(3)
+        ]
+        scores = scorer.score(signals)
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, signals)
+        assert "Zapier" in result["founder_intelligence"]["existing_competitors"]
+
+    def test_existing_competitors_honest_when_none_named(self, scorer, make_signal):
+        """Must never invent a competitor that wasn't actually in the evidence."""
+        signals = [
+            make_signal(title="Looking for a better way to track compliance", source="hn", score=50, comments=10)
+            for _ in range(3)
+        ]
+        scores = scorer.score(signals)
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, signals)
+        competitors = result["founder_intelligence"]["existing_competitors"]
+        assert "no specific competing product" in competitors.lower()
+
+    def test_fastest_mvp_never_recommends_focusing_on_a_named_competitor(self, scorer, make_signal):
+        """Regression: fastest_mvp used to say 'focused on Notion' for a
+        signal that explicitly named Notion as an inadequate existing
+        option — directly contradicting existing_competitors, which
+        correctly names Notion as competition."""
+        signals = [
+            make_signal(
+                title="Is there a note tool built FOR therapists, not generic meeting notes like Notion?",
+                source="hn", score=100, comments=20,
+            )
+            for _ in range(3)
+        ]
+        scores = scorer.score(signals)
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, signals)
+        fi = result["founder_intelligence"]
+        assert "Notion" in fi["existing_competitors"]
+        assert "notion" not in fi["fastest_mvp"].lower()
+
+    def test_first_distribution_channel_reflects_dominant_source(self, scorer, make_signal):
+        reddit_heavy = [
+            make_signal(title="Looking for a compliance tool for freelancers", source="reddit", score=50, comments=10)
+            for _ in range(4)
+        ] + [make_signal(title="Looking for a compliance tool for freelancers", source="hn", score=50, comments=10)]
+        scores = scorer.score(reddit_heavy)
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, reddit_heavy)
+        assert "subreddit" in result["founder_intelligence"]["first_distribution_channel"].lower()
+
+    def test_time_to_first_revenue_reflects_service_vs_platform_category(self, scorer, make_signal):
+        service_signals = [
+            make_signal(title="Looking for a freelance consulting service for compliance", score=50, comments=10)
+            for _ in range(3)
+        ]
+        platform_signals = [
+            make_signal(title="Looking for a marketplace platform for compliance professionals", score=50, comments=10)
+            for _ in range(3)
+        ]
+        service_scores = scorer.score(service_signals)
+        platform_scores = scorer.score(platform_signals)
+        service_result = explainer.explain_opportunity(_opp_dict(service_scores), service_signals)
+        platform_result = explainer.explain_opportunity(_opp_dict(platform_scores), platform_signals)
+        assert service_result["founder_intelligence"]["time_to_first_revenue"] != \
+            platform_result["founder_intelligence"]["time_to_first_revenue"]
+
+    def test_missing_cluster_signals_degrades_gracefully(self, scorer, demand_signals):
+        scores = scorer.score(demand_signals)
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, [])
+        fi = result["founder_intelligence"]
+        assert self._REQUIRED_QUESTIONS.issubset(fi.keys())
+        assert "not enough evidence" in fi["first_distribution_channel"].lower()
+
+
 class TestExplainOpportunityShape:
     def test_returns_all_required_keys(self, scorer, demand_signals):
         scores = scorer.score(demand_signals)
@@ -214,10 +315,12 @@ class TestExplainZeroOpportunities:
         for c in result["candidates"]:
             assert set(c.keys()) == {
                 "title", "signal_count", "sources", "total_engagement", "composite_score",
-                "status", "why_it_failed", "missing_evidence", "recommended_action",
+                "status", "why_it_failed", "missing_evidence", "recurrence", "recommended_action",
             }
             assert c["why_it_failed"].strip() != ""
             assert c["missing_evidence"].strip() != ""
+            assert c["recurrence"]["weeks_seen"] == 1
+            assert c["recurrence"]["recurring"] is False
             assert c["recommended_action"]["label"] in {"Monitor", "Research", "Ignore"}
 
     def test_candidates_capped_and_ranked_by_score(self, detector, make_signal):
@@ -490,6 +593,49 @@ class TestWatchList:
         assert watch_list[0]["composite_score"] >= watch_list[1]["composite_score"]
 
 
+    def test_no_previous_watch_list_is_first_seen(self, make_signal):
+        signals = [make_signal(title="Looking for a compliance tracking alternative", score=1, comments=0) for _ in range(2)]
+        rejected = RejectedCluster(signals=signals, reason="too_small", summary="x")
+        watch_list = explainer.build_watch_list([rejected], previous_watch_list=None)
+        assert watch_list[0]["recurrence"]["weeks_seen"] == 1
+        assert watch_list[0]["recurrence"]["recurring"] is False
+
+    def test_matching_title_in_previous_watch_list_increments_weeks_seen(self, make_signal):
+        signals = [make_signal(title="Looking for a compliance tracking alternative", score=1, comments=0) for _ in range(2)]
+        rejected = RejectedCluster(signals=signals, reason="too_small", summary="x")
+        previous = [{"title": "Looking for a compliance tracking tool", "recurrence": {"weeks_seen": 1}}]
+        watch_list = explainer.build_watch_list([rejected], previous_watch_list=previous)
+        assert watch_list[0]["recurrence"]["weeks_seen"] == 2
+        assert watch_list[0]["recurrence"]["recurring"] is True
+
+    def test_recurrence_chains_across_more_than_two_weeks(self, make_signal):
+        signals = [make_signal(title="Looking for a compliance tracking alternative", score=1, comments=0) for _ in range(2)]
+        rejected = RejectedCluster(signals=signals, reason="too_small", summary="x")
+        previous = [{"title": "Looking for a compliance tracking tool", "recurrence": {"weeks_seen": 3}}]
+        watch_list = explainer.build_watch_list([rejected], previous_watch_list=previous)
+        assert watch_list[0]["recurrence"]["weeks_seen"] == 4
+
+    def test_three_plus_weeks_recurring_escalates_to_research(self, make_signal):
+        """The core new capability: a pain point that's never individually
+        cleared the bar, but has shown up 3+ weeks running, should be
+        escalated — the cumulative signal across weeks is itself evidence."""
+        signals = [make_signal(title="Looking for a compliance tracking alternative", score=1, comments=0) for _ in range(2)]
+        rejected = RejectedCluster(signals=signals, reason="too_small", summary="x")
+        previous = [{"title": "Looking for a compliance tracking tool", "recurrence": {"weeks_seen": 2}}]
+        watch_list = explainer.build_watch_list([rejected], previous_watch_list=previous)
+        assert watch_list[0]["recurrence"]["weeks_seen"] == 3
+        assert watch_list[0]["recommended_action"]["label"] == "Research"
+        assert "3 consecutive weeks" in watch_list[0]["recommended_action"]["justification"]
+
+    def test_unrelated_previous_watch_list_does_not_falsely_match(self, make_signal):
+        signals = [make_signal(title="Looking for a compliance tracking alternative", score=1, comments=0) for _ in range(2)]
+        rejected = RejectedCluster(signals=signals, reason="too_small", summary="x")
+        previous = [{"title": "Looking for a video editing tool", "recurrence": {"weeks_seen": 5}}]
+        watch_list = explainer.build_watch_list([rejected], previous_watch_list=previous)
+        assert watch_list[0]["recurrence"]["weeks_seen"] == 1
+        assert watch_list[0]["recurrence"]["recurring"] is False
+
+
 class TestRecommendationVocabulary:
     _OPPORTUNITY_VOCAB = {"Build", "Validate First", "Monitor", "Ignore"}
     _TREND_VOCAB = {"Build", "Validate", "Research", "Monitor", "Ignore"}
@@ -523,6 +669,53 @@ class TestRecommendationVocabulary:
         result = explainer.explain_opportunity(opp, demand_signals)
         assert result["tier"] == "gold"
         assert result["build_verdict"]["label"] == "Build"
+
+    def test_gold_without_cross_source_confirmation_does_not_get_build(self, scorer, make_signal):
+        """A single-source cluster can still reach gold/high-confidence
+        numerically, but Build now requires ≥2 independent sources. It
+        lands on Monitor rather than Validate First — missing cross-source
+        corroboration is a more fundamental gap than missing pay
+        confirmation (a founder can go validate willingness-to-pay
+        directly via interviews; they can't manufacture a second
+        independent source, so "wait and see" is the more honest verdict)."""
+        single_source_signals = [
+            make_signal(title="I would pay for this business tool", source="hn", score=200, comments=80)
+            for _ in range(5)
+        ]
+        scores = scorer.score(single_source_signals)
+        scores.demand = scores.competition = scores.revenue_potential = 9.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = scores.confidence = 9.0
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, single_source_signals)
+        assert result["tier"] == "gold"
+        assert result["build_verdict"]["label"] != "Build"
+        assert result["build_verdict"]["label"] == "Monitor"
+
+    def test_gold_without_pay_evidence_gets_validate_first(self, scorer, make_signal):
+        """Cross-source and gold-tier alone still isn't enough — Build
+        requires confirmed willingness-to-pay language specifically."""
+        no_pay_signals = [
+            make_signal(title="How to find a better workflow for this", source="hn", score=200, comments=80),
+            make_signal(title="How to find a better workflow for this", source="reddit", score=180, comments=60),
+        ]
+        scores = scorer.score(no_pay_signals)
+        scores.demand = scores.competition = scores.revenue_potential = 9.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = scores.confidence = 9.0
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, no_pay_signals)
+        assert result["tier"] == "gold"
+        assert result["build_verdict"]["label"] == "Validate First"
+        assert "willingness-to-pay" in result["build_verdict"]["justification"].lower()
+
+    def test_build_verdict_justification_cites_specific_evidence(self, scorer, demand_signals):
+        scores = scorer.score(demand_signals)
+        scores.demand = scores.competition = scores.revenue_potential = 9.0
+        scores.execution_difficulty = scores.time_to_revenue = scores.risk = scores.confidence = 9.0
+        opp = _opp_dict(scores)
+        result = explainer.explain_opportunity(opp, demand_signals)
+        assert result["build_verdict"]["label"] == "Build"
+        # Must cite concrete evidence, not a generic sentence.
+        assert "independent sources" in result["build_verdict"]["justification"]
 
     def test_trend_recommendation_uses_allowed_vocabulary(self, make_signal):
         signals = [make_signal(title="Using Claude with Rust for a fast AI coding agent")]

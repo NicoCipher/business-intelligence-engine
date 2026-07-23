@@ -167,6 +167,44 @@ class TestWatchListAndClosingSynthesis:
             assert phrase not in full_text
 
 
+class TestIntelligenceQuality:
+    def test_founder_intelligence_present_in_real_report(self, fresh_db, make_signal):
+        signals = _make_qualifying_signals(make_signal)
+        persist_signals(signals)
+        PatternDetector().detect_and_persist(signals, domain="business")
+
+        report = ReportGenerator().generate(week_key=_current_week_key(), domain="business")
+        opp = report.content["opportunities"][0]
+        fi = opp["founder_intelligence"]
+        required = {
+            "who_is_the_customer", "why_do_they_pay", "existing_competitors",
+            "market_gap", "fastest_mvp", "first_distribution_channel",
+            "time_to_first_revenue",
+        }
+        assert required.issubset(fi.keys())
+
+    def test_pure_news_never_becomes_a_persisted_opportunity(self, fresh_db, make_signal):
+        """End-to-end proof of the false-positive fix: a well-corroborated,
+        high-engagement news cluster must never appear in opportunities,
+        even though the old scoring alone might have let it through."""
+        news_signals = [
+            make_signal(title="OpenAI announced a major new feature today", score=500, comments=200)
+            for _ in range(3)
+        ] + [
+            make_signal(title="OpenAI announced a major new feature today", score=400, comments=150, source="reddit")
+            for _ in range(3)
+        ]
+        persist_signals(news_signals)
+        inserted = PatternDetector().detect_and_persist(news_signals, domain="business")
+        assert inserted == 0
+
+        report = ReportGenerator().generate(week_key=_current_week_key(), domain="business")
+        assert report.content["opportunities"] == []
+        # And it must not leak onto the Watch List either.
+        watch_titles = [w["title"] for w in report.content["watch_list"]]
+        assert "OpenAI announced a major new feature today" not in watch_titles
+
+
 class TestReportWithOpportunities:
     def test_report_content_has_analyst_briefing_shape(self, fresh_db, make_signal):
         signals = _make_qualifying_signals(make_signal)

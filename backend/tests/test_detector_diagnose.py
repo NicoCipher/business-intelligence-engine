@@ -61,6 +61,76 @@ class TestDiagnoseBasics:
                [round(o.composite_score, 2) for o in diagnosed]
 
 
+class TestBusinessSignalGate:
+    """
+    Regression coverage for the core false-positive fix: a cluster with
+    zero demand/complaint/willingness-to-pay evidence must never become
+    an opportunity, regardless of how well-corroborated or high-engagement
+    it is — this is what "reduce false positives" actually requires, not
+    just narrative-layer filtering.
+    """
+
+    def test_well_corroborated_pure_news_is_rejected(self, detector, make_signal):
+        """The exact failure mode this gate exists to prevent: a
+        well-discussed announcement, cross-source, high engagement — none
+        of which implies anyone wants or needs anything."""
+        news_signals = [
+            make_signal(title="OpenAI announced a major new feature today", score=500, comments=200)
+            for _ in range(3)
+        ] + [
+            make_signal(title="OpenAI announced a major new feature today", score=400, comments=150, source="reddit")
+            for _ in range(3)
+        ]
+        result = detector.diagnose(news_signals)
+        assert result.accepted == [], "pure news must never be accepted as an opportunity"
+        gated = [r for r in result.rejected if r.reason == "no_business_signal"]
+        assert len(gated) > 0
+
+    def test_detect_also_rejects_pure_news_not_just_diagnose(self, detector, make_signal):
+        """detect()/detect_and_persist() must be gated identically to
+        diagnose() — this is the actual persistence path."""
+        news_signals = [
+            make_signal(title="OpenAI announced a major new feature today", score=500, comments=200)
+            for _ in range(3)
+        ] + [
+            make_signal(title="OpenAI announced a major new feature today", score=400, comments=150, source="reddit")
+            for _ in range(3)
+        ]
+        result = detector.detect(news_signals)
+        assert result == []
+
+    def test_demand_language_alone_passes_the_gate(self, detector, make_signal):
+        signals = [make_signal(title="Looking for a tool like this", score=10, comments=2) for _ in range(3)]
+        assert detector._has_business_signal(signals) is True
+
+    def test_complaint_language_alone_passes_the_gate(self, detector, make_signal):
+        signals = [make_signal(title="This is broken and terrible", score=10, comments=2) for _ in range(3)]
+        assert detector._has_business_signal(signals) is True
+
+    def test_pay_language_alone_passes_the_gate(self, detector, make_signal):
+        signals = [make_signal(title="I would pay for a fix", score=10, comments=2) for _ in range(3)]
+        assert detector._has_business_signal(signals) is True
+
+    def test_pure_announcement_fails_the_gate(self, detector, make_signal):
+        signals = [make_signal(title="Company announced a new product launch", score=10, comments=2) for _ in range(3)]
+        assert detector._has_business_signal(signals) is False
+
+    def test_gate_checked_before_scoring_for_efficiency_and_correctness(self, detector, make_signal):
+        """A gated cluster should carry no scores at all in diagnose() output
+        — it was never scored, not scored-and-then-discarded."""
+        news_signals = [
+            make_signal(title="Company announced a new product launch", score=10, comments=2)
+            for _ in range(3)
+        ] + [
+            make_signal(title="Company announced a new product launch", score=8, comments=1, source="reddit")
+            for _ in range(3)
+        ]
+        result = detector.diagnose(news_signals)
+        gated = [r for r in result.rejected if r.reason == "no_business_signal"]
+        assert gated
+        assert gated[0].scores is None
+
+
 class TestRejectionReasons:
     def test_too_small_cluster_is_rejected_with_reason(self, detector, make_signal):
         single_signal = [make_signal(title="A totally unique one-off topic")]
@@ -82,10 +152,10 @@ class TestRejectionReasons:
 
     def test_below_threshold_cluster_carries_scores(self, detector, make_signal):
         weak_signals = [
-            make_signal(title="Google announced a minor product update", score=1, comments=0)
+            make_signal(title="Looking for a minor product update tool", score=1, comments=0)
             for _ in range(3)
         ] + [
-            make_signal(title="Google announced a minor product update", score=1, comments=0, source="reddit")
+            make_signal(title="Looking for a minor product update tool", score=1, comments=0, source="reddit")
             for _ in range(3)
         ]
         result = detector.diagnose(weak_signals)

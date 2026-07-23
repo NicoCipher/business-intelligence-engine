@@ -13,8 +13,14 @@ Algorithm:
   2. Extract keyword fingerprints from each signal's title + content.
   3. Group signals by fingerprint similarity (a simple bag-of-words overlap).
   4. Reject clusters with fewer than MIN_CLUSTER_SIZE signals or only one source.
-  5. Score each surviving cluster using OpportunityScorer.
-  6. Persist opportunities that exceed MIN_COMPOSITE_TO_PERSIST.
+  5. Reject clusters with no demand/complaint/willingness-to-pay evidence at
+     all — a well-corroborated pure-news cluster (e.g. "OpenAI announced X"
+     discussed on both HN and Reddit) can otherwise still cross the
+     composite threshold on competition/execution/confidence dimensions
+     alone, with zero actual evidence of a business opportunity. See
+     _has_business_signal().
+  6. Score each surviving cluster using OpportunityScorer.
+  7. Persist opportunities that exceed MIN_COMPOSITE_TO_PERSIST.
 
 Why no NLP or embeddings?
   Embedding models require either a paid API or a locally-run model (slow,
@@ -48,7 +54,10 @@ from datetime import datetime, timezone
 import database
 from models import Signal, Opportunity, OpportunityScores
 from opportunity_engine.scorer import OpportunityScorer
-from config import MIN_CLUSTER_SIZE, MIN_COMPOSITE_TO_PERSIST
+from config import (
+    MIN_CLUSTER_SIZE, MIN_COMPOSITE_TO_PERSIST,
+    DEMAND_KEYWORDS, COMPLAINT_KEYWORDS, WILLINGNESS_TO_PAY,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +241,18 @@ class PatternDetector:
                 ))
                 continue
 
+            if not self._has_business_signal(cluster):
+                rejected.append(RejectedCluster(
+                    signals=cluster,
+                    reason="no_business_signal",
+                    summary=(
+                        "No demand-seeking, complaint, or willingness-to-pay language "
+                        "found anywhere in this cluster — reads as news or general "
+                        "discussion rather than evidence of an unmet need."
+                    ),
+                ))
+                continue
+
             scores = self._scorer.score(cluster)
             if scores.composite() < MIN_COMPOSITE_TO_PERSIST:
                 rejected.append(RejectedCluster(
@@ -347,6 +368,35 @@ class PatternDetector:
 
     # ── Cluster evaluation ─────────────────────────────────────────────────
 
+    @staticmethod
+    def _has_business_signal(cluster: list[Signal]) -> bool:
+        """
+        The core false-positive fix: does this cluster show ANY evidence of
+        an actual business opportunity, or does it just read as news?
+
+        A pure-announcement cluster ("OpenAI announced X", discussed on
+        both HN and Reddit with real engagement) can be well-corroborated
+        and score reasonably on competition/execution/confidence — none of
+        which require anyone to actually want or need anything. Without
+        this gate, a well-discussed announcement could cross
+        MIN_COMPOSITE_TO_PERSIST on those dimensions alone and get
+        persisted as a real opportunity, which it isn't.
+
+        This checks for the presence of ANY demand-seeking, complaining,
+        or willingness-to-pay language anywhere in the cluster — the same
+        keyword vocabulary the scorer itself uses for those dimensions, so
+        this isn't a new signal, just a hard floor under it. A cluster
+        that fails this has literally zero of that language anywhere in
+        it, which is a strong (if blunt) indicator it's discussion/news
+        rather than a signal of unmet demand.
+        """
+        blob = " ".join(s.full_text for s in cluster)
+        return (
+            any(kw in blob for kw in DEMAND_KEYWORDS)
+            or any(kw in blob for kw in COMPLAINT_KEYWORDS)
+            or any(kw in blob for kw in WILLINGNESS_TO_PAY)
+        )
+
     def _evaluate_cluster(self, cluster: list[Signal], domain: str) -> Opportunity | None:
         """
         Evaluate one cluster and produce an Opportunity if it qualifies.
@@ -356,7 +406,10 @@ class PatternDetector:
           2. Minimum source diversity (at least 2 distinct sources preferred;
              single-source clusters allowed if size ≥ 5 — high frequency alone
              is a valid signal)
-          3. Minimum composite score (config.MIN_COMPOSITE_TO_PERSIST)
+          3. Business-signal presence (_has_business_signal) — rejects pure
+             news/announcement clusters regardless of how well they'd
+             otherwise score
+          4. Minimum composite score (config.MIN_COMPOSITE_TO_PERSIST)
 
         Returns None if the cluster doesn't qualify.
         """
@@ -367,6 +420,9 @@ class PatternDetector:
         # Require cross-source for small clusters. Allow single-source
         # only if the cluster is large enough (strong frequency signal).
         if len(sources) == 1 and len(cluster) < 5:
+            return None
+
+        if not self._has_business_signal(cluster):
             return None
 
         scores = self._scorer.score(cluster)

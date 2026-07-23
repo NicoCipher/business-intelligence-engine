@@ -111,3 +111,15 @@ RISK_KEYWORDS: frozenset[str] = frozenset([
     "openai announced", "microsoft announced",   # big tech entering
     "overhyped", "bubble",
 ])
+
+# Evidence of a manual, unautomated workflow — a strong signal the person
+# is doing something by hand that could be a product. Deliberately NOT
+# wired into OpportunityScorer's numeric dimensions (that would change
+# every composite score already covered by test_scorer.py's exact-value
+# assertions) — this is validation/narrative evidence only, cited directly
+# in Build-verdict justifications and founder intelligence, not scored.
+MANUAL_WORKFLOW_KEYWORDS: frozenset[str] = frozenset([
+    "manually", "by hand", "spreadsheet", "copy and paste", "copy-paste",
+    "every week i", "every sunday", "every month i", "spend hours",
+    "spending hours", "no automation", "there's no way to automate",
+])
