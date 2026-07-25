@@ -63,7 +63,7 @@ class TestEntityDeduplicationGoingForward:
     def test_unique_index_actually_exists(self, fresh_db):
         with database.get_connection() as conn:
             indexes = {r["name"] for r in conn.execute("PRAGMA index_list(entities)").fetchall()}
-        assert "idx_entities_type_name" in indexes
+        assert "idx_entities_type_name_domain" in indexes
 
 
 class TestRelationshipWeightAccumulation:
@@ -98,10 +98,97 @@ class TestRelationshipWeightAccumulation:
     def test_unique_index_actually_exists(self, fresh_db):
         with database.get_connection() as conn:
             indexes = {r["name"] for r in conn.execute("PRAGMA index_list(relationships)").fetchall()}
-        assert "idx_rel_from_to_type" in indexes
+        assert "idx_rel_from_to_type_domain" in indexes
 
 
 # ── Migration: cleaning up pre-existing duplicates ────────────────────────
+
+class TestKnowledgeGraphDomainScoping:
+    """
+    Regression coverage for the architecture review's flagged gap:
+    entities/relationships had no domain column at all, so two domains'
+    knowledge graphs were silently shared. These tests prove the fix
+    directly — the same (type, name) entity independently exists per
+    domain, and cross-domain data never appears in a domain-scoped query.
+    """
+
+    def test_same_entity_name_independent_per_domain(self, fresh_db, make_signal):
+        extractor = EntityExtractor()
+        biz_sig = make_signal(title="Using Claude for a business automation task", source="hn")
+        sec_sig = make_signal(title="Using Claude for a security automation task", source="hn")
+
+        extractor.persist_results(extractor.extract_batch([biz_sig]), domain="business")
+        extractor.persist_results(extractor.extract_batch([sec_sig]), domain="cybersecurity")
+
+        with database.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT domain FROM entities WHERE type = 'technology' AND name = 'Claude'"
+            ).fetchall()
+        domains = {r["domain"] for r in rows}
+        assert domains == {"business", "cybersecurity"}
+        assert len(rows) == 2  # one row per domain, not merged into one
+
+    def test_co_occurring_pairs_scoped_to_domain_excludes_other_domain(self, fresh_db, make_signal):
+        extractor = EntityExtractor()
+        biz_signals = [make_signal(title="Using Claude with Rust for business tooling", source="hn") for _ in range(3)]
+        sec_signals = [make_signal(title="Using Claude with Rust for security tooling", source="hn") for _ in range(5)]
+
+        extractor.persist_results(extractor.extract_batch(biz_signals), domain="business")
+        extractor.persist_results(extractor.extract_batch(sec_signals), domain="cybersecurity")
+
+        biz_pairs = kg.co_occurring_pairs(min_weight=0.0, limit=10, domain="business")
+        biz_weight = next(
+            (p["weight"] for p in biz_pairs if {p["from"]["name"], p["to"]["name"]} == {"Claude", "Rust"}),
+            None,
+        )
+        assert biz_weight == pytest.approx(3.0), "business's weight must not include cybersecurity's 5 mentions"
+
+    def test_weekly_entity_summary_scoped_to_domain(self, fresh_db, make_signal):
+        extractor = EntityExtractor()
+        biz_signals = [make_signal(title="Using Claude for business tasks", source="hn") for _ in range(2)]
+        sec_signals = [make_signal(title="Using Claude for security tasks", source="hn") for _ in range(4)]
+
+        extractor.persist_results(extractor.extract_batch(biz_signals), domain="business")
+        extractor.persist_results(extractor.extract_batch(sec_signals), domain="cybersecurity")
+
+        biz_summary = kg.weekly_entity_summary(domain="business")
+        # "Claude" entity: 1 per domain (deduped within domain) -> business total_entities
+        # must not be inflated by cybersecurity's separate Claude row.
+        assert biz_summary["total_entities"] == 1
+
+    def test_domain_none_preserves_old_all_domains_behavior(self, fresh_db, make_signal):
+        """Backward compatibility: callers that don't specify domain still
+        get the pre-v5 all-domains view, for direct/debugging use — but
+        this is explicitly not what production report generation uses."""
+        extractor = EntityExtractor()
+        biz_sig = make_signal(title="Using Claude for a general task", source="hn")
+        sec_sig = make_signal(title="Using Claude for a general task", source="hn")
+        extractor.persist_results(extractor.extract_batch([biz_sig]), domain="business")
+        extractor.persist_results(extractor.extract_batch([sec_sig]), domain="cybersecurity")
+
+        with database.get_connection() as conn:
+            claude_rows = conn.execute(
+                "SELECT domain FROM entities WHERE type = 'technology' AND name = 'Claude'"
+            ).fetchall()
+        assert {r["domain"] for r in claude_rows} == {"business", "cybersecurity"}
+
+        all_domains_pairs_or_summary = kg.weekly_entity_summary(domain=None)
+        # domain=None must not filter anything out -- both domains' rows visible.
+        assert all_domains_pairs_or_summary["total_entities"] >= 2
+
+    def test_persist_results_defaults_to_business_domain(self, fresh_db, make_signal):
+        """Existing callers that don't pass domain explicitly must keep
+        working exactly as before v5."""
+        extractor = EntityExtractor()
+        sig = make_signal(title="Using Claude for a task", source="hn")
+        extractor.persist_results(extractor.extract_batch([sig]))  # no domain arg
+
+        with database.get_connection() as conn:
+            row = conn.execute(
+                "SELECT domain FROM entities WHERE type = 'technology' AND name = 'Claude'"
+            ).fetchone()
+        assert row["domain"] == "business"
+
 
 class TestMigrationV4MergesExistingDuplicates:
     """
@@ -130,6 +217,7 @@ class TestMigrationV4MergesExistingDuplicates:
         # a pre-v4 database state where duplicates could accumulate.
         with database.get_connection() as conn:
             conn.execute("DROP INDEX IF EXISTS idx_entities_type_name")
+            conn.execute("DROP INDEX IF EXISTS idx_entities_type_name_domain")
             self._insert_raw_entity(conn, "e1", "technology", "AI", "2026-01-01T00:00:00Z")
             self._insert_raw_entity(conn, "e2", "technology", "AI", "2026-01-02T00:00:00Z")
             self._insert_raw_entity(conn, "e3", "technology", "ai", "2026-01-03T00:00:00Z")
@@ -146,6 +234,7 @@ class TestMigrationV4MergesExistingDuplicates:
     def test_github_casing_variants_merged(self, fresh_db):
         with database.get_connection() as conn:
             conn.execute("DROP INDEX IF EXISTS idx_entities_type_name")
+            conn.execute("DROP INDEX IF EXISTS idx_entities_type_name_domain")
             self._insert_raw_entity(conn, "g1", "technology", "Github", "2026-01-01T00:00:00Z")
             self._insert_raw_entity(conn, "g2", "technology", "GitHub", "2026-01-02T00:00:00Z")
             conn.commit()
@@ -162,6 +251,7 @@ class TestMigrationV4MergesExistingDuplicates:
         repointing relationships, not silently cascade-delete it."""
         with database.get_connection() as conn:
             conn.execute("DROP INDEX IF EXISTS idx_entities_type_name")
+            conn.execute("DROP INDEX IF EXISTS idx_entities_type_name_domain")
             self._insert_raw_entity(conn, "ai1", "technology", "AI", "2026-01-01T00:00:00Z")
             self._insert_raw_entity(conn, "ai2", "technology", "AI", "2026-01-02T00:00:00Z")
             self._insert_raw_entity(conn, "rust1", "technology", "Rust", "2026-01-01T00:00:00Z")
@@ -181,7 +271,9 @@ class TestMigrationV4MergesExistingDuplicates:
         collision — weights must be summed, not left as duplicate rows."""
         with database.get_connection() as conn:
             conn.execute("DROP INDEX IF EXISTS idx_entities_type_name")
+            conn.execute("DROP INDEX IF EXISTS idx_entities_type_name_domain")
             conn.execute("DROP INDEX IF EXISTS idx_rel_from_to_type")
+            conn.execute("DROP INDEX IF EXISTS idx_rel_from_to_type_domain")
             self._insert_raw_entity(conn, "ai1", "technology", "AI", "2026-01-01T00:00:00Z")
             self._insert_raw_entity(conn, "ai2", "technology", "AI", "2026-01-02T00:00:00Z")
             self._insert_raw_entity(conn, "rust1", "technology", "Rust", "2026-01-01T00:00:00Z")
@@ -200,6 +292,7 @@ class TestMigrationV4MergesExistingDuplicates:
         other, merging them creates a self-loop, which must be dropped."""
         with database.get_connection() as conn:
             conn.execute("DROP INDEX IF EXISTS idx_entities_type_name")
+            conn.execute("DROP INDEX IF EXISTS idx_entities_type_name_domain")
             self._insert_raw_entity(conn, "ai1", "technology", "AI", "2026-01-01T00:00:00Z")
             self._insert_raw_entity(conn, "ai2", "technology", "AI", "2026-01-02T00:00:00Z")
             self._insert_raw_relationship(conn, "r1", "ai1", "ai2", "co-occurs", 1.0, "2026-01-01T00:00:00Z")
@@ -214,6 +307,7 @@ class TestMigrationV4MergesExistingDuplicates:
         """Running the migration twice must not error or change the result."""
         with database.get_connection() as conn:
             conn.execute("DROP INDEX IF EXISTS idx_entities_type_name")
+            conn.execute("DROP INDEX IF EXISTS idx_entities_type_name_domain")
             self._insert_raw_entity(conn, "e1", "technology", "AI", "2026-01-01T00:00:00Z")
             self._insert_raw_entity(conn, "e2", "technology", "AI", "2026-01-02T00:00:00Z")
             conn.commit()
@@ -234,4 +328,4 @@ class TestMigrationV4MergesExistingDuplicates:
             version = conn.execute(
                 "SELECT version FROM schema_info ORDER BY version DESC LIMIT 1"
             ).fetchone()["version"]
-        assert version == database.SCHEMA_VERSION == 4
+        assert version == database.SCHEMA_VERSION == 5

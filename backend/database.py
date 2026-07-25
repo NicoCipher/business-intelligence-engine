@@ -34,7 +34,7 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Full DDL. CREATE IF NOT EXISTS makes this idempotent — safe to call on
 # every startup without worrying about duplicate table errors.
@@ -48,8 +48,9 @@ PRAGMA journal_mode = WAL;
 
 CREATE TABLE IF NOT EXISTS entities (
     id          TEXT PRIMARY KEY,
-    type        TEXT NOT NULL,   -- problem|market|technology|company|skill|product|regulation
+    type        TEXT NOT NULL,   -- problem|market|technology|skill|regulation (see knowledge_graph/schema.py ENTITY_TYPES for the authoritative list)
     name        TEXT NOT NULL,
+    domain      TEXT NOT NULL DEFAULT 'business',
     description TEXT DEFAULT '',
     metadata    TEXT DEFAULT '{}',
     created_at  TEXT NOT NULL,
@@ -57,11 +58,12 @@ CREATE TABLE IF NOT EXISTS entities (
 );
 CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
 CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name COLLATE NOCASE);
--- NOTE: the UNIQUE(type, name) index is created at the end of
--- _migrate_v4(), not here. Creating it unconditionally in this DDL block
--- (which runs on every startup, before migrations) would fail immediately
--- against any existing database that still has duplicate rows — the
--- migration needs to run first to clean those up.
+CREATE INDEX IF NOT EXISTS idx_entities_domain ON entities(domain);
+-- NOTE: the UNIQUE(type, name, domain) index is created at the end of
+-- _migrate_v4()/_migrate_v5(), not here — same reasoning as before:
+-- creating it unconditionally here would fail against any existing
+-- database that still has duplicate rows before the migration cleans
+-- them up.
 
 
 -- ── Knowledge Graph: Relationships ───────────────────────────────────────
@@ -74,13 +76,15 @@ CREATE TABLE IF NOT EXISTS relationships (
     to_id       TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     type        TEXT NOT NULL,   -- solves|belongs_to|requires|competes_with|indicates
     weight      REAL DEFAULT 1.0,
+    domain      TEXT NOT NULL DEFAULT 'business',
     metadata    TEXT DEFAULT '{}',
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rel_from   ON relationships(from_id);
--- NOTE: the UNIQUE(from_id, to_id, type) index is created at the end of
--- _migrate_v4(), not here — same reasoning as idx_entities_type_name above.
+CREATE INDEX IF NOT EXISTS idx_rel_domain ON relationships(domain);
+-- NOTE: the UNIQUE(from_id, to_id, type, domain) index is created at the
+-- end of _migrate_v5(), not here — same reasoning as idx_entities above.
 CREATE INDEX IF NOT EXISTS idx_rel_to     ON relationships(to_id);
 CREATE INDEX IF NOT EXISTS idx_rel_type   ON relationships(type);
 
@@ -221,6 +225,9 @@ def initialize() -> None:
 
         if current_version < 4:
             _migrate_v4(conn)
+
+        if current_version < 5:
+            _migrate_v5(conn)
 
         if current_version < SCHEMA_VERSION:
             conn.execute(
@@ -461,6 +468,62 @@ def _migrate_v4(conn) -> None:
     )
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_from_to_type ON relationships(from_id, to_id, type)"
+    )
+
+    conn.commit()
+
+
+def _migrate_v5(conn) -> None:
+    """
+    Migration v4 → v5: domain-scope the knowledge graph.
+
+    Root cause: entities and relationships had no domain column at all —
+    a single global graph shared across every domain. Invisible while
+    only "business" ever had real data; would silently corrupt
+    co_occurring_pairs()/weekly_entity_summary() the moment a second
+    domain (e.g. the already-stubbed "cybersecurity") gets real signals,
+    mixing both domains' entities into every ranking with no way to tell
+    them apart.
+
+    Steps:
+      1. Add `domain` column to entities/relationships if not already
+         present (ALTER TABLE ADD COLUMN with a DEFAULT — SQLite backfills
+         existing rows with the default in place, no data rewrite needed).
+         Default is 'business': the only domain that has ever had real
+         data in this system, so every existing row is correctly
+         classified by the default alone — no ambiguous backfill logic
+         needed.
+      2. Drop the old 2/3-column unique indexes from _migrate_v4 (they no
+         longer match the intended uniqueness — two different domains
+         should be allowed to independently have an entity with the same
+         (type, name), which the old indexes would have incorrectly
+         prevented).
+      3. Create the new domain-aware unique indexes.
+
+    Idempotent: safe to run against an already-migrated or fresh database.
+    """
+    entity_columns = {row["name"] for row in conn.execute("PRAGMA table_info(entities)").fetchall()}
+    if "domain" not in entity_columns:
+        conn.execute("ALTER TABLE entities ADD COLUMN domain TEXT NOT NULL DEFAULT 'business'")
+        logger.info("Migration v5: added entities.domain (backfilled 'business')")
+
+    rel_columns = {row["name"] for row in conn.execute("PRAGMA table_info(relationships)").fetchall()}
+    if "domain" not in rel_columns:
+        conn.execute("ALTER TABLE relationships ADD COLUMN domain TEXT NOT NULL DEFAULT 'business'")
+        logger.info("Migration v5: added relationships.domain (backfilled 'business')")
+
+    conn.execute("DROP INDEX IF EXISTS idx_entities_type_name")
+    conn.execute("DROP INDEX IF EXISTS idx_rel_from_to_type")
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_entities_domain ON entities(domain)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_rel_domain ON relationships(domain)")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_type_name_domain "
+        "ON entities(type, name, domain)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_from_to_type_domain "
+        "ON relationships(from_id, to_id, type, domain)"
     )
 
     conn.commit()

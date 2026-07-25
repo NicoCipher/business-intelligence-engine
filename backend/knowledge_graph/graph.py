@@ -129,15 +129,23 @@ def opportunity_context(opportunity_id: str) -> dict:
     }
 
 
-def top_entities(entity_type: str | None = None, limit: int = 20) -> list[dict]:
+def top_entities(entity_type: str | None = None, limit: int = 20, domain: str | None = None) -> list[dict]:
     """
     Return entities ranked by the number of relationships they participate in.
     Higher relationship count = this concept is more central to the intelligence.
+
+    domain=None returns across all domains (backward-compatible default);
+    real callers pass it explicitly, same as co_occurring_pairs().
     """
-    type_filter = "WHERE e.type = :type" if entity_type else ""
+    filters = []
     params: dict = {"limit": limit}
     if entity_type:
+        filters.append("e.type = :type")
         params["type"] = entity_type
+    if domain:
+        filters.append("e.domain = :domain")
+        params["domain"] = domain
+    where_clause = ("WHERE " + " AND ".join(filters)) if filters else ""
 
     with database.get_connection() as conn:
         rows = conn.execute(
@@ -147,7 +155,7 @@ def top_entities(entity_type: str | None = None, limit: int = 20) -> list[dict]:
             FROM     entities e
             LEFT JOIN relationships r
                    ON (r.from_id = e.id OR r.to_id = e.id)
-            {type_filter}
+            {where_clause}
             GROUP BY e.id
             ORDER BY relationship_count DESC, e.name ASC
             LIMIT    :limit
@@ -158,25 +166,38 @@ def top_entities(entity_type: str | None = None, limit: int = 20) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def co_occurring_pairs(min_weight: float = 2.0, limit: int = 15) -> list[dict]:
+def co_occurring_pairs(min_weight: float = 2.0, limit: int = 15, domain: str | None = None) -> list[dict]:
     """
     Return entity pairs with the strongest co-occurrence relationships.
     Weight accumulates each time the pair appears together in a new signal.
+
+    domain=None returns pairs across all domains (the old, pre-v5
+    behavior) — kept as the default for backward compatibility with
+    direct/debugging callers, but every real production call site
+    (report/generator.py) always passes the actual domain explicitly.
+    Without it, two domains' entities could appear paired together in
+    the same ranking, which schema v5's domain-scoping exists to prevent.
     """
+    domain_filter = "AND r.domain = :domain" if domain else ""
+    params: dict = {"min_weight": min_weight, "limit": limit}
+    if domain:
+        params["domain"] = domain
+
     with database.get_connection() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT   r.from_id, r.to_id, r.type, r.weight,
                      a.name as from_name, a.type as from_type,
                      b.name as to_name,   b.type as to_type
             FROM     relationships r
             JOIN     entities a ON a.id = r.from_id
             JOIN     entities b ON b.id = r.to_id
-            WHERE    r.type = 'co-occurs' AND r.weight >= ?
+            WHERE    r.type = 'co-occurs' AND r.weight >= :min_weight
+            {domain_filter}
             ORDER BY r.weight DESC
-            LIMIT    ?
+            LIMIT    :limit
             """,
-            (min_weight, limit),
+            params,
         ).fetchall()
 
     return [
@@ -189,30 +210,41 @@ def co_occurring_pairs(min_weight: float = 2.0, limit: int = 15) -> list[dict]:
     ]
 
 
-def weekly_entity_summary(week_key: str | None = None) -> dict:
+def weekly_entity_summary(week_key: str | None = None, domain: str | None = None) -> dict:
     """
     Summarise graph activity for a given ISO week.
     Defaults to the current week.
+
+    domain=None summarises across all domains (old behavior, kept for
+    backward compatibility) — real production callers always pass domain
+    explicitly, same reasoning as co_occurring_pairs().
     """
     if not week_key:
         now = datetime.now(timezone.utc)
         week_key = f"{now.isocalendar().year}-W{now.isocalendar().week:02d}"
 
+    domain_filter = "WHERE domain = :domain" if domain else ""
+    params = {"domain": domain} if domain else {}
+
     with database.get_connection() as conn:
         total_entities = conn.execute(
-            "SELECT COUNT(*) FROM entities"
+            f"SELECT COUNT(*) FROM entities {domain_filter}", params
         ).fetchone()[0]
 
         by_type = conn.execute(
-            "SELECT type, COUNT(*) as count FROM entities GROUP BY type ORDER BY count DESC"
+            f"SELECT type, COUNT(*) as count FROM entities {domain_filter} "
+            f"GROUP BY type ORDER BY count DESC",
+            params,
         ).fetchall()
 
         total_rels = conn.execute(
-            "SELECT COUNT(*) FROM relationships"
+            f"SELECT COUNT(*) FROM relationships {domain_filter}", params
         ).fetchone()[0]
 
         by_rel_type = conn.execute(
-            "SELECT type, COUNT(*) as count FROM relationships GROUP BY type ORDER BY count DESC"
+            f"SELECT type, COUNT(*) as count FROM relationships {domain_filter} "
+            f"GROUP BY type ORDER BY count DESC",
+            params,
         ).fetchall()
 
     return {
@@ -221,25 +253,31 @@ def weekly_entity_summary(week_key: str | None = None) -> dict:
         "entities_by_type": {r["type"]: r["count"] for r in by_type},
         "total_relationships": total_rels,
         "relationships_by_type": {r["type"]: r["count"] for r in by_rel_type},
-        "top_entities": top_entities(limit=10),
-        "top_co_occurrences": co_occurring_pairs(min_weight=1.0, limit=8),
+        "top_entities": top_entities(limit=10, domain=domain),
+        "top_co_occurrences": co_occurring_pairs(min_weight=1.0, limit=8, domain=domain),
     }
 
 
-def find_or_create_entity(entity_type: str, name: str) -> str:
+def find_or_create_entity(entity_type: str, name: str, domain: str = "business") -> str:
     """
-    Return the ID of an existing entity (matched by type + name, case-insensitive)
-    or create it if it doesn't exist.
+    Return the ID of an existing entity (matched by type + name + domain,
+    case-insensitive on name) or create it if it doesn't exist.
 
     This is the safe way to reference entities during opportunity linking —
     it ensures the entity exists and returns its stable ID.
+
+    Note: not currently called anywhere in the pipeline — persist_results()
+    in extractor.py does its own equivalent insert+resolve inline. Kept
+    correct and domain-scoped rather than left as a stale, pre-v5 trap for
+    whoever picks it up next; consolidating the two implementations is
+    flagged as code debt, not fixed here.
     """
     from models import Entity
 
     with database.get_connection() as conn:
         existing = conn.execute(
-            "SELECT id FROM entities WHERE type = ? AND name = ? COLLATE NOCASE",
-            (entity_type, name),
+            "SELECT id FROM entities WHERE type = ? AND name = ? COLLATE NOCASE AND domain = ?",
+            (entity_type, name, domain),
         ).fetchone()
 
         if existing:
@@ -250,6 +288,7 @@ def find_or_create_entity(entity_type: str, name: str) -> str:
             "id":          new_entity.id,
             "type":        new_entity.type,
             "name":        new_entity.name,
+            "domain":      domain,
             "description": new_entity.description,
             "metadata":    encode_json(new_entity.metadata),
             "created_at":  new_entity.created_at,
@@ -258,9 +297,9 @@ def find_or_create_entity(entity_type: str, name: str) -> str:
         conn.execute(
             """
             INSERT OR IGNORE INTO entities
-              (id, type, name, description, metadata, created_at, updated_at)
+              (id, type, name, domain, description, metadata, created_at, updated_at)
             VALUES
-              (:id, :type, :name, :description, :metadata, :created_at, :updated_at)
+              (:id, :type, :name, :domain, :description, :metadata, :created_at, :updated_at)
             """,
             row,
         )
@@ -268,20 +307,23 @@ def find_or_create_entity(entity_type: str, name: str) -> str:
         return new_entity.id
 
 
-def increment_relationship_weight(from_id: str, to_id: str, rel_type: str) -> None:
+def increment_relationship_weight(from_id: str, to_id: str, rel_type: str, domain: str = "business") -> None:
     """
     Increment the weight of an existing relationship, or set it to 1 if new.
 
     Used when the same entity pair co-occurs across multiple signals —
     each new co-occurrence strengthens the relationship.
+
+    Note: not currently called anywhere in the pipeline — same status as
+    find_or_create_entity() above.
     """
     from models import Relationship
     import json
 
     with database.get_connection() as conn:
         existing = conn.execute(
-            "SELECT id, weight FROM relationships WHERE from_id=? AND to_id=? AND type=?",
-            (from_id, to_id, rel_type),
+            "SELECT id, weight FROM relationships WHERE from_id=? AND to_id=? AND type=? AND domain=?",
+            (from_id, to_id, rel_type, domain),
         ).fetchone()
 
         if existing:
@@ -294,10 +336,10 @@ def increment_relationship_weight(from_id: str, to_id: str, rel_type: str) -> No
             conn.execute(
                 """
                 INSERT OR IGNORE INTO relationships
-                  (id, from_id, to_id, type, weight, metadata, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                  (id, from_id, to_id, type, weight, domain, metadata, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (rel.id, rel.from_id, rel.to_id, rel.type, rel.weight,
+                (rel.id, rel.from_id, rel.to_id, rel.type, rel.weight, domain,
                  json.dumps(rel.metadata), rel.created_at, rel.updated_at)
             )
         conn.commit()

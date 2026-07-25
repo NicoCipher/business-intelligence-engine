@@ -186,7 +186,7 @@ def _run_domain(
         extractor = EntityExtractor()
         extraction_results = extractor.extract_batch(domain_signals)
         if not dry_run:
-            counts = extractor.persist_results(extraction_results)
+            counts = extractor.persist_results(extraction_results, domain=domain.id)
             run_result.entities_inserted = counts["entities_inserted"]
             run_result.relationships_inserted = counts["relationships_inserted"]
             logger.info(

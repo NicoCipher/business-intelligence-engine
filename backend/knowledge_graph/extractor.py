@@ -115,14 +115,23 @@ class EntityExtractor:
 
     # ── Persistence helpers ───────────────────────────────────────────────
 
-    def persist_results(self, results: list[ExtractionResult]) -> dict:
+    def persist_results(self, results: list[ExtractionResult], domain: str = "business") -> dict:
         """
         Write extracted entities and relationships to the database.
 
-        Entities: INSERT OR IGNORE, deduplicated by the (type, name)
-        unique index (see database.py's _migrate_v4). Relationships:
-        upserted on (from_id, to_id, type) — weight accumulates rather
-        than each co-occurrence creating another row.
+        Entities: INSERT OR IGNORE, deduplicated by the (type, name, domain)
+        unique index (see database.py's _migrate_v5). Relationships:
+        upserted on (from_id, to_id, type, domain) — weight accumulates
+        rather than each co-occurrence creating another row.
+
+        Domain scoping: entities and relationships are scoped per-domain
+        (schema v5) — the same (type, name) can independently exist once
+        per domain (e.g. "AI" as a technology entity in both "business"
+        and "cybersecurity" are two different rows), so cross-domain
+        knowledge doesn't get silently mixed into shared rankings like
+        co_occurring_pairs(). All results in one call are assumed to
+        belong to the same domain — this matches how pipeline.py actually
+        calls this, once per domain per run.
 
         Entity id resolution: every Entity object built by extract() has
         a fresh random id (models.py), generated before we know whether
@@ -154,14 +163,15 @@ class EntityExtractor:
                         conn.execute(
                             """
                             INSERT OR IGNORE INTO entities
-                              (id, type, name, description, metadata, created_at, updated_at)
+                              (id, type, name, domain, description, metadata, created_at, updated_at)
                             VALUES
-                              (:id, :type, :name, :description, :metadata, :created_at, :updated_at)
+                              (:id, :type, :name, :domain, :description, :metadata, :created_at, :updated_at)
                             """,
                             {
                                 "id":          entity.id,
                                 "type":        entity.type,
                                 "name":        entity.name,
+                                "domain":      domain,
                                 "description": entity.description,
                                 "metadata":    json.dumps(entity.metadata),
                                 "created_at":  entity.created_at,
@@ -172,10 +182,12 @@ class EntityExtractor:
                             entity_inserts += 1
                             id_map[entity.id] = entity.id
                         else:
-                            # Already existed under a different id — resolve it.
+                            # Already existed under a different id — resolve it,
+                            # scoped to this domain so we never resolve onto
+                            # another domain's identically-named entity.
                             existing = conn.execute(
-                                "SELECT id FROM entities WHERE type = ? AND name = ?",
-                                (entity.type, entity.name),
+                                "SELECT id FROM entities WHERE type = ? AND name = ? AND domain = ?",
+                                (entity.type, entity.name, domain),
                             ).fetchone()
                             id_map[entity.id] = existing["id"] if existing else entity.id
                     except sqlite3.Error as e:
@@ -191,11 +203,11 @@ class EntityExtractor:
                         conn.execute(
                             """
                             INSERT INTO relationships
-                              (id, from_id, to_id, type, weight, metadata, created_at, updated_at)
+                              (id, from_id, to_id, type, weight, domain, metadata, created_at, updated_at)
                             VALUES
-                              (:id, :from_id, :to_id, :type, :weight, :metadata,
+                              (:id, :from_id, :to_id, :type, :weight, :domain, :metadata,
                                :created_at, :updated_at)
-                            ON CONFLICT(from_id, to_id, type) DO UPDATE SET
+                            ON CONFLICT(from_id, to_id, type, domain) DO UPDATE SET
                               weight     = MIN(10.0, weight + excluded.weight),
                               updated_at = excluded.updated_at
                             """,
@@ -205,6 +217,7 @@ class EntityExtractor:
                                 "to_id":      to_id,
                                 "type":       rel.type,
                                 "weight":     rel.weight,
+                                "domain":     domain,
                                 "metadata":   json.dumps(rel.metadata),
                                 "created_at": rel.created_at,
                                 "updated_at": rel.updated_at,

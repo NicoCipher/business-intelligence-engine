@@ -105,8 +105,8 @@ class ReportGenerator:
         # Gather all data needed for the report
         signal_stats  = self._get_signal_stats(week_key, domain, period_start, period_end)
         opportunities = self._get_week_opportunities(week_key, domain)
-        entity_summary = kg.weekly_entity_summary(week_key)
-        top_pairs     = kg.co_occurring_pairs(min_weight=1.0, limit=5)
+        entity_summary = kg.weekly_entity_summary(week_key, domain=domain)
+        top_pairs     = kg.co_occurring_pairs(min_weight=1.0, limit=5, domain=domain)
         week_signals  = self._get_week_signals(period_start, period_end, domain)
         signals_by_id = {s.id: s for s in week_signals}
 
