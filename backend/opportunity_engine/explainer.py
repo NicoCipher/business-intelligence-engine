@@ -65,23 +65,10 @@ _REJECTION_LABELS = {
     "below_threshold": "evidence quality fell short of the investment-grade bar once scored",
 }
 
-_TITLE_STOPWORDS = {
-    "the", "a", "an", "for", "and", "or", "of", "to", "in", "on", "with",
-    "is", "are", "this", "that", "new", "software", "tool", "app",
-}
-
 
 # ── Small shared helpers ──────────────────────────────────────────────────
 
-def _title_tokens(title: str) -> set[str]:
-    words = "".join(c if c.isalnum() else " " for c in title.lower()).split()
-    return {w for w in words if len(w) > 3 and w not in _TITLE_STOPWORDS}
-
-
-def _jaccard(a: set, b: set) -> float:
-    if not a or not b:
-        return 0.0
-    return len(a & b) / len(a | b)
+from opportunity_engine.similarity import title_tokens as _title_tokens, jaccard as _jaccard
 
 
 def _target_group(cluster_signals: list[Signal]) -> str:
