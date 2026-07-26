@@ -328,4 +328,4 @@ class TestMigrationV4MergesExistingDuplicates:
             version = conn.execute(
                 "SELECT version FROM schema_info ORDER BY version DESC LIMIT 1"
             ).fetchone()["version"]
-        assert version == database.SCHEMA_VERSION == 5
+        assert version == database.SCHEMA_VERSION == 6

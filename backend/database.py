@@ -26,6 +26,7 @@ Schema evolution:
 import json
 import logging
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,7 +35,7 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # Full DDL. CREATE IF NOT EXISTS makes this idempotent — safe to call on
 # every startup without worrying about duplicate table errors.
@@ -137,11 +138,35 @@ CREATE TABLE IF NOT EXISTS opportunities (
     week_key        TEXT NOT NULL,      -- ISO week: '2026-W28'
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
-    domain          TEXT NOT NULL DEFAULT 'business'  -- originating domain id
+    domain          TEXT NOT NULL DEFAULT 'business',  -- originating domain id
+    problem_id      TEXT DEFAULT ''     -- canonical Problem this observation is linked to; see problems table below
 );
 CREATE INDEX IF NOT EXISTS idx_opp_composite ON opportunities(composite_score DESC);
 CREATE INDEX IF NOT EXISTS idx_opp_status    ON opportunities(status);
 CREATE INDEX IF NOT EXISTS idx_opp_week      ON opportunities(week_key DESC);
+CREATE INDEX IF NOT EXISTS idx_opp_problem   ON opportunities(problem_id);
+
+
+-- ── Problems ──────────────────────────────────────────────────────────────
+-- The canonical, long-lived identity for a pain point (architecture review
+-- §4/§5). An Opportunity is a dated, scored observation of one solution
+-- angle against a Problem; the Problem is what persists across weeks and
+-- accumulates history. problem_id on opportunities is a plain reference
+-- (not an enforced FK, consistent with how entity_ids already works) —
+-- see opportunity_engine/canonicalizer.py for how matching works.
+
+CREATE TABLE IF NOT EXISTS problems (
+    id          TEXT PRIMARY KEY,
+    domain      TEXT NOT NULL DEFAULT 'business',
+    title       TEXT NOT NULL,
+    entity_ids  TEXT DEFAULT '[]',  -- JSON: accumulated union of entity ids across every linked opportunity
+    first_seen  TEXT NOT NULL,
+    last_seen   TEXT NOT NULL,
+    weeks_seen  INTEGER DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_problems_domain ON problems(domain);
 
 
 -- ── Weekly Reports ────────────────────────────────────────────────────────
@@ -228,6 +253,9 @@ def initialize() -> None:
 
         if current_version < 5:
             _migrate_v5(conn)
+
+        if current_version < 6:
+            _migrate_v6(conn)
 
         if current_version < SCHEMA_VERSION:
             conn.execute(
@@ -525,6 +553,76 @@ def _migrate_v5(conn) -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_from_to_type_domain "
         "ON relationships(from_id, to_id, type, domain)"
     )
+
+    conn.commit()
+
+
+def _migrate_v6(conn) -> None:
+    """
+    Migration v5 → v6: canonical Problem identity (architecture review §4/§5).
+
+    Adds the `problems` table — the long-lived pain-point identity that an
+    Opportunity observation attaches to — and `opportunities.problem_id`.
+
+    Backfill for existing (pre-v6) opportunities: each one becomes its own
+    initial Problem root (a new Problem row with entity_ids=[] and the
+    opportunity's own title/domain). This is an honest, explicitly-limited
+    backfill, not a best-effort guess: pre-v6 opportunities never had
+    entity_ids populated either (that field has been dead since it was
+    added — see opportunity_engine/canonicalizer.py's docstring), so there
+    is no real signature to retroactively match them against each other.
+    Each old opportunity gets a stable identity going forward; it just
+    doesn't get to benefit from canonicalization retroactively. New
+    opportunities detected after this migration lands get real entity_ids
+    and real matching.
+
+    Idempotent: only backfills opportunities where problem_id is still
+    empty, so re-running this is a no-op the second time.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS problems (
+            id          TEXT PRIMARY KEY,
+            domain      TEXT NOT NULL DEFAULT 'business',
+            title       TEXT NOT NULL,
+            entity_ids  TEXT DEFAULT '[]',
+            first_seen  TEXT NOT NULL,
+            last_seen   TEXT NOT NULL,
+            weeks_seen  INTEGER DEFAULT 1,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_problems_domain ON problems(domain)")
+
+    opp_columns = {row["name"] for row in conn.execute("PRAGMA table_info(opportunities)").fetchall()}
+    if "problem_id" not in opp_columns:
+        conn.execute("ALTER TABLE opportunities ADD COLUMN problem_id TEXT DEFAULT ''")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_opp_problem ON opportunities(problem_id)")
+        logger.info("Migration v6: added opportunities.problem_id")
+
+    unlinked = conn.execute(
+        "SELECT id, title, domain, created_at FROM opportunities WHERE problem_id IS NULL OR problem_id = ''"
+    ).fetchall()
+
+    for opp in unlinked:
+        problem_id = str(uuid.uuid4())
+        now = opp["created_at"]
+        conn.execute(
+            """
+            INSERT INTO problems (id, domain, title, entity_ids, first_seen, last_seen, weeks_seen, created_at, updated_at)
+            VALUES (?, ?, ?, '[]', ?, ?, 1, ?, ?)
+            """,
+            (problem_id, opp["domain"], opp["title"], now, now, now, now),
+        )
+        conn.execute(
+            "UPDATE opportunities SET problem_id = ? WHERE id = ?",
+            (problem_id, opp["id"]),
+        )
+
+    if unlinked:
+        logger.info(f"Migration v6: backfilled {len(unlinked)} opportunity(ies) with initial Problem roots")
 
     conn.commit()
 

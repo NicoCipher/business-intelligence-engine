@@ -279,6 +279,53 @@ class OpportunityScores:
 # ── Opportunity ───────────────────────────────────────────────────────────
 
 @dataclass
+class Problem:
+    """
+    A stable, long-lived pain point — the canonical identity an Opportunity
+    observation attaches to.
+
+    Why this exists as a distinct object from Opportunity (see the
+    architecture review, §4/§5): the same underlying problem ("solo
+    therapists lack purpose-built note tooling") can recur across weeks
+    under different wording ("therapist notes", "clinical session
+    documentation"), and can have multiple different solution-angle
+    Opportunities pointing at it (an AI SaaS, a Notion template pack, a
+    consulting service are three different responses to one problem).
+    Opportunity used to conflate all of this into one weekly snapshot
+    row with no persisted continuity; Problem is the thing that actually
+    persists, Opportunity is the dated observation attached to it.
+
+    entity_ids is the accumulated UNION of entity ids seen across every
+    Opportunity ever linked to this Problem — it only grows richer over
+    time, never shrinks, and is the signature new opportunities are
+    matched against (see opportunity_engine/canonicalizer.py).
+    """
+    title: str
+    domain: str = "business"
+    entity_ids: list[str] = field(default_factory=list)
+    first_seen: str = field(default_factory=_now)
+    last_seen: str = field(default_factory=_now)
+    weeks_seen: int = 1
+    id: str = field(default_factory=_uuid)
+    created_at: str = field(default_factory=_now)
+    updated_at: str = field(default_factory=_now)
+
+    def to_db_row(self) -> dict:
+        import json
+        return {
+            "id":         self.id,
+            "domain":     self.domain,
+            "title":      self.title,
+            "entity_ids": json.dumps(self.entity_ids),
+            "first_seen": self.first_seen,
+            "last_seen":  self.last_seen,
+            "weeks_seen": self.weeks_seen,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
 class Opportunity:
     """
     A scored, evidence-backed opportunity.
@@ -297,6 +344,7 @@ class Opportunity:
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
     domain: str = "business"    # originating domain id (see domains/registry.py)
+    problem_id: str = ""        # canonical Problem this observation is linked to (see canonicalizer.py)
 
     def __post_init__(self):
         if not self.week_key:
@@ -327,6 +375,7 @@ class Opportunity:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "domain": self.domain,
+            "problem_id": self.problem_id,
         }
 
 
