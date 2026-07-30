@@ -54,6 +54,7 @@ from datetime import datetime, timezone
 import database
 from models import Signal, Opportunity, OpportunityScores
 from opportunity_engine.scorer import OpportunityScorer
+from opportunity_engine import canonicalizer
 from config import (
     MIN_CLUSTER_SIZE, MIN_COMPOSITE_TO_PERSIST,
     DEMAND_KEYWORDS, COMPLAINT_KEYWORDS, WILLINGNESS_TO_PAY,
@@ -165,25 +166,39 @@ class PatternDetector:
         """
         Detect opportunities for one domain and write them to the database.
         Returns the number of new opportunities persisted.
+
+        Also resolves each opportunity's entity signature and canonical
+        Problem before persisting (opportunity_engine/canonicalizer.py) —
+        this is what actually populates entity_ids (previously always [],
+        a dead field since it was added) and links the opportunity to a
+        long-lived Problem identity that survives wording changes across
+        weeks (architecture review §4/§5).
         """
         opportunities = self.detect(signals, domain=domain)
         if not opportunities:
             return 0
 
+        signals_by_id = {s.id: s for s in signals}
         inserted = 0
         with database.get_connection() as conn:
             for opp in opportunities:
+                cluster_signals = [signals_by_id[sid] for sid in opp.signal_ids if sid in signals_by_id]
+                opp.entity_ids = canonicalizer.resolve_entity_ids(cluster_signals, domain)
+                opp.problem_id, _match = canonicalizer.resolve_problem(
+                    opp.entity_ids, opp.title, domain, opp.week_key, conn,
+                )
+
                 row = opp.to_db_row()
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO opportunities
                       (id, title, description, signal_ids, entity_ids,
                        scores, composite_score, status, week_key,
-                       created_at, updated_at, domain)
+                       created_at, updated_at, domain, problem_id)
                     VALUES
                       (:id, :title, :description, :signal_ids, :entity_ids,
                        :scores, :composite_score, :status, :week_key,
-                       :created_at, :updated_at, :domain)
+                       :created_at, :updated_at, :domain, :problem_id)
                     """,
                     row,
                 )
