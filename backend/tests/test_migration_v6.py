@@ -60,12 +60,17 @@ class TestSchemaV6:
             columns = {r["name"] for r in conn.execute("PRAGMA table_info(opportunities)").fetchall()}
         assert "problem_id" in columns
 
-    def test_schema_version_is_6(self, fresh_db):
+    def test_schema_version_is_at_least_6(self, fresh_db):
+        """A fresh database always ends up at the current SCHEMA_VERSION
+        (now 7, since schema v7 added problem_history) — this test just
+        confirms v6's migration ran as part of that chain, not that v6
+        is the final version."""
         with database.get_connection() as conn:
             version = conn.execute(
                 "SELECT version FROM schema_info ORDER BY version DESC LIMIT 1"
             ).fetchone()["version"]
-        assert version == database.SCHEMA_VERSION == 6
+        assert version == database.SCHEMA_VERSION
+        assert version >= 6
 
 
 class TestBackfillOfPreV6Opportunities:

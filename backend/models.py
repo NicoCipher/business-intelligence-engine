@@ -325,6 +325,89 @@ class Problem:
         }
 
 
+# ── ProblemHistoryEvent ───────────────────────────────────────────────────
+
+VALID_HISTORY_EVENT_TYPES = frozenset([
+    "created", "evidence_added", "confidence_updated",
+    "status_changed", "merged", "split",
+])
+
+
+@dataclass
+class ProblemHistoryEvent:
+    """
+    One append-only event in a Problem's timeline (schema v7).
+
+    Why this exists as a separate table rather than arrays-on-Problem:
+    Problem stores only the current canonical state (see its docstring —
+    entity_ids is already an accumulated union, not a history). Growing
+    JSON arrays on that row would mean rewriting an ever-larger blob on
+    every match, no per-event querying, and unbounded row growth over
+    years of weekly runs. problem_history is a normal append-only child
+    table instead — one row per event, indexed, cheap to query or prune.
+
+    Event types currently written by the pipeline:
+      - "created"         — a new Problem was established (no match found).
+      - "evidence_added"   — an existing Problem matched a new observation
+                              (opportunity_engine/canonicalizer.py).
+    Event types defined for future use, not yet written by any code path
+    (Problem has no status field and no merge/split logic yet — adding
+    those is separate, larger work, not smuggled in here):
+      - "confidence_updated", "status_changed", "merged", "split".
+
+    `metadata` is intentionally flexible (JSON) rather than a fixed set of
+    columns — different event types carry different facts (a match score,
+    a status transition, a merge target), and forcing one rigid schema
+    across all of them would mean either NULL-heavy columns or constant
+    migrations as new event types are added.
+    """
+    problem_id: str
+    event_type: str
+    domain: str = "business"
+    week_key: str = ""
+    opportunity_id: str = ""
+    metadata: dict = field(default_factory=dict)
+    occurred_at: str = field(default_factory=_now)
+    id: str = field(default_factory=_uuid)
+    created_at: str = field(default_factory=_now)
+
+    def __post_init__(self):
+        if self.event_type not in VALID_HISTORY_EVENT_TYPES:
+            raise ValueError(
+                f"Invalid history event_type '{self.event_type}'. "
+                f"Must be one of {VALID_HISTORY_EVENT_TYPES}"
+            )
+
+    def to_db_row(self) -> dict:
+        import json
+        return {
+            "id":             self.id,
+            "problem_id":     self.problem_id,
+            "domain":         self.domain,
+            "event_type":     self.event_type,
+            "occurred_at":    self.occurred_at,
+            "week_key":       self.week_key,
+            "opportunity_id": self.opportunity_id,
+            "metadata":       json.dumps(self.metadata, default=str),
+            "created_at":     self.created_at,
+        }
+
+    @classmethod
+    def from_db_row(cls, row) -> "ProblemHistoryEvent":
+        import json
+        return cls(
+            id=row["id"],
+            problem_id=row["problem_id"],
+            domain=row["domain"],
+            event_type=row["event_type"],
+            occurred_at=row["occurred_at"],
+            week_key=row["week_key"] or "",
+            opportunity_id=row["opportunity_id"] or "",
+            metadata=json.loads(row["metadata"] or "{}"),
+            created_at=row["created_at"],
+        )
+
+
 @dataclass
 class Opportunity:
     """

@@ -323,9 +323,12 @@ class TestMigrationV4MergesExistingDuplicates:
     def test_migration_runs_cleanly_on_fresh_database(self, fresh_db):
         """initialize() already ran _migrate_v4 once for this fixture (via
         the normal startup path) — must not have raised, and the schema
-        must report version 4."""
+        must report the current SCHEMA_VERSION (now 7; this test only
+        needs to confirm v4 ran as part of that chain, not that v4 is
+        the final version)."""
         with database.get_connection() as conn:
             version = conn.execute(
                 "SELECT version FROM schema_info ORDER BY version DESC LIMIT 1"
             ).fetchone()["version"]
-        assert version == database.SCHEMA_VERSION == 6
+        assert version == database.SCHEMA_VERSION
+        assert version >= 4

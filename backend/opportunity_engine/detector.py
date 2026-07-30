@@ -172,7 +172,10 @@ class PatternDetector:
         this is what actually populates entity_ids (previously always [],
         a dead field since it was added) and links the opportunity to a
         long-lived Problem identity that survives wording changes across
-        weeks (architecture review §4/§5).
+        weeks (architecture review §4/§5). Every resolution also appends
+        a problem_history event (schema v7, persistent Problem memory) —
+        "created" or "evidence_added" — so the Problem's full timeline is
+        recorded, not just its current accumulated state.
         """
         opportunities = self.detect(signals, domain=domain)
         if not opportunities:
@@ -186,6 +189,7 @@ class PatternDetector:
                 opp.entity_ids = canonicalizer.resolve_entity_ids(cluster_signals, domain)
                 opp.problem_id, _match = canonicalizer.resolve_problem(
                     opp.entity_ids, opp.title, domain, opp.week_key, conn,
+                    opportunity_id=opp.id,
                 )
 
                 row = opp.to_db_row()

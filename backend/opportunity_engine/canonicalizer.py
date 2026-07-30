@@ -29,6 +29,7 @@ import logging
 
 import database
 from knowledge_graph.extractor import EntityExtractor
+from opportunity_engine import problem_history
 from opportunity_engine.similarity import title_tokens, jaccard
 from models import Signal, Problem
 
@@ -134,7 +135,14 @@ def find_match(entity_ids: list[str], title: str, domain: str, conn) -> dict | N
     }
 
 
-def resolve_problem(entity_ids: list[str], title: str, domain: str, week_key: str, conn) -> tuple[str, dict | None]:
+def resolve_problem(
+    entity_ids: list[str],
+    title: str,
+    domain: str,
+    week_key: str,
+    conn,
+    opportunity_id: str = "",
+) -> tuple[str, dict | None]:
     """
     Resolve (and update, or create) the canonical Problem for a new
     opportunity. This is the one function detector.py calls.
@@ -149,6 +157,20 @@ def resolve_problem(entity_ids: list[str], title: str, domain: str, week_key: st
     Problem (e.g. two differently-worded clusters both resolving to one
     underlying pain point) — otherwise a single pipeline run could
     inflate weeks_seen by more than one real week.
+
+    `opportunity_id` is optional (defaults to "") and purely additive —
+    when supplied it's recorded on the resulting problem_history event so
+    the timeline can be traced back to the specific observation that
+    produced it (schema v7). Existing callers that don't pass it keep
+    working unchanged; the event is still recorded, just without that
+    cross-reference.
+
+    Every branch below writes exactly one problem_history event via
+    opportunity_engine.problem_history.record_event() — "created" for a
+    genuinely new Problem, "evidence_added" for a match — in the same
+    transaction as the problems table write, so the two can never
+    diverge (a Problem row without a corresponding origin event, or vice
+    versa).
     """
     match = find_match(entity_ids, title, domain, conn)
 
@@ -163,6 +185,15 @@ def resolve_problem(entity_ids: list[str], title: str, domain: str, week_key: st
               (:id, :domain, :title, :entity_ids, :first_seen, :last_seen, :weeks_seen, :created_at, :updated_at)
             """,
             row,
+        )
+        problem_history.record_event(
+            conn,
+            problem.id,
+            domain,
+            "created",
+            week_key=week_key,
+            opportunity_id=opportunity_id,
+            metadata={"title": title, "entity_count": len(entity_ids)},
         )
         logger.info(f"[{domain}] New Problem created: '{title[:60]}'")
         return problem.id, None
@@ -186,6 +217,21 @@ def resolve_problem(entity_ids: list[str], title: str, domain: str, week_key: st
         WHERE id = ?
         """,
         (json.dumps(merged_entity_ids), database._now(), new_weeks_seen, database._now(), problem_id),
+    )
+    problem_history.record_event(
+        conn,
+        problem_id,
+        domain,
+        "evidence_added",
+        week_key=week_key,
+        opportunity_id=opportunity_id,
+        metadata={
+            "title": title,
+            "matched_title": match["matched_title"],
+            "match_score": match["match_score"],
+            "new_entity_count": len(entity_ids),
+            "weeks_seen": new_weeks_seen,
+        },
     )
     logger.info(
         f"[{domain}] '{title[:60]}' matched Problem {problem_id[:8]}... "

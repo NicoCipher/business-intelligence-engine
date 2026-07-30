@@ -35,7 +35,7 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # Full DDL. CREATE IF NOT EXISTS makes this idempotent — safe to call on
 # every startup without worrying about duplicate table errors.
@@ -169,6 +169,30 @@ CREATE TABLE IF NOT EXISTS problems (
 CREATE INDEX IF NOT EXISTS idx_problems_domain ON problems(domain);
 
 
+-- ── Problem History ───────────────────────────────────────────────────────
+-- Append-only event log for a Problem's timeline (schema v7). Problem
+-- itself stores only current canonical state; this table stores the
+-- complete evidence and change timeline as one row per event. See
+-- models.py's ProblemHistoryEvent docstring for why this is normalized
+-- rather than JSON arrays on the problems row.
+
+CREATE TABLE IF NOT EXISTS problem_history (
+    id             TEXT PRIMARY KEY,
+    problem_id     TEXT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+    domain         TEXT NOT NULL DEFAULT 'business',
+    event_type     TEXT NOT NULL,   -- created|evidence_added|confidence_updated|status_changed|merged|split
+    occurred_at    TEXT NOT NULL,
+    week_key       TEXT DEFAULT '',
+    opportunity_id TEXT DEFAULT '', -- the observation that triggered this event, if any (plain reference, not FK — consistent with opportunities.problem_id)
+    metadata       TEXT DEFAULT '{}', -- JSON: event-type-specific payload
+    created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_problem_history_problem  ON problem_history(problem_id);
+CREATE INDEX IF NOT EXISTS idx_problem_history_type     ON problem_history(event_type);
+CREATE INDEX IF NOT EXISTS idx_problem_history_occurred ON problem_history(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_problem_history_domain   ON problem_history(domain);
+
+
 -- ── Weekly Reports ────────────────────────────────────────────────────────
 
 -- One report per (week_key, domain) — each active domain gets its own
@@ -256,6 +280,9 @@ def initialize() -> None:
 
         if current_version < 6:
             _migrate_v6(conn)
+
+        if current_version < 7:
+            _migrate_v7(conn)
 
         if current_version < SCHEMA_VERSION:
             conn.execute(
@@ -627,6 +654,84 @@ def _migrate_v6(conn) -> None:
     conn.commit()
 
 
+def _migrate_v7(conn) -> None:
+    """
+    Migration v6 → v7: persistent Problem memory (problem_history table).
+
+    Adds `problem_history` — the append-only event timeline for a Problem
+    (models.py's ProblemHistoryEvent). Problem itself continues to store
+    only current canonical state (title, entity_ids, first_seen, last_seen,
+    weeks_seen); this table stores the full timeline as one row per event.
+    Written going forward by opportunity_engine/canonicalizer.py's
+    resolve_problem() — "created" when a new Problem is established,
+    "evidence_added" when an existing one matches a new observation.
+
+    Backfill for existing (pre-v7) problems: each gets exactly one
+    synthetic "created" event, occurred_at = the problem's own first_seen,
+    with metadata explicitly marked backfilled=True. This is an honest,
+    explicitly-limited backfill, following the same principle _migrate_v6
+    used for opportunities: pre-v7 problems were never tracked event-by-
+    event, so there is no real per-week timeline to reconstruct — only
+    weeks_seen (a count) survives, not which weeks. Fabricating one
+    evidence_added event per counted week would misrepresent data that
+    was never actually recorded. Each old Problem gets a truthful single
+    origin marker instead; new events accumulate correctly from here on.
+
+    Idempotent: only backfills problems that have zero existing
+    problem_history rows, so re-running this is a no-op the second time.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS problem_history (
+            id             TEXT PRIMARY KEY,
+            problem_id     TEXT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+            domain         TEXT NOT NULL DEFAULT 'business',
+            event_type     TEXT NOT NULL,
+            occurred_at    TEXT NOT NULL,
+            week_key       TEXT DEFAULT '',
+            opportunity_id TEXT DEFAULT '',
+            metadata       TEXT DEFAULT '{}',
+            created_at     TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_problem_history_problem  ON problem_history(problem_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_problem_history_type     ON problem_history(event_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_problem_history_occurred ON problem_history(occurred_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_problem_history_domain  ON problem_history(domain)")
+
+    unbacked = conn.execute(
+        """
+        SELECT p.id, p.domain, p.title, p.first_seen
+        FROM problems p
+        LEFT JOIN problem_history h ON h.problem_id = p.id
+        WHERE h.id IS NULL
+        """
+    ).fetchall()
+
+    for problem in unbacked:
+        conn.execute(
+            """
+            INSERT INTO problem_history
+              (id, problem_id, domain, event_type, occurred_at, week_key, opportunity_id, metadata, created_at)
+            VALUES (?, ?, ?, 'created', ?, '', '', ?, ?)
+            """,
+            (
+                str(uuid.uuid4()),
+                problem["id"],
+                problem["domain"],
+                problem["first_seen"],
+                json.dumps({"title": problem["title"], "backfilled": True}),
+                _now(),
+            ),
+        )
+
+    if unbacked:
+        logger.info(f"Migration v7: backfilled {len(unbacked)} problem(s) with an initial 'created' history event")
+
+    conn.commit()
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 def _now() -> str:
@@ -653,10 +758,12 @@ def get_stats() -> dict:
     """Return a summary of database contents for health checks and the UI."""
     with get_connection() as conn:
         return {
-            "signals":       conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0],
-            "opportunities": conn.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0],
-            "entities":      conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0],
-            "reports":       conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0],
+            "signals":         conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0],
+            "opportunities":   conn.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0],
+            "entities":        conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0],
+            "problems":        conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0],
+            "problem_history": conn.execute("SELECT COUNT(*) FROM problem_history").fetchone()[0],
+            "reports":         conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0],
             "latest_signal": (
                 conn.execute(
                     "SELECT collected_at FROM signals ORDER BY collected_at DESC LIMIT 1"

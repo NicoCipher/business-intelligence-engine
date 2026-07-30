@@ -18,7 +18,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import database
-from opportunity_engine import canonicalizer
+from opportunity_engine import canonicalizer, problem_history
 from knowledge_graph.extractor import EntityExtractor
 
 
@@ -187,3 +187,85 @@ class TestResolveProblem:
             conn.commit()
         assert biz_id != sec_id
         assert match is None  # cybersecurity has no prior problems of its own
+
+
+class TestResolveProblemHistory:
+    """
+    Schema v7: resolve_problem must write exactly one problem_history
+    event per call, in the same transaction as the problems table write,
+    so a Problem row and its origin event can never diverge.
+    """
+
+    def test_new_problem_writes_a_created_event(self, fresh_db):
+        with database.get_connection() as conn:
+            problem_id, _ = canonicalizer.resolve_problem(
+                ["e1", "e2"], "A brand new pattern", "business", "2026-W01", conn,
+            )
+            conn.commit()
+            events = problem_history.list_for_problem(conn, problem_id)
+        assert len(events) == 1
+        assert events[0].event_type == "created"
+        assert events[0].metadata["title"] == "A brand new pattern"
+        assert events[0].metadata["entity_count"] == 2
+
+    def test_match_writes_an_evidence_added_event(self, fresh_db):
+        with database.get_connection() as conn:
+            _insert_problem(conn, "p1", "Therapist notes tool", "business",
+                             ["e1", "e2", "e3"], "2026-01-01T00:00:00Z")
+            conn.commit()
+            problem_id, match = canonicalizer.resolve_problem(
+                ["e1", "e2"], "Clinical session documentation", "business", "2026-W02", conn,
+            )
+            conn.commit()
+            events = problem_history.list_for_problem(conn, "p1")
+        assert len(events) == 1
+        assert events[0].event_type == "evidence_added"
+        assert events[0].metadata["match_score"] == match["match_score"]
+        assert events[0].metadata["title"] == "Clinical session documentation"
+
+    def test_repeated_matches_accumulate_multiple_events(self, fresh_db):
+        with database.get_connection() as conn:
+            problem_id, _ = canonicalizer.resolve_problem(
+                ["e1", "e2"], "Original pattern", "business", "2026-W01", conn,
+            )
+            conn.commit()
+            canonicalizer.resolve_problem(
+                ["e1", "e2"], "Same pattern, week 2", "business", "2026-W02", conn,
+            )
+            conn.commit()
+            canonicalizer.resolve_problem(
+                ["e1", "e2"], "Same pattern, week 3", "business", "2026-W03", conn,
+            )
+            conn.commit()
+            events = problem_history.list_for_problem(conn, problem_id)
+        assert [e.event_type for e in events] == ["created", "evidence_added", "evidence_added"]
+
+    def test_opportunity_id_is_threaded_through_to_the_event(self, fresh_db):
+        with database.get_connection() as conn:
+            problem_id, _ = canonicalizer.resolve_problem(
+                ["e1"], "A pattern", "business", "2026-W01", conn,
+                opportunity_id="opp-123",
+            )
+            conn.commit()
+            events = problem_history.list_for_problem(conn, problem_id)
+        assert events[0].opportunity_id == "opp-123"
+
+    def test_opportunity_id_defaults_to_empty_string(self, fresh_db):
+        """Backward compatibility: existing callers that don't pass
+        opportunity_id must keep working, and the event is still recorded."""
+        with database.get_connection() as conn:
+            problem_id, _ = canonicalizer.resolve_problem(
+                ["e1"], "A pattern", "business", "2026-W01", conn,
+            )
+            conn.commit()
+            events = problem_history.list_for_problem(conn, problem_id)
+        assert events[0].opportunity_id == ""
+
+    def test_history_event_domain_matches_problem_domain(self, fresh_db):
+        with database.get_connection() as conn:
+            problem_id, _ = canonicalizer.resolve_problem(
+                ["e1"], "A pattern", "cybersecurity", "2026-W01", conn,
+            )
+            conn.commit()
+            events = problem_history.list_for_problem(conn, problem_id)
+        assert events[0].domain == "cybersecurity"
