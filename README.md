@@ -1,6 +1,13 @@
 # BIA-OS — Business Intelligence Autonomous Operating System
 
-> Version 1 · Opportunity Discovery
+> Originally scoped as "Version 1 · Opportunity Discovery." The system
+> has since grown well past that scope (knowledge graph, canonical
+> Problem identity, persistent Problem memory) without this README being
+> kept in sync. **For the current architecture, read `docs/ARCHITECTURE.md`
+> and `docs/SCHEMA.md` instead of the sections below** — they describe
+> what actually exists today. This file is left mostly as originally
+> written rather than silently rewritten; see `docs/HANDOFF.md` for
+> session-to-session continuity.
 
 ---
 
@@ -8,11 +15,16 @@
 
 BIA-OS observes the public internet, detects patterns across multiple unrelated sources, scores them as business opportunities, and explains its reasoning. It does not hallucinate trends. It does not invent statistics. Every claim traces to a specific observed signal.
 
-Version 1 has one responsibility: **discover opportunities**. Nothing else.
+Version 1 had one responsibility: **discover opportunities**. That responsibility still holds — everything built since (the knowledge graph, canonical Problem identity, persistent Problem memory) exists in service of doing that discovery more reliably across time, not replacing it.
 
 ---
 
 ## Architecture
+
+The diagram below is the original Version 1 shape and is now incomplete
+— it predates the knowledge graph, Problem identity, and Problem memory
+entirely. **See `docs/ARCHITECTURE.md` for the current data flow.** Kept
+here only for historical context:
 
 ```
 Public Internet (HN · Reddit · RSS)
@@ -146,6 +158,11 @@ bia-os/
 │   └── api/
 │       ├── opportunities.py        GET/PATCH opportunity endpoints
 │       └── signals.py              GET signal feed + stats
+├── docs/
+│   ├── ARCHITECTURE.md             current-state architecture (start here, not the section above)
+│   ├── SCHEMA.md                   full schema version history (v1-v7)
+│   ├── HANDOFF.md                  session-to-session continuity doc
+│   └── PROBLEM_MEMORY_VALIDATION.md  schema v7 validation report
 └── README.md
 ```
 
@@ -163,11 +180,16 @@ These rules are enforced by convention, not by tooling (yet):
 
 ---
 
-## Future modules (not Version 1)
+## Future modules (not yet built)
 
-These modules are planned but must not be built until Version 1 is reliable:
+Updated from the original Version 1 list — Knowledge Graph is no longer
+future work, it's been built and is at schema v5 (domain-scoped). See
+`docs/ARCHITECTURE.md`'s "What's explicitly not built yet" section for
+the accurate, current version of this list — it also covers what schema
+v7 (Persistent Problem Memory) does and doesn't include, which the list
+below predates entirely.
 
-- **Knowledge Graph** — entity extraction + relationship mapping
+Still genuinely not built, as of the original Version 1 scoping:
 - **Business Generator** — from opportunity to business model outline
 - **Execution Agents** — draft outreach messages, content, proposals
 - **Revenue Tracker** — connect outcomes to opportunities
