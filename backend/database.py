@@ -127,7 +127,15 @@ CREATE TABLE IF NOT EXISTS signals (
 -- Dedup is scoped per domain: shared collectors (e.g. Hacker News) persist
 -- one independent copy of the same source item for every active domain,
 -- so each domain scores and stores its own row. See pipeline.py.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_dedup     ON signals(source, source_id, domain);
+-- NOTE: idx_signals_dedup is NOT created here. It references signals.domain,
+-- which only exists after _migrate_v2() runs on a database older than v2 —
+-- this DDL block runs unconditionally on every initialize() call, before
+-- any migration, so creating it here would fail with "no such column:
+-- domain" against any pre-v2 database, before _migrate_v2() ever gets the
+-- chance to add it. _migrate_v3() (the migration that made this index
+-- domain-aware in the first place) is responsible for guaranteeing it
+-- exists in the correct shape, for both a pre-existing 2-column index and
+-- a database with no such index at all yet.
 CREATE        INDEX IF NOT EXISTS idx_signals_source    ON signals(source);
 CREATE        INDEX IF NOT EXISTS idx_signals_collected ON signals(collected_at DESC);
 CREATE        INDEX IF NOT EXISTS idx_signals_processed ON signals(processed);
@@ -155,7 +163,13 @@ CREATE TABLE IF NOT EXISTS opportunities (
 CREATE INDEX IF NOT EXISTS idx_opp_composite ON opportunities(composite_score DESC);
 CREATE INDEX IF NOT EXISTS idx_opp_status    ON opportunities(status);
 CREATE INDEX IF NOT EXISTS idx_opp_week      ON opportunities(week_key DESC);
-CREATE INDEX IF NOT EXISTS idx_opp_problem   ON opportunities(problem_id);
+-- NOTE: idx_opp_problem is NOT created here — same reasoning as
+-- idx_entities_domain above. It references opportunities.problem_id,
+-- which only exists after _migrate_v6() runs on a database older than
+-- v6; creating it in this unconditional pre-migration DDL block fails
+-- with "no such column: problem_id" against any pre-v6 database.
+-- _migrate_v6() already creates this index itself, after its own
+-- ALTER TABLE call, in the correct order.
 
 
 -- ── Problems ──────────────────────────────────────────────────────────────
@@ -209,7 +223,8 @@ CREATE INDEX IF NOT EXISTS idx_problem_history_domain   ON problem_history(domai
 -- One report per (week_key, domain) — each active domain gets its own
 -- weekly briefing. The uniqueness constraint is a composite index rather
 -- than an inline UNIQUE on week_key so multiple domains can each have a
--- report for the same week (see idx_reports_week_domain below).
+-- report for the same week (idx_reports_week_domain, created by
+-- _migrate_v3() — see the NOTE just below the table definition).
 CREATE TABLE IF NOT EXISTS reports (
     id           TEXT PRIMARY KEY,
     week_key     TEXT NOT NULL,
@@ -221,7 +236,13 @@ CREATE TABLE IF NOT EXISTS reports (
     created_at   TEXT NOT NULL,
     domain       TEXT NOT NULL DEFAULT 'business'  -- originating domain id
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_week_domain ON reports(week_key, domain);
+-- NOTE: idx_reports_week_domain is NOT created here — same reasoning as
+-- idx_signals_dedup above. It references reports.domain, which only
+-- exists after _migrate_v2() runs on a database older than v2.
+-- _migrate_v3() already creates this index itself, unconditionally, at
+-- the end of its own function — after both _migrate_v2()'s ALTER TABLE
+-- and its own table-rebuild step have guaranteed the domain column and
+-- correct table shape exist.
 
 
 -- ── Schema Version ────────────────────────────────────────────────────────
@@ -350,13 +371,25 @@ def _migrate_v3(conn) -> None:
 
     Both operations are idempotent — safe to run against a fresh database
     (where the final-shape DDL already matches) or an existing v2 database.
+
+    idx_signals_dedup is no longer created by the unconditional DDL block
+    (it references signals.domain, which doesn't exist pre-v2 — see the
+    NOTE next to signals' indexes in _SCHEMA_DDL) — this function is the
+    sole place that guarantees it exists, covering both "exists with the
+    old 2-column shape" and "doesn't exist at all yet."
     """
     # ── signals: rebuild the dedup index to include domain ─────────────
     existing_indexes = {
         row["name"]
         for row in conn.execute("PRAGMA index_list(signals)").fetchall()
     }
-    if "idx_signals_dedup" in existing_indexes:
+    if "idx_signals_dedup" not in existing_indexes:
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_signals_dedup "
+            "ON signals(source, source_id, domain)"
+        )
+        logger.info("Migration v3: created idx_signals_dedup (source, source_id, domain)")
+    else:
         index_info = conn.execute(
             "PRAGMA index_info(idx_signals_dedup)"
         ).fetchall()
@@ -637,8 +670,16 @@ def _migrate_v6(conn) -> None:
     opp_columns = {row["name"] for row in conn.execute("PRAGMA table_info(opportunities)").fetchall()}
     if "problem_id" not in opp_columns:
         conn.execute("ALTER TABLE opportunities ADD COLUMN problem_id TEXT DEFAULT ''")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_opp_problem ON opportunities(problem_id)")
         logger.info("Migration v6: added opportunities.problem_id")
+
+    # NOT nested inside the column-existence check above: on a fresh
+    # database, problem_id already exists (it's in the DDL's own CREATE
+    # TABLE), so that check is False and this index would never be
+    # created if it lived inside it — exactly the bug that was found and
+    # fixed for idx_entities_domain/idx_rel_domain in _migrate_v5 (see
+    # that function for the same reasoning). IF NOT EXISTS makes this
+    # safe to run unconditionally either way.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_opp_problem ON opportunities(problem_id)")
 
     unlinked = conn.execute(
         "SELECT id, title, domain, created_at FROM opportunities WHERE problem_id IS NULL OR problem_id = ''"
