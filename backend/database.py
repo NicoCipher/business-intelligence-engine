@@ -59,7 +59,15 @@ CREATE TABLE IF NOT EXISTS entities (
 );
 CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
 CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name COLLATE NOCASE);
-CREATE INDEX IF NOT EXISTS idx_entities_domain ON entities(domain);
+-- NOTE: idx_entities_domain (like the UNIQUE(type, name, domain) index) is
+-- created at the end of _migrate_v5(), not here. Same reasoning as the
+-- UNIQUE index below: this DDL block runs unconditionally on every
+-- initialize() call, before any migration — an existing pre-v5 database
+-- doesn't have the domain column yet at that point, so an index
+-- referencing it here would fail with "no such column: domain" before
+-- _migrate_v5() ever gets the chance to add it. (This exact bug shipped
+-- and was live for a while — see docs/PROBLEM_MEMORY_VALIDATION.md and
+-- the CI investigation that found it.)
 -- NOTE: the UNIQUE(type, name, domain) index is created at the end of
 -- _migrate_v4()/_migrate_v5(), not here — same reasoning as before:
 -- creating it unconditionally here would fail against any existing
@@ -83,7 +91,10 @@ CREATE TABLE IF NOT EXISTS relationships (
     updated_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rel_from   ON relationships(from_id);
-CREATE INDEX IF NOT EXISTS idx_rel_domain ON relationships(domain);
+-- NOTE: idx_rel_domain is created at the end of _migrate_v5(), not here —
+-- same reasoning as idx_entities_domain above (see that NOTE for the
+-- full explanation of why an unconditional index on a migration-added
+-- column here breaks pre-v5 databases).
 -- NOTE: the UNIQUE(from_id, to_id, type, domain) index is created at the
 -- end of _migrate_v5(), not here — same reasoning as idx_entities above.
 CREATE INDEX IF NOT EXISTS idx_rel_to     ON relationships(to_id);
