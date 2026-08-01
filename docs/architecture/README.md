@@ -29,8 +29,8 @@ Read these first.
 | File | Purpose |
 |------|---------|
 | 00_ARCHITECTURE_SPECIFICATION.md | Overall architectural vision and system boundaries. |
-| 01_INTELLIGENCE_PHILOSOPHY.md | Core philosophy behind intelligence generation. |
-| 02_INTELLIGENCE_MODEL.md | Defines the conceptual intelligence model. |
+| 01_ENGINE_PHILOSOPHY.md | Core philosophy behind intelligence generation. |
+| 02_INTELLIGENCE_PRINCIPLES.md | Defines the conceptual intelligence model. |
 | 03_SYSTEM_ARCHITECTURE.md | High-level system organization. |
 | 04_DATA_MODEL.md | Canonical intelligence objects and their relationships. |
 | 05_PIPELINE_ARCHITECTURE.md | Intelligence processing pipeline. |

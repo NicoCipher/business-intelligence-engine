@@ -149,9 +149,9 @@ Reports describe Problems.
 
 ## Definition
 
-An Opportunity is a time-bound commercial assessment of a Problem.
+An Opportunity is a time-bound commercial assessment of a Problem, captured as a dated, immutable observation.
 
-Unlike Problems, Opportunities are expected to change.
+Each Opportunity is generated once, at detection time, and is never edited afterward.
 
 Opportunity attributes may include:
 
@@ -160,9 +160,9 @@ Opportunity attributes may include:
 - recommendations
 - supporting evidence
 
-Opportunities may expire.
+An Opportunity's relevance can become stale over time. Staleness is expressed by newer Opportunities linked to the same Problem, or by the Problem's own accumulated state — never by rewriting an existing Opportunity.
 
-Problems do not.
+Problems persist. Opportunities are the dated evidence trail that accumulates against them.
 
 ---
 
@@ -182,29 +182,37 @@ Identity depends upon the underlying concept represented by the object.
 
 # 10. Historical Evolution
 
-Objects evolve differently.
+Every canonical object falls into exactly one of two categories: an immutable historical observation, or a mutable canonical identity.
+
+## Immutable Historical Observations
+
+Signals and Opportunities are dated records of something that was true at a specific point in time. Each individual record is created once and never edited. New understanding is captured by creating new records, not by rewriting old ones.
 
 Signals
 
-- immutable
-
-Entities
-
-- accumulate references
-
-Relationships
-
-- accumulate evidence
-
-Problems
-
-- accumulate intelligence
+- immutable; append-only
 
 Opportunities
 
-- represent current assessments
+- immutable; one record per detection, linked to a Problem
 
-This distinction is fundamental.
+## Mutable Canonical Identities
+
+Entities, Relationships, and Problems represent an ongoing concept that accumulates evidence and current state across many observations. Their identity persists even as specific fields on them legitimately change over time. This is not a violation of historical integrity, provided the observations that produced that state — Signals, Opportunities, and any dedicated history record such as Problem Memory — remain intact and reconstructable elsewhere.
+
+Entities
+
+- accumulate references; current relevance state may change (lifecycle); identity and extraction history remain intact
+
+Relationships
+
+- accumulate evidence; current relevance state may change (lifecycle); identity and extraction history remain intact
+
+Problems
+
+- accumulate intelligence (recurrence, evidence, history); current summary fields (for example, last observed, times seen) update as new evidence arrives; full evolution is separately preserved in Problem Memory
+
+This distinction is fundamental: mutating a current-state field on a canonical identity is not the same as rewriting history, as long as the evidence trail that produced that state is preserved elsewhere and remains reconstructable.
 
 ---
 

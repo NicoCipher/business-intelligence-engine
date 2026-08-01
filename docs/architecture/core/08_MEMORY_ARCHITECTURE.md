@@ -140,6 +140,8 @@ Historical additions strengthen understanding.
 
 Historical deletion weakens understanding.
 
+A canonical object may still carry a small number of current-state fields that update in place — for example, an Entity's or Relationship's current lifecycle state, or a Problem's last-observed timestamp. This is not a rewrite of history, provided the evidence that produced each state change remains available: either as the underlying Signals and Opportunities themselves, or as a dedicated append-only history record such as Problem Memory. Current state summarizes. It does not replace the underlying evidence.
+
 ---
 
 # 10. Historical Continuity
@@ -192,6 +194,12 @@ Future memory may include:
 These extend the memory architecture.
 
 They do not replace it.
+
+## Current Implementation Note
+
+As of schema v8, Entities and Relationships carry a current lifecycle state (active, dormant, archived) plus the timestamp of its last change, rather than a full append-only log of every transition. This mirrors a principle already applied elsewhere in the platform's evolution: introduce the minimum structure a capability actually needs today, expand later once real usage proves the shape.
+
+A dedicated append-only lifecycle history, structurally symmetric to Problem Memory, remains a possible future enhancement consistent with the list above — it is not a current architectural requirement. Its absence today is a scope decision, not a violation of Memory Evolution's append-only principle: the evidence that produced each lifecycle transition remains fully intact and traceable through the underlying Signals, Entities, and Relationships themselves.
 
 ---
 
