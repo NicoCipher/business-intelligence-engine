@@ -201,6 +201,12 @@ These capabilities may exist around BIA.
 
 They are not BIA itself.
 
+No agent, and no future subsystem, acts autonomously in the world on a user's behalf.
+
+Sending, posting, spending, or any other action with external effect requires explicit human approval at the point of action.
+
+This constraint is permanent. It does not change as agents are added.
+
 ---
 
 # 8. Evolution

@@ -28,6 +28,10 @@ Agents own execution.
 
 This distinction is fundamental.
 
+Agents execute workflows. Agents do not execute unapproved actions in the world.
+
+Producing a recommendation is execution. Sending, posting, or spending on a user's behalf is not — that always requires explicit human approval at the point of action.
+
 If multiple agents maintain separate intelligence stores, the architecture has failed.
 
 ---
@@ -230,6 +234,16 @@ Agents use common intelligence.
 ## Explainability
 
 Every output must remain traceable.
+
+---
+
+## Human Authorization
+
+No agent acts autonomously in the world.
+
+Any action with external effect — sending, posting, spending — requires explicit human approval at the point of action.
+
+Agents propose. Humans authorize.
 
 ---
 
