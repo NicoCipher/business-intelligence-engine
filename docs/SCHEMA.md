@@ -9,7 +9,7 @@ read the corresponding `_migrate_vN()` docstring in `backend/database.py`
 directly; this file intentionally doesn't duplicate that reasoning in
 full, only enough to orient.
 
-Current version: **v7**. Defined by `database.SCHEMA_VERSION`.
+Current version: **v8**. Defined by `database.SCHEMA_VERSION`.
 
 ---
 
@@ -129,9 +129,85 @@ Read/write API: `opportunity_engine/problem_history.py`
 separate from `canonicalizer.py` since matching and recording are
 different responsibilities.
 
+## v8 — Knowledge-graph decay (lifecycle states)
+
+Added `lifecycle_state` (`active`|`dormant`|`archived`) and
+`lifecycle_updated_at` to `entities` and `relationships`. Never deletes
+anything — decay is purely a reversible state transition. Deliberately
+scoped to the knowledge graph only: `Signal` stays append-only/immutable
+and `Opportunity` stays immutable, one row per detection — neither gets
+a lifecycle here. Problem/Opportunity lifecycle (Discovery → Validation →
+Growing → Mature → Declining → Archived, per the RFC review's roadmap
+item 5) is a separate, future, explicitly-gated decision — bundling it
+into this migration would have blurred the Problem/Opportunity split
+schema v6/v7 exist to establish.
+
+**Lifecycle:** `ACTIVE → DORMANT → SOFT_ARCHIVED`. A decay pass
+(`knowledge_graph/decay.py::run_decay_pass()`) runs once per domain per
+pipeline execution — after entity extraction/persistence, before
+detection (see `pipeline.py` Stage 2.5) — and only ever moves state
+*forward* or leaves it alone. Reactivation (state moving back to
+`active`) happens exclusively in `knowledge_graph/extractor.py`'s
+`persist_results()`, on new evidence — new evidence is the only thing
+that undoes decay.
+
+**Decision factors** (all inspectable per-row, no black-box score):
+- last meaningful reference time — `updated_at`, which `persist_results()`
+  now bumps on *every* re-encounter, not just first insert. This closed
+  a real pre-existing gap: entities previously used `INSERT OR IGNORE`,
+  which touched nothing at all on a re-encounter, so a re-referenced
+  entity's `updated_at` stayed frozen at its original creation time
+  forever. Relationships already bumped `updated_at` correctly; only
+  entities had the gap.
+- connection strength — entity: count of non-archived relationships
+  referencing it; relationship: its own accumulated `weight`. Extends
+  (not immunizes) the dormant/archive thresholds by
+  `config.DECAY_PROTECTION_MULTIPLIER` when above a configurable
+  threshold.
+- referenced by any current Problem's `entity_ids` in the domain — the
+  best available concrete proxy for "importance" today. This *protects*
+  (freezes current state, skips further decay) rather than reactivates.
+
+**Extension points, explicitly not implemented:** confidence score,
+evidence quality, user-interaction signals. None of these exist
+anywhere in this codebase yet (no per-entity confidence field, no
+evidence-quality scoring distinct from the opportunity scorer's
+composite formula, no auth/user model at all). `run_decay_pass()` and
+`decide_lifecycle_state()` accept keyword-only parameters for all three,
+currently always `None`/no-op, so real signals can be wired in later
+without changing every call site again.
+
+**Two-layer matching eligibility** (`opportunity_engine/canonicalizer.py`):
+entity-Jaccard in `find_match()` is now weighted by lifecycle state via
+`opportunity_engine/similarity.py`'s new `weighted_jaccard()` (a strict
+generalization of the existing `jaccard()`, which is untouched and still
+used for title comparison). Active entities count fully; dormant
+entities count at a reduced, configurable weight
+(`config.DORMANT_MATCH_WEIGHT`); archived entities are excluded
+entirely (weight 0) from new matching — the rows themselves are never
+deleted, so they remain queryable as historical context. Entity ids with
+no corresponding `entities` row (including every pre-v8 test's bare
+synthetic ids) default to full weight, preserving exact backward
+compatibility.
+
+**Index-creation lesson applied directly:** both `idx_entities_lifecycle`
+and `idx_rel_lifecycle` are created unconditionally in `_migrate_v8()`,
+outside any column-existence guard — this is the exact fix already
+applied to `idx_opp_problem` in `_migrate_v6()` after it was found that
+nesting index creation inside a "column doesn't exist yet" guard means a
+*fresh* database (where the column already exists via the DDL's own
+`CREATE TABLE`) never gets the index at all.
+
+**Backfill:** every pre-v8 row gets `lifecycle_state = 'active'` and
+`lifecycle_updated_at` set to its own existing `updated_at` — the most
+honest available proxy for "when did this become active," since there's
+no earlier truthful timestamp, and defaulting to the migration's own
+run-time would make every pre-existing row falsely look like it just
+became active.
+
 ---
 
-## Migration discipline (applies to every version above and future ones)
+
 
 - **Migrations are immutable once shipped.** `_migrate_v4` was left
   untouched when v5/v6 needed related index changes — new migrations do

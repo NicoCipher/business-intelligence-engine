@@ -49,8 +49,10 @@ from collectors.base import persist_signals
 from collectors.hn_collector import HNCollector
 from collectors.reddit_collector import RedditCollector
 from collectors.rss_collector import RSSCollector
+import database
 from domains.base import DomainConfig
 from domains.registry import DomainRegistry
+from knowledge_graph import decay
 from knowledge_graph.extractor import EntityExtractor
 from models import Signal
 from opportunity_engine.detector import PatternDetector
@@ -69,6 +71,8 @@ class DomainRunResult:
     signals_persisted:       int  = 0
     entities_inserted:       int  = 0
     relationships_inserted:  int  = 0
+    entities_decayed:        int  = 0   # entities newly moved to dormant or archived this run
+    relationships_decayed:   int  = 0   # relationships newly moved to dormant or archived this run
     opportunities_detected:  int  = 0
     report_generated:        bool = False
 
@@ -192,6 +196,26 @@ def _run_domain(
             logger.info(
                 "[%s] extracted %d new entities, %d new relationships",
                 domain.id, counts["entities_inserted"], counts["relationships_inserted"],
+            )
+
+    # ── Stage 2.5: Knowledge-graph decay ────────────────────────────────
+    # Runs after extraction/persistence (so anything re-encountered this
+    # run has already been reactivated to 'active' before decay evaluates
+    # it — see extractor.persist_results()) and before detection (so
+    # canonical matching sees this run's current lifecycle states, not
+    # last run's). Skipped in dry_run, matching every other stage that
+    # writes to the database. See knowledge_graph/decay.py.
+    if not dry_run:
+        with database.get_connection() as conn:
+            decay_counts = decay.run_decay_pass(conn, domain=domain.id)
+        run_result.entities_decayed = decay_counts["entities_dormant"] + decay_counts["entities_archived"]
+        run_result.relationships_decayed = (
+            decay_counts["relationships_dormant"] + decay_counts["relationships_archived"]
+        )
+        if run_result.entities_decayed or run_result.relationships_decayed:
+            logger.info(
+                "[%s] decay: %d entities, %d relationships transitioned this run",
+                domain.id, run_result.entities_decayed, run_result.relationships_decayed,
             )
 
     # ── Stage 3: Detect opportunities ───────────────────────────────────

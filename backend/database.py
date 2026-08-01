@@ -35,7 +35,7 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Full DDL. CREATE IF NOT EXISTS makes this idempotent — safe to call on
 # every startup without worrying about duplicate table errors.
@@ -55,10 +55,19 @@ CREATE TABLE IF NOT EXISTS entities (
     description TEXT DEFAULT '',
     metadata    TEXT DEFAULT '{}',
     created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    lifecycle_state       TEXT NOT NULL DEFAULT 'active',  -- active|dormant|archived — see knowledge_graph/decay.py
+    lifecycle_updated_at  TEXT DEFAULT ''                   -- last time lifecycle_state itself changed (not last reference)
 );
 CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
 CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name COLLATE NOCASE);
+-- NOTE: idx_entities_lifecycle is NOT created here — same reasoning as
+-- idx_entities_domain below (this DDL block runs before any migration,
+-- so an index on a migration-added column breaks pre-v8 databases).
+-- _migrate_v8() creates it, unconditionally, outside any column-existence
+-- guard (a fresh database, where the column already exists via this
+-- CREATE TABLE, still needs the index — see that migration's docstring
+-- for the earlier bug this exact mistake caused with idx_opp_problem).
 -- NOTE: idx_entities_domain (like the UNIQUE(type, name, domain) index) is
 -- created at the end of _migrate_v5(), not here. Same reasoning as the
 -- UNIQUE index below: this DDL block runs unconditionally on every
@@ -88,9 +97,13 @@ CREATE TABLE IF NOT EXISTS relationships (
     domain      TEXT NOT NULL DEFAULT 'business',
     metadata    TEXT DEFAULT '{}',
     created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    lifecycle_state       TEXT NOT NULL DEFAULT 'active',
+    lifecycle_updated_at  TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_rel_from   ON relationships(from_id);
+-- NOTE: idx_rel_lifecycle is NOT created here — see idx_entities_lifecycle
+-- above; _migrate_v8() creates it instead, unconditionally.
 -- NOTE: idx_rel_domain is created at the end of _migrate_v5(), not here —
 -- same reasoning as idx_entities_domain above (see that NOTE for the
 -- full explanation of why an unconditional index on a migration-added
@@ -315,6 +328,9 @@ def initialize() -> None:
 
         if current_version < 7:
             _migrate_v7(conn)
+
+        if current_version < 8:
+            _migrate_v8(conn)
 
         if current_version < SCHEMA_VERSION:
             conn.execute(
@@ -780,6 +796,62 @@ def _migrate_v7(conn) -> None:
 
     if unbacked:
         logger.info(f"Migration v7: backfilled {len(unbacked)} problem(s) with an initial 'created' history event")
+
+    conn.commit()
+
+
+def _migrate_v8(conn) -> None:
+    """
+    Migration v7 → v8: knowledge-graph decay (lifecycle states).
+
+    Adds `lifecycle_state` (active|dormant|archived — see
+    knowledge_graph/decay.py) and `lifecycle_updated_at` to `entities` and
+    `relationships`. Never deletes anything — decay is purely a state
+    transition, always reversible by new evidence
+    (knowledge_graph/extractor.py's persist_results() reactivates on
+    re-encounter). Deliberately scoped to the knowledge graph only —
+    Signal stays append-only/immutable and Opportunity stays immutable;
+    neither gets a lifecycle here (that's out of scope — see
+    docs/HANDOFF.md's roadmap, which keeps Problem/Opportunity lifecycle
+    as a separate, future, explicitly-gated RFC decision).
+
+    Backfill: every pre-v8 row gets lifecycle_state='active' (the DDL's
+    own column default already handles this for the ALTER TABLE — SQLite
+    backfills a NOT NULL DEFAULT value onto every existing row
+    automatically) and lifecycle_updated_at = its own updated_at (the
+    most honest available proxy for "when did this lifecycle state
+    start" — it didn't really change at that moment, but there is no
+    earlier truthful timestamp to use, and defaulting to the migration's
+    own run-time would make every pre-existing row look like it *just*
+    became active, which is worse).
+
+    Index-creation placement is deliberately UNCONDITIONAL and OUTSIDE
+    any column-existence guard in this function — this is not a stylistic
+    choice, it's fixing the exact mistake that _migrate_v6() originally
+    made with idx_opp_problem: nesting `CREATE INDEX` inside
+    `if "problem_id" not in opp_columns` meant a FRESH database (where
+    the column already exists via the DDL's own CREATE TABLE) never got
+    the index at all, since that guard is always False there. IF NOT
+    EXISTS makes running these indexes unconditionally safe regardless of
+    whether the ALTER TABLE branch below actually ran.
+    """
+    entity_columns = {row["name"] for row in conn.execute("PRAGMA table_info(entities)").fetchall()}
+    if "lifecycle_state" not in entity_columns:
+        conn.execute("ALTER TABLE entities ADD COLUMN lifecycle_state TEXT NOT NULL DEFAULT 'active'")
+        conn.execute("ALTER TABLE entities ADD COLUMN lifecycle_updated_at TEXT DEFAULT ''")
+        conn.execute("UPDATE entities SET lifecycle_updated_at = updated_at WHERE lifecycle_updated_at = ''")
+        logger.info("Migration v8: added entities.lifecycle_state / lifecycle_updated_at")
+
+    rel_columns = {row["name"] for row in conn.execute("PRAGMA table_info(relationships)").fetchall()}
+    if "lifecycle_state" not in rel_columns:
+        conn.execute("ALTER TABLE relationships ADD COLUMN lifecycle_state TEXT NOT NULL DEFAULT 'active'")
+        conn.execute("ALTER TABLE relationships ADD COLUMN lifecycle_updated_at TEXT DEFAULT ''")
+        conn.execute("UPDATE relationships SET lifecycle_updated_at = updated_at WHERE lifecycle_updated_at = ''")
+        logger.info("Migration v8: added relationships.lifecycle_state / lifecycle_updated_at")
+
+    # Unconditional and outside both guards above — see docstring.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_entities_lifecycle ON entities(lifecycle_state)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_rel_lifecycle ON relationships(lifecycle_state)")
 
     conn.commit()
 

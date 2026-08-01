@@ -31,25 +31,38 @@ Opportunity (dated, immutable observation) → Report`.
    embeddings — postponed; agent architecture — postponed until the
    data model proves stable; multi-tenancy schema hook — elevated in
    priority despite being "not urgent."
-9. **Schema v7: persistent Problem memory.** `problem_history` table,
-   `opportunity_engine/problem_history.py`, wired into
-   `canonicalizer.resolve_problem()`. **Just completed, validated, and
-   committed locally** (see Part 5).
+9. Schema v7: persistent Problem memory (`problem_history` table,
+   `opportunity_engine/problem_history.py`).
+10. **CI investigation, three separate pushes**: found and fixed the
+    same DDL-ordering bug class three times over — `_SCHEMA_DDL` runs
+    unconditionally on every `initialize()` call, before any migration,
+    so any index referencing a migration-added column crashes any
+    database older than that migration. Fixed for
+    `idx_entities_domain`/`idx_rel_domain` (v5 boundary), then
+    `idx_signals_dedup`/`idx_opp_problem`/`idx_reports_week_domain` (v2
+    and v6 boundaries) in one comprehensive audit, which itself
+    surfaced a second bug class (index creation nested inside a
+    column-existence guard means it silently never runs on a *fresh*
+    database) — found by the audit's own new regression tests, not by
+    a reported error. Full detail:
+    `docs/PROBLEM_MEMORY_VALIDATION.md` and the `d26e891`/`bbf0722`
+    commit messages.
+11. **Schema v8: knowledge-graph decay.** `lifecycle_state` on
+    `entities`/`relationships` (active → dormant → archived, never
+    deleted, reversible on new evidence), lifecycle-weighted canonical
+    matching, decay pass wired into the pipeline as Stage 2.5. **Just
+    completed, validated, and committed locally** (see Part 5).
 
-**Current code state:** committed locally at `7e9a6c1` on top of
-`ad95a3b`. **Not yet pushed to origin** — see Part 5 for why. 341/341
-tests passing. Schema version 7. Working tree clean at time of commit.
+**Current code state:** committed locally at `bbf0722` on `origin/main`,
+plus schema v8 work committed on top locally (not yet pushed — see Part
+5). 423/423 tests passing. Schema version 8.
 
-**Active problems:** none known/open. Full validation report:
-`docs/PROBLEM_MEMORY_VALIDATION.md` — covers the real end-to-end
-pipeline check, migration verification against an authentic v6
-database, and transaction-atomicity testing. Three non-blocking pieces
-of debt were surfaced (documented there and in
-`docs/ARCHITECTURE.md`'s "Matching" section): silent zero-entity
-degradation when entity persistence is skipped, the vocabulary-coverage
-limitation of deterministic matching (now empirically demonstrated, not
-just theorized), and `detect_and_persist()`'s batch-level (not
-per-opportunity) commit granularity.
+**Active problems:** none known/open. Every DDL-ordering-class bug found
+during the CI investigation is fixed and has dedicated regression
+coverage (`test_migration_v5.py`, `test_migration_v6_upgrade.py`,
+`test_migration_v8.py`) that specifically exercises both failure modes
+(pre-migration database, and fresh database with guard-nested index
+creation) so neither recurs silently for a future migration.
 
 ## Part 2: Product Vision
 
@@ -101,25 +114,62 @@ persisting. Real trade-off, not obviously wrong, and changing it is a
 separate, larger decision (partial-batch persistence semantics) — not
 bundled into this milestone.
 
+**Decision: knowledge-graph decay is scoped to entities/relationships
+only — Signal and Opportunity stay exactly as immutable as before.**
+The original decay request bundled in Signal/Opportunity lifecycle
+states and Problem lifecycle transitions; both were pushed back on and
+descoped before implementation, since Signal/Opportunity immutability
+is a load-bearing decision from schema v6/v7, and Problem lifecycle is
+already its own separately-gated future item (Part 4, item 5 below) that
+needs real `problem_history` data to design against, not to be decided
+as a side effect of a knowledge-graph feature.
+
+**Decision: decay never reactivates; only new evidence does.** The decay
+pass (`run_decay_pass()`) only ever moves lifecycle state forward or
+leaves it alone. Reactivation lives entirely in
+`extractor.persist_results()`, on the same code path that already
+handles first-insert vs. re-encounter — one reactivation path, not two
+places that both need to agree on what "active again" means.
+
+**Decision: matching is two-layer weighted (active/dormant/archived), not
+binary include/exclude.** `weighted_jaccard()` was added as a strict
+generalization of the existing `jaccard()` rather than modifying it in
+place — every existing caller (title comparison, and every pre-v8 test)
+is provably unaffected, confirmed by the full existing suite passing
+unchanged before any new tests were added.
+
+**Decision: two DDL-ordering-bug lessons from the CI investigation were
+applied proactively, not just documented.** Schema v8's two new indexes
+(`idx_entities_lifecycle`, `idx_rel_lifecycle`) are created unconditionally
+in `_migrate_v8()`, outside any column-existence guard, from the start —
+rather than writing them the "obvious" way and discovering the same bug
+class a fourth time.
+
 ## Part 4: Future Roadmap
 
 Per the RFC review's reprioritization (supersedes the pre-RFC ordering):
 
 1. ~~Domain-scope knowledge graph~~ — done (v5).
 2. ~~`problems` table + canonical matching~~ — done (v6).
-3. ~~Persistent memory~~ — **done (v7), this milestone.**
-4. **Time-decay on the knowledge graph** — elevated during the RFC
-   review from "not listed" to next priority, ahead of hierarchy. Cheap
-   now (a last-referenced timestamp + periodic soft-archive pass); a
-   graph that only grows will quietly degrade match quality and query
-   performance over years of weekly runs if nothing ages out.
+3. ~~Persistent memory~~ — done (v7).
+4. ~~Time-decay on the knowledge graph~~ — **done (v8), this milestone.**
+   Scoped to entities/relationships only, per an explicit descope
+   decision during design (see Part 3) — Signal/Opportunity lifecycle
+   was requested but rejected as out of scope for this item.
 5. **Opportunity lifecycle** state machine (Discovery → Validation →
-   Growing → Mature → Declining → Archived) — depends on step 3
-   (now real) to derive transitions from actual evidence history, not
-   arbitrary thresholds. Explain transition logic before implementing,
-   per standing instruction.
+   Growing → Mature → Declining → Archived) — depends on persistent
+   memory (step 3, real since v7) to derive transitions from actual
+   evidence history, not arbitrary thresholds. Explain transition logic
+   before implementing, per standing instruction. Now that decay (step
+   4) is also real, this is next in the RFC's own dependency order —
+   but still needs its own design pass, not a continuation of this one;
+   see Part 3's descope decision for why decay didn't already cover it.
 6. **Evidence-quality weighting** — as a separate signal informing
    confidence/verdict, not a rewrite of the scorer's composite formula.
+   Schema v8 added the extension-point *shape* for this
+   (`decide_lifecycle_state()`'s `evidence_quality` parameter) but not
+   the signal itself — nothing in the codebase computes evidence quality
+   as a distinct value yet.
 7. Relationship hierarchy (multi-level `belongs_to`) — explicitly
    postponed by the RFC review; not enough real multi-hop data yet to
    know what depth is actually useful. Building it now risks a
@@ -140,33 +190,55 @@ Per the RFC review's reprioritization (supersedes the pre-RFC ordering):
 **Frontend note (from the RFC review, worth restating):** the
 originally-planned "backend done → build Next.js frontend" ordering was
 challenged — Problem Memory is the highest-leverage screen the frontend
-will show, and it's only as good as the history data behind it. Now that
-v7 is real, frontend scaffolding/design-system work can start in
-parallel with item 4 above, but the Problem Memory screen specifically
-should wait until there's real accumulated history to design against,
-not be built thin against v7 on day one.
+will show, and it's only as good as the history data behind it. Frontend
+scaffolding/design-system work can start any time, but the Problem
+Memory screen specifically should wait until there's real accumulated
+history to design against, not be built thin on day one.
 
 ## Part 5: Current Session Context
 
-**What happened this session:** implemented, validated, and locally
-committed schema v7 end-to-end. Full validation detail:
-`docs/PROBLEM_MEMORY_VALIDATION.md`.
+**History across sessions, most recent last:**
 
-**Not yet pushed to origin, and here's exactly why:** two GitHub
-Personal Access Tokens were pasted directly into the chat during this
-session. Both were treated as compromised the moment they appeared in
-plaintext (regardless of whether they were ever actually used) and were
-not committed anywhere or written to any file in this repo. **Whoever
-picks this up next should confirm both tokens have been revoked at
-https://github.com/settings/tokens before generating a new one and
-pushing `7e9a6c1`.** This is a process note, not a code issue — nothing
-about it affects the v7 implementation itself.
+1. Schema v7 (persistent Problem memory) was implemented, validated, and
+   pushed — `origin/main` reached `a7519cd`. Full validation detail:
+   `docs/PROBLEM_MEMORY_VALIDATION.md`.
+2. A live CI failure ("Run collection pipeline" erroring) was diagnosed
+   and fixed across two more pushes (`d26e891`, then `bbf0722` after a
+   second, related error surfaced on the next run) — the DDL-ordering
+   bug class described in Part 3 and in full in `docs/SCHEMA.md`'s
+   v5/v6 entries. `origin/main` is at `bbf0722`.
+3. This session: schema v8 (knowledge-graph decay) was designed,
+   descoped from a larger initial request (see Part 3), implemented,
+   and validated. **Committed locally, not yet pushed** — see below.
 
-**Next steps:** once pushed, the next substantive work is Part 4, item
-4 (knowledge-graph time-decay) — small, cheap, and ahead of hierarchy
-work in the reprioritized order. Recommend starting the next session by
-reading `docs/ARCHITECTURE.md` in full (it's the current-state doc now,
-not the README) plus `knowledge_graph/extractor.py`'s `persist_results()`
-and whatever currently reads `entities`/`relationships` by recency, since
-decay will most likely be a last-referenced timestamp plus a periodic
-soft-archive query against those two tables.
+**Token handling note, still relevant for whoever continues this:**
+every GitHub Personal Access Token used in this project's history was
+pasted directly into chat and therefore treated as compromised the
+moment it appeared, regardless of whether it was used. None were ever
+committed or written to any file in this repo. **Before pushing
+anything, confirm no stale token is still live at
+https://github.com/settings/tokens**, and treat any newly-provided token
+the same way — use once, then revoke.
+
+**What's sitting locally, unpushed, right now:** schema v8 — lifecycle
+states on `entities`/`relationships`, decay pass wired into the
+pipeline, lifecycle-weighted canonical matching. 423/423 tests passing.
+Verified via direct calls to `pipeline._run_domain()` (not just unit
+tests) with both empty and real injected signals, dry_run=False,
+confirming Stage 2.5 runs correctly end-to-end. Not yet committed as of
+the end of this session's work — see the conversation for the exact
+diff, or run `git status`/`git diff` before committing.
+
+**Next steps:** commit and push schema v8, then move to Part 4 item 5
+(Opportunity lifecycle state machine) — it's next in the RFC's
+dependency order now that both persistent memory (v7) and decay (v8)
+are real, but it needs its own design pass first, per the standing
+"explain transition logic before implementing" instruction, not a
+continuation of this session's descoped decay work. Recommend starting
+by reading `docs/ARCHITECTURE.md`'s "Knowledge-graph decay" section and
+`knowledge_graph/decay.py`'s module docstring, since the lifecycle
+*shape* (state names, protection-vs-reactivation distinction, extension
+points for not-yet-existing signals) is the direct precedent to follow
+for whatever Problem/Opportunity lifecycle design comes next — the same
+descope discipline (don't blur Signal/Opportunity immutability, don't
+implement systems that don't exist yet) applies there too.

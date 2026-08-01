@@ -51,12 +51,17 @@ class TestSchemaV7:
             ).fetchall()}
         assert "problem_history" in tables
 
-    def test_schema_version_is_7(self, fresh_db):
+    def test_schema_version_is_at_least_7(self, fresh_db):
+        """A fresh database always ends up at the current SCHEMA_VERSION
+        (now 8, since schema v8 added knowledge-graph decay) — this test
+        just confirms v7's migration ran as part of that chain, not that
+        v7 is the final version."""
         with database.get_connection() as conn:
             version = conn.execute(
                 "SELECT version FROM schema_info ORDER BY version DESC LIMIT 1"
             ).fetchone()["version"]
-        assert version == database.SCHEMA_VERSION == 7
+        assert version == database.SCHEMA_VERSION
+        assert version >= 7
 
     def test_problem_history_columns(self, fresh_db):
         with database.get_connection() as conn:

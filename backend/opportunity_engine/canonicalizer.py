@@ -25,12 +25,14 @@ Design, stated plainly:
     infrastructure decision, not something to back into silently here.
 """
 
+import json
 import logging
 
 import database
+from knowledge_graph import decay
 from knowledge_graph.extractor import EntityExtractor
 from opportunity_engine import problem_history
-from opportunity_engine.similarity import title_tokens, jaccard
+from opportunity_engine.similarity import title_tokens, jaccard, weighted_jaccard
 from models import Signal, Problem
 
 logger = logging.getLogger(__name__)
@@ -96,6 +98,19 @@ def find_match(entity_ids: list[str], title: str, domain: str, conn) -> dict | N
     candidate set would undermine the point. Flagged in the architecture
     review as a future scaling concern (§6), not addressed here.
 
+    Entity comparison is lifecycle-weighted (schema v8,
+    knowledge_graph/decay.py), not plain set overlap: an entity's
+    contribution to entity-Jaccard is scaled by decay.match_weight()
+    (active=1.0, dormant=reduced, archived=0/excluded). This is the
+    "two-layer matching eligibility" decision from the decay RFC review —
+    stale knowledge stops creating new matches without being deleted or
+    blocking the Problem from being retrieved as historical context.
+    Entity ids with no corresponding `entities` row (including every
+    existing test that uses bare synthetic ids) default to full weight —
+    see decay.match_weight()'s docstring for why that's the correct
+    default, not a gap. Title comparison is untouched plain jaccard()
+    throughout — titles aren't entities, they have no lifecycle.
+
     Returns {"problem_id", "matched_title", "match_score"} or None.
     """
     rows = conn.execute(
@@ -108,12 +123,15 @@ def find_match(entity_ids: list[str], title: str, domain: str, conn) -> dict | N
     new_entities = set(entity_ids)
     new_title_tokens = title_tokens(title)
 
+    candidate_entity_sets = [set(json.loads(row["entity_ids"] or "[]")) for row in rows]
+    all_entity_ids = new_entities.union(*candidate_entity_sets) if candidate_entity_sets else new_entities
+    weights = _lifecycle_match_weights(conn, domain, all_entity_ids)
+    weight_fn = lambda eid: weights.get(eid, 1.0)  # noqa: E731 — unknown id -> full weight, see decay.match_weight()
+
     best = None
     best_score = 0.0
-    for row in rows:
-        import json
-        candidate_entities = set(json.loads(row["entity_ids"] or "[]"))
-        entity_j = jaccard(new_entities, candidate_entities)
+    for row, candidate_entities in zip(rows, candidate_entity_sets):
+        entity_j = weighted_jaccard(new_entities, candidate_entities, weight_fn)
         title_j = jaccard(new_title_tokens, title_tokens(row["title"]))
 
         qualifies = entity_j >= ENTITY_MATCH_THRESHOLD or (entity_j > 0 and title_j >= TITLE_SUPPORT_THRESHOLD)
@@ -133,6 +151,24 @@ def find_match(entity_ids: list[str], title: str, domain: str, conn) -> dict | N
         "matched_title": best["title"],
         "match_score": round(best_score, 3),
     }
+
+
+def _lifecycle_match_weights(conn, domain: str, entity_ids: set[str]) -> dict[str, float]:
+    """
+    Batch-resolve match_weight() for every entity id that might appear in
+    this find_match() call, in one query instead of one per comparison.
+    Ids with no corresponding row (synthetic test ids, or genuinely
+    unknown ids) are simply absent from the returned dict — callers
+    default those to full weight via weights.get(id, 1.0).
+    """
+    if not entity_ids:
+        return {}
+    placeholders = ",".join("?" for _ in entity_ids)
+    rows = conn.execute(
+        f"SELECT id, lifecycle_state FROM entities WHERE domain = ? AND id IN ({placeholders})",
+        (domain, *entity_ids),
+    ).fetchall()
+    return {row["id"]: decay.match_weight(row["lifecycle_state"]) for row in rows}
 
 
 def resolve_problem(
@@ -204,7 +240,6 @@ def resolve_problem(
         (problem_id,),
     ).fetchone()
 
-    import json
     merged_entity_ids = sorted(set(json.loads(existing["entity_ids"] or "[]")) | set(entity_ids))
 
     already_counted_this_week = _week_key_from_iso(existing["last_seen"]) == week_key

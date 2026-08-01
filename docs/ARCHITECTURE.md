@@ -16,10 +16,12 @@ Signal (immutable event, domain-scoped, dedup on source+source_id+domain)
    │        │
    │        ▼
    │  Entity / Relationship (knowledge graph, domain-scoped — schema v5)
+   │        │  lifecycle: active → dormant → archived (schema v8, never deleted)
    │        │
    ▼        ▼
    canonical matching: opportunity_engine/canonicalizer.py
-        (entity-Jaccard primary, title-Jaccard secondary support)
+        (entity-Jaccard primary, title-Jaccard secondary support,
+         entity contribution lifecycle-weighted — schema v8)
         │
         ▼
    Problem (stable, long-lived identity — schema v6)
@@ -112,6 +114,46 @@ when the failure isn't a `sqlite3.Error` (the only exception type
 `database.get_connection()`'s explicit rollback branch catches).
 
 Full event-type table and backfill details: `docs/SCHEMA.md`'s v7 entry.
+
+## Knowledge-graph decay (schema v8)
+
+A graph that only ever grows quietly degrades match quality and query
+performance. `entities` and `relationships` now carry a `lifecycle_state`
+(`active` → `dormant` → `archived`), evaluated by
+`knowledge_graph/decay.py::run_decay_pass()` once per domain per pipeline
+run (Stage 2.5 in `pipeline.py`, between extraction and detection).
+Nothing is ever deleted; decay only ever moves state forward, and only
+new evidence (via `extractor.persist_results()`) moves it back to
+active.
+
+Deliberately scoped to the knowledge graph only — `Signal` and
+`Opportunity` both stay exactly as immutable as described above.
+Problem/Opportunity lifecycle is explicitly a separate, future,
+gated decision (see the handoff doc's roadmap); this migration doesn't
+touch either.
+
+Matching is lifecycle-weighted, not lifecycle-blind: `find_match()`'s
+entity-Jaccard now runs through `similarity.weighted_jaccard()` — active
+entities count fully, dormant entities count at a reduced configurable
+weight, archived entities are excluded from new matches entirely (but
+never deleted, so a Problem built on since-archived entities remains
+queryable as historical context). Entity ids with no corresponding
+`entities` row default to full weight — this is what keeps every
+pre-v8 test passing unchanged.
+
+Decision factors today: last-referenced recency, connection strength
+(relationship count for entities, accumulated weight for relationships),
+and whether an entity is referenced by any current Problem (the
+available proxy for "important" — protects without reactivating).
+Confidence score, evidence quality, and user-interaction signals are
+real extension points in the function signatures but are not wired to
+anything — none of those inputs exist anywhere in this codebase yet, and
+fabricating them would be worse than leaving the hooks unused until they
+do.
+
+Full detail, including the two DDL-ordering-bug lessons this migration
+deliberately applied (index creation unconditional and outside any
+column-existence guard): `docs/SCHEMA.md`'s v8 entry.
 
 ## Explainability as an architectural constraint, not a feature
 

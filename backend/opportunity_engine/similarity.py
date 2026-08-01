@@ -33,3 +33,28 @@ def jaccard(a: set, b: set) -> float:
     if not a or not b:
         return 0.0
     return len(a & b) / len(a | b)
+
+
+def weighted_jaccard(a: set, b: set, weight_fn) -> float:
+    """
+    Jaccard similarity where each member's contribution to both the
+    intersection and union is scaled by `weight_fn(member)` instead of
+    counting as a flat 1. Reduces to plain jaccard() exactly when
+    weight_fn returns 1.0 for everything — this is a generalization, not
+    a replacement, and every existing caller of jaccard() is untouched.
+
+    Built for knowledge-graph lifecycle weighting (schema v8,
+    knowledge_graph/decay.py): archived entities get weight 0 (excluded
+    from both sides, as if absent), dormant entities get a configurable
+    reduced weight, active entities (or anything with no lifecycle
+    information at all — see decay.match_weight()'s default) get full
+    weight. A member with weight 0 in `a`/`b` is dropped from
+    consideration entirely rather than distorting the denominator.
+    """
+    weighted_a = {x for x in a if weight_fn(x) > 0}
+    weighted_b = {x for x in b if weight_fn(x) > 0}
+    if not weighted_a or not weighted_b:
+        return 0.0
+    intersection = sum(weight_fn(x) for x in weighted_a & weighted_b)
+    union = sum(weight_fn(x) for x in weighted_a | weighted_b)
+    return intersection / union if union > 0 else 0.0

@@ -75,6 +75,35 @@ assert abs(sum(SCORE_WEIGHTS.values()) - 1.0) < 1e-9, \
     "SCORE_WEIGHTS must sum to exactly 1.0"
 
 
+# ── Knowledge-graph decay (schema v8) ──────────────────────────────────────
+# Lifecycle: ACTIVE -> DORMANT -> SOFT_ARCHIVED. Never deleted. See
+# knowledge_graph/decay.py for the full decision logic. Scoped separately
+# to entities vs. relationships since they decay for different reasons
+# (an entity is a concept that can matter for years; a relationship is
+# one specific co-occurrence pattern that goes stale faster).
+
+ENTITY_DORMANT_DAYS       = int(os.getenv("BIA_ENTITY_DORMANT_DAYS", "365"))
+ENTITY_ARCHIVE_DAYS       = int(os.getenv("BIA_ENTITY_ARCHIVE_DAYS", "730"))
+RELATIONSHIP_DORMANT_DAYS = int(os.getenv("BIA_RELATIONSHIP_DORMANT_DAYS", "180"))
+RELATIONSHIP_ARCHIVE_DAYS = int(os.getenv("BIA_RELATIONSHIP_ARCHIVE_DAYS", "365"))
+
+# Connection-strength protection: entities linked by many relationships, or
+# relationships with high accumulated co-occurrence weight, are more
+# likely to reflect a real, recurring pattern than a one-off mention —
+# give them more time before decaying. Multiplier, not immunity: strongly
+# connected items still eventually decay if genuinely unreferenced.
+ENTITY_STRONG_CONNECTION_COUNT   = int(os.getenv("BIA_ENTITY_STRONG_CONNECTION_COUNT", "5"))
+RELATIONSHIP_STRONG_WEIGHT       = float(os.getenv("BIA_RELATIONSHIP_STRONG_WEIGHT", "5.0"))
+DECAY_PROTECTION_MULTIPLIER      = float(os.getenv("BIA_DECAY_PROTECTION_MULTIPLIER", "1.5"))
+
+# Two-layer matching eligibility (opportunity_engine/canonicalizer.py):
+# dormant entities still count toward canonical Problem matching, just at
+# reduced weight; archived entities are excluded entirely from new
+# matching (weight 0) but the rows themselves are never deleted, so they
+# remain queryable as historical context.
+DORMANT_MATCH_WEIGHT = float(os.getenv("BIA_DORMANT_MATCH_WEIGHT", "0.5"))
+
+
 # ── Keyword dictionaries ───────────────────────────────────────────────────
 # Centralised here so the scorer and detector share the same vocabulary.
 

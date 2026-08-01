@@ -119,10 +119,22 @@ class EntityExtractor:
         """
         Write extracted entities and relationships to the database.
 
-        Entities: INSERT OR IGNORE, deduplicated by the (type, name, domain)
-        unique index (see database.py's _migrate_v5). Relationships:
-        upserted on (from_id, to_id, type, domain) — weight accumulates
-        rather than each co-occurrence creating another row.
+        Entities: upserted on the (type, name, domain) unique index (see
+        database.py's _migrate_v5) — a true insert and a re-encounter are
+        distinguished by comparing the row's created_at after the write,
+        since ON CONFLICT DO UPDATE's changes() can't tell them apart the
+        way INSERT OR IGNORE's could. Relationships: upserted on
+        (from_id, to_id, type, domain) — weight accumulates rather than
+        each co-occurrence creating another row.
+
+        Lifecycle (schema v8, knowledge_graph/decay.py): every write here
+        — insert or re-encounter — sets lifecycle_state to 'active'. This
+        is the system's only reactivation path: new evidence always wins
+        over decay. `updated_at` is bumped on every re-encounter too (not
+        just first insert) — it doubles as "last meaningfully referenced"
+        for decay's own decision logic, so this fixes what used to be a
+        gap where a re-encountered entity's updated_at stayed frozen at
+        its original creation time forever.
 
         Domain scoping: entities and relationships are scoped per-domain
         (schema v5) — the same (type, name) can independently exist once
@@ -162,10 +174,19 @@ class EntityExtractor:
                     try:
                         conn.execute(
                             """
-                            INSERT OR IGNORE INTO entities
-                              (id, type, name, domain, description, metadata, created_at, updated_at)
+                            INSERT INTO entities
+                              (id, type, name, domain, description, metadata, created_at, updated_at,
+                               lifecycle_state, lifecycle_updated_at)
                             VALUES
-                              (:id, :type, :name, :domain, :description, :metadata, :created_at, :updated_at)
+                              (:id, :type, :name, :domain, :description, :metadata, :created_at, :updated_at,
+                               'active', :updated_at)
+                            ON CONFLICT(type, name, domain) DO UPDATE SET
+                              updated_at           = excluded.updated_at,
+                              lifecycle_state       = 'active',
+                              lifecycle_updated_at  = CASE
+                                WHEN lifecycle_state != 'active' THEN excluded.updated_at
+                                ELSE lifecycle_updated_at
+                              END
                             """,
                             {
                                 "id":          entity.id,
@@ -178,18 +199,18 @@ class EntityExtractor:
                                 "updated_at":  entity.updated_at,
                             }
                         )
-                        if conn.execute("SELECT changes()").fetchone()[0] > 0:
+                        # changes() is 1 for both a true insert and a conflict
+                        # update, so it can't distinguish "new" from
+                        # "re-encountered" the way INSERT OR IGNORE's 0-vs-1
+                        # could. Ask directly instead: a genuinely new row's
+                        # created_at will equal what we just supplied.
+                        row = conn.execute(
+                            "SELECT id, created_at FROM entities WHERE type = ? AND name = ? AND domain = ?",
+                            (entity.type, entity.name, domain),
+                        ).fetchone()
+                        id_map[entity.id] = row["id"]
+                        if row["created_at"] == entity.created_at:
                             entity_inserts += 1
-                            id_map[entity.id] = entity.id
-                        else:
-                            # Already existed under a different id — resolve it,
-                            # scoped to this domain so we never resolve onto
-                            # another domain's identically-named entity.
-                            existing = conn.execute(
-                                "SELECT id FROM entities WHERE type = ? AND name = ? AND domain = ?",
-                                (entity.type, entity.name, domain),
-                            ).fetchone()
-                            id_map[entity.id] = existing["id"] if existing else entity.id
                     except sqlite3.Error as e:
                         logger.warning(f"Failed to insert entity {entity.name}: {e}")
                         id_map[entity.id] = entity.id  # best effort — don't silently drop relationships
@@ -203,13 +224,19 @@ class EntityExtractor:
                         conn.execute(
                             """
                             INSERT INTO relationships
-                              (id, from_id, to_id, type, weight, domain, metadata, created_at, updated_at)
+                              (id, from_id, to_id, type, weight, domain, metadata, created_at, updated_at,
+                               lifecycle_state, lifecycle_updated_at)
                             VALUES
                               (:id, :from_id, :to_id, :type, :weight, :domain, :metadata,
-                               :created_at, :updated_at)
+                               :created_at, :updated_at, 'active', :updated_at)
                             ON CONFLICT(from_id, to_id, type, domain) DO UPDATE SET
                               weight     = MIN(10.0, weight + excluded.weight),
-                              updated_at = excluded.updated_at
+                              updated_at = excluded.updated_at,
+                              lifecycle_state       = 'active',
+                              lifecycle_updated_at  = CASE
+                                WHEN lifecycle_state != 'active' THEN excluded.updated_at
+                                ELSE lifecycle_updated_at
+                              END
                             """,
                             {
                                 "id":         rel.id,

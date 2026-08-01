@@ -43,6 +43,9 @@ VALID_ENTITY_TYPES = frozenset([
 ])
 
 
+VALID_LIFECYCLE_STATES = frozenset(["active", "dormant", "archived"])
+
+
 @dataclass
 class Entity:
     """A node in the knowledge graph."""
@@ -53,10 +56,25 @@ class Entity:
     id: str = field(default_factory=_uuid)
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
+    # Knowledge-graph decay (schema v8) — see knowledge_graph/decay.py.
+    # `updated_at` above doubles as "last meaningfully referenced" once
+    # persisted (extractor.persist_results() bumps it on every
+    # re-encounter, not just first insert) — lifecycle_updated_at is
+    # deliberately separate: it's the last time lifecycle_state itself
+    # changed (by a decay pass or by reactivation), not the last
+    # reference. Conflating the two would make "how long has this been
+    # dormant" impossible to answer once decay thresholds change.
+    lifecycle_state: str = "active"
+    lifecycle_updated_at: str = field(default_factory=_now)
 
     def __post_init__(self):
         if self.type not in VALID_ENTITY_TYPES:
             raise ValueError(f"Invalid entity type '{self.type}'. Must be one of {VALID_ENTITY_TYPES}")
+        if self.lifecycle_state not in VALID_LIFECYCLE_STATES:
+            raise ValueError(
+                f"Invalid lifecycle_state '{self.lifecycle_state}'. "
+                f"Must be one of {VALID_LIFECYCLE_STATES}"
+            )
 
     def to_db_row(self) -> dict:
         import json
@@ -68,6 +86,8 @@ class Entity:
             "metadata": json.dumps(self.metadata),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "lifecycle_state": self.lifecycle_state,
+            "lifecycle_updated_at": self.lifecycle_updated_at,
         }
 
 
@@ -90,10 +110,34 @@ class Relationship:
     id: str = field(default_factory=_uuid)
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
+    # Knowledge-graph decay (schema v8) — see Entity's docstring above for
+    # the updated_at vs. lifecycle_updated_at distinction; identical here.
+    lifecycle_state: str = "active"
+    lifecycle_updated_at: str = field(default_factory=_now)
 
     def __post_init__(self):
         if self.weight < 0 or self.weight > 10:
             raise ValueError(f"Relationship weight must be 0–10, got {self.weight}")
+        if self.lifecycle_state not in VALID_LIFECYCLE_STATES:
+            raise ValueError(
+                f"Invalid lifecycle_state '{self.lifecycle_state}'. "
+                f"Must be one of {VALID_LIFECYCLE_STATES}"
+            )
+
+    def to_db_row(self) -> dict:
+        import json
+        return {
+            "id": self.id,
+            "from_id": self.from_id,
+            "to_id": self.to_id,
+            "type": self.type,
+            "weight": self.weight,
+            "metadata": json.dumps(self.metadata),
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "lifecycle_state": self.lifecycle_state,
+            "lifecycle_updated_at": self.lifecycle_updated_at,
+        }
 
 
 # ── Signal ────────────────────────────────────────────────────────────────
