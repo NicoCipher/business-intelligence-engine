@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--report", action="store_true",
-        help="Generate weekly report after collection (always runs on Sundays)"
+        help="No-op, kept for backward compatibility -- a report is now generated on every run"
     )
     parser.add_argument(
         "--hn-only", action="store_true",
@@ -64,7 +64,6 @@ def main() -> int:
     args      = parse_args()
     start     = time.monotonic()
     today     = datetime.now(timezone.utc)
-    is_sunday = today.weekday() == 6
 
     logger.info(f"BIA-OS pipeline starting ({today.strftime('%Y-%m-%d %H:%M UTC')})")
     if args.dry_run:
@@ -87,7 +86,14 @@ def main() -> int:
         result = run_full_pipeline(
             dry_run=args.dry_run,
             hn_only=args.hn_only,
-            generate_report=(args.report or is_sunday),
+            # A report is generated on every run, not just weekly -- the
+            # previous Sunday-only default (kept behind --report as an
+            # explicit override, now redundant but harmless) meant most
+            # runs produced no report at all, even when there was
+            # something worth reporting (including "nothing new this
+            # period," which generate()/persist() already handle
+            # correctly on their own -- see report/generator.py).
+            generate_report=True,
         )
 
         for d in result.domains:
