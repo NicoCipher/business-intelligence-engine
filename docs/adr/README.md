@@ -133,15 +133,24 @@ Withdrawn ADRs remain part of the historical record.
 
 # Current ADR Index
 
-| ADR | Title |
-|------|-------|
-| ADR-001 | Problem as Canonical Identity |
-| ADR-002 | Opportunity Immutability |
-| ADR-003 | Domain-Scoped Knowledge Graph |
-| ADR-004 | False Positive Gate |
-| ADR-005 | Persistent Problem Memory |
-| ADR-006 | Lifecycle Decay |
-| ADR-007 | Weighted Canonical Matching |
+| ADR | Title | Status |
+|------|-------|--------|
+| ADR-001 | Problem as Canonical Identity | Accepted |
+| ADR-002 | Opportunity Immutability | Accepted |
+| ADR-003 | Domain-Scoped Knowledge Graph | Accepted |
+| ADR-004 | False Positive Gate | Accepted |
+| ADR-005 | Persistent Problem Memory | Accepted |
+| ADR-006 | Lifecycle Decay | Superseded by ADR-008, ADR-010 |
+| ADR-007 | Weighted Canonical Matching | Superseded by ADR-009 |
+| ADR-008 | Entity & Relationship Lifecycle Decay | Accepted |
+| ADR-009 | Weighted Canonical Matching (Corrected) | Accepted |
+| ADR-010 | Problem Lifecycle & Trend | Accepted |
+
+ADR-006 and ADR-007 conflated Problem-level and Entity/Relationship-level
+lifecycle concepts under the wrong subject. Per this directory's own
+rule against rewriting accepted ADRs, both were left unedited (aside from
+a superseded-status banner) as the historical record of the original
+framing — ADR-008/009/010 are the corrected, accurate versions.
 
 Additional ADRs should be appended sequentially.
 

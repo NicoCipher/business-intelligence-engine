@@ -2,11 +2,32 @@
 
 Version: 1.0
 
-Status: Accepted
+Status: Superseded by ADR-009
 
 Date: 2026-08-01
 
 Supersedes: None
+
+---
+
+> **Superseded.** The core decision here — matching should be
+> lifecycle-aware rather than treating all historical evidence equally —
+> is correct and is preserved by ADR-009. What's wrong is the mechanism
+> description throughout Decision/Rationale/Alternatives: this ADR says
+> weighting is based on the *Problem's own* lifecycle state
+> ("dormant Problems compete equally with active Problems... their
+> influence varies according to lifecycle state"). The actual
+> implementation weights by *entity* lifecycle state, feeding into the
+> entity-Jaccard component of canonical matching
+> (`opportunity_engine/similarity.py`'s `weighted_jaccard()`) — a
+> Problem's own `lifecycle_state` (schema v9) does not currently affect
+> its matching eligibility at all; an archived Problem remains fully
+> matchable, which is what allows reactivation to work. "The dormant
+> Problem is reactivated rather than recreated" is also true but is a
+> separate mechanism (`canonicalizer.resolve_problem()`'s reactivation
+> check), not part of the weighting itself. Preserved unedited below as
+> the historical record of the original (incorrect) framing, per this
+> directory's own rule against rewriting accepted ADRs.
 
 ---
 

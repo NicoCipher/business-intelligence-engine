@@ -2,11 +2,27 @@
 
 Version: 1.0
 
-Status: Accepted
+Status: Superseded by ADR-008 and ADR-010
 
 Date: 2026-08-01
 
 Supersedes: None
+
+---
+
+> **Superseded.** This ADR conflates two separate decisions under one
+> title: entity/relationship decay (what schema v8 actually built,
+> correctly described by ADR-008) and Problem lifecycle (what schema v9
+> actually built, correctly described by ADR-010 — including the
+> independent `trend` axis this ADR never mentions). The body below uses
+> "Problem" where it should say "Entity/Relationship" throughout, and
+> lists a state model (Active/Dormant/Archived/Reactivated) that matches
+> neither system exactly: entities/relationships never persist a
+> distinct "Reactivated" state (they reactivate straight to `active`),
+> and Problems have a "New" state and a whole separate `trend` axis this
+> document doesn't cover. Preserved unedited below as the historical
+> record of the original (incorrect) framing, per this directory's own
+> rule against rewriting accepted ADRs.
 
 ---
 
