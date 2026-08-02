@@ -35,7 +35,7 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # Full DDL. CREATE IF NOT EXISTS makes this idempotent — safe to call on
 # every startup without worrying about duplicate table errors.
@@ -202,9 +202,22 @@ CREATE TABLE IF NOT EXISTS problems (
     last_seen   TEXT NOT NULL,
     weeks_seen  INTEGER DEFAULT 1,
     created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    -- Two INDEPENDENT current-state axes (schema v9) — see
+    -- opportunity_engine/lifecycle.py and models.py's Problem docstring
+    -- for why these are deliberately separate fields, not one combined
+    -- enum: one field, one concept.
+    lifecycle_state       TEXT NOT NULL DEFAULT 'new',      -- new|active|dormant|archived|reactivated — "is this operationally relevant"
+    lifecycle_updated_at  TEXT DEFAULT '',                  -- last time lifecycle_state itself changed
+    trend                 TEXT NOT NULL DEFAULT 'unknown',  -- unknown|growing|stable|declining — "how is its evidence cadence changing"
+    trend_updated_at      TEXT DEFAULT ''                   -- last time trend itself changed
 );
 CREATE INDEX IF NOT EXISTS idx_problems_domain ON problems(domain);
+-- NOTE: idx_problems_lifecycle / idx_problems_trend are NOT created here
+-- — same reasoning as idx_entities_lifecycle above (this DDL block runs
+-- before any migration, so an index on a migration-added column breaks
+-- pre-v9 databases). _migrate_v9() creates both, unconditionally,
+-- outside any column-existence guard.
 
 
 -- ── Problem History ───────────────────────────────────────────────────────
@@ -331,6 +344,9 @@ def initialize() -> None:
 
         if current_version < 8:
             _migrate_v8(conn)
+
+        if current_version < 9:
+            _migrate_v9(conn)
 
         if current_version < SCHEMA_VERSION:
             conn.execute(
@@ -852,6 +868,75 @@ def _migrate_v8(conn) -> None:
     # Unconditional and outside both guards above — see docstring.
     conn.execute("CREATE INDEX IF NOT EXISTS idx_entities_lifecycle ON entities(lifecycle_state)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_rel_lifecycle ON relationships(lifecycle_state)")
+
+    conn.commit()
+
+
+def _migrate_v9(conn) -> None:
+    """
+    Migration v8 → v9: Problem lifecycle & trend — two INDEPENDENT axes.
+
+    Adds `lifecycle_state` (new|active|dormant|archived|reactivated —
+    "is this operationally relevant") and `trend` (unknown|growing|
+    stable|declining — "how is its evidence cadence changing") to
+    `problems`, each with its own `_updated_at` companion. Deliberately
+    two separate fields, not one combined state — see
+    opportunity_engine/lifecycle.py's module docstring and models.py's
+    Problem docstring for the full reasoning: one field should represent
+    one concept, and a combined enum either explodes combinatorially or
+    produces contradictory-reading states (a Problem that's "declining"
+    but was also just reactivated, or "growing" while also newly
+    dormant). A single-field trajectory_state design was the first one
+    built here and was deliberately unwound in favor of this before
+    anything shipped, once that cost became concrete rather than
+    theoretical.
+
+    Both are current-state fields, not history — every transition on
+    either axis is also written to problem_history as a "status_changed"
+    event (the event type schema v7 reserved for exactly this and left
+    unused until now), tagged with which axis changed, so the full
+    trajectory over time remains reconstructable even though these
+    columns themselves are overwritten on each transition.
+
+    Deliberately distinct from Opportunity.status (new|validated|
+    dismissed|archived — a pre-existing, human-curated review field
+    mutated via PATCH /opportunities/{id}/status, unrelated and never
+    enforced): lifecycle_state/trend are system-derived from accumulated
+    evidence, never human-set. The vocabularies happen to share "new"
+    and "archived" — they are not the same concept.
+
+    Backfill: every pre-v9 Problem gets lifecycle_state='new' and
+    trend='unknown' (the DDL's own NOT NULL DEFAULTs handle this
+    automatically for the ALTER TABLE), with both *_updated_at columns
+    set to the row's own updated_at — the same honest-backfill reasoning
+    used in every prior migration in this file: there's no earlier
+    truthful timestamp for "when did this state start," and this
+    backfill only needs to be a safe, honest starting point — the real
+    lifecycle pass, run once after this migration, promptly reclassifies
+    anything that actually has enough history to be active/dormant or a
+    real trend.
+
+    Index-creation placement is deliberately UNCONDITIONAL and OUTSIDE
+    any column-existence guard — same fix already applied for
+    idx_opp_problem (_migrate_v6) and idx_entities_lifecycle/
+    idx_rel_lifecycle (_migrate_v8): nesting `CREATE INDEX` inside
+    `if "lifecycle_state" not in problem_columns` would mean a FRESH
+    database (where the column already exists via the DDL's own CREATE
+    TABLE) never gets the index at all.
+    """
+    problem_columns = {row["name"] for row in conn.execute("PRAGMA table_info(problems)").fetchall()}
+    if "lifecycle_state" not in problem_columns:
+        conn.execute("ALTER TABLE problems ADD COLUMN lifecycle_state TEXT NOT NULL DEFAULT 'new'")
+        conn.execute("ALTER TABLE problems ADD COLUMN lifecycle_updated_at TEXT DEFAULT ''")
+        conn.execute("ALTER TABLE problems ADD COLUMN trend TEXT NOT NULL DEFAULT 'unknown'")
+        conn.execute("ALTER TABLE problems ADD COLUMN trend_updated_at TEXT DEFAULT ''")
+        conn.execute("UPDATE problems SET lifecycle_updated_at = updated_at WHERE lifecycle_updated_at = ''")
+        conn.execute("UPDATE problems SET trend_updated_at = updated_at WHERE trend_updated_at = ''")
+        logger.info("Migration v9: added problems.lifecycle_state / lifecycle_updated_at / trend / trend_updated_at")
+
+    # Unconditional and outside the guard above — see docstring.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_problems_lifecycle ON problems(lifecycle_state)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_problems_trend ON problems(trend)")
 
     conn.commit()
 

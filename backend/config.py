@@ -104,6 +104,49 @@ DECAY_PROTECTION_MULTIPLIER      = float(os.getenv("BIA_DECAY_PROTECTION_MULTIPL
 DORMANT_MATCH_WEIGHT = float(os.getenv("BIA_DORMANT_MATCH_WEIGHT", "0.5"))
 
 
+# ── Problem lifecycle & trend (schema v9) ──────────────────────────────────
+# Two INDEPENDENT axes, not one combined state — see
+# opportunity_engine/lifecycle.py's module docstring for the full
+# reasoning (one field, one concept; avoids state-explosion and
+# contradictory combinations like "declining but freshly reactivated").
+#
+#   lifecycle_state: new -> active -> dormant -> archived
+#                                        ^-- reactivated <--'
+#     "Is this Problem operationally relevant right now?"
+#
+#   trend: unknown -> {growing | stable | declining}
+#     "How is its evidence cadence changing?" Independent of lifecycle —
+#     a dormant Problem can still carry a last-known trend value.
+#
+# Distinct from the knowledge-graph decay thresholds above (different
+# model) and from Opportunity.status (human-curated review field,
+# unrelated, never enforced).
+
+# weeks_seen at or above this exits 'new' into 'active'.
+PROBLEM_RECURRENCE_WEEKS = int(os.getenv("BIA_PROBLEM_RECURRENCE_WEEKS", "2"))
+
+# Lifecycle: no new evidence for this long -> dormant; this much longer
+# again -> archived. Same active->dormant->archived shape as the
+# knowledge-graph decay thresholds above, mirrored here for consistency,
+# with its own thresholds since a Problem going quiet is a different,
+# higher-level signal than a single entity mention going stale.
+PROBLEM_DORMANT_DAYS = int(os.getenv("BIA_PROBLEM_DORMANT_DAYS", "90"))
+PROBLEM_ARCHIVE_DAYS = int(os.getenv("BIA_PROBLEM_ARCHIVE_DAYS", "180"))
+
+# Trend classification compares problem_history evidence cadence in the
+# most recent window against the window before it. Needs 2x this many
+# days of elapsed history (since the relevant anchor — first_seen, or
+# the most recent reactivation if later) before a trend can be
+# classified at all; before that, trend stays 'unknown' rather than
+# being forced into a guess.
+PROBLEM_TREND_WINDOW_DAYS = int(os.getenv("BIA_PROBLEM_TREND_WINDOW_DAYS", "28"))  # 4 weeks
+
+# recent_count / prior_count >= this -> growing; <= this -> declining;
+# between the two (inclusive of neither) -> stable.
+PROBLEM_GROWTH_RATIO  = float(os.getenv("BIA_PROBLEM_GROWTH_RATIO", "1.5"))
+PROBLEM_DECLINE_RATIO = float(os.getenv("BIA_PROBLEM_DECLINE_RATIO", "0.5"))
+
+
 # ── Keyword dictionaries ───────────────────────────────────────────────────
 # Centralised here so the scorer and detector share the same vocabulary.
 

@@ -322,6 +322,10 @@ class OpportunityScores:
 
 # ── Opportunity ───────────────────────────────────────────────────────────
 
+VALID_PROBLEM_LIFECYCLE_STATES = frozenset(["new", "active", "dormant", "archived", "reactivated"])
+VALID_PROBLEM_TREND_STATES = frozenset(["unknown", "growing", "stable", "declining"])
+
+
 @dataclass
 class Problem:
     """
@@ -343,6 +347,34 @@ class Problem:
     Opportunity ever linked to this Problem — it only grows richer over
     time, never shrinks, and is the signature new opportunities are
     matched against (see opportunity_engine/canonicalizer.py).
+
+    lifecycle_state and trend (schema v9, opportunity_engine/lifecycle.py)
+    are two DELIBERATELY INDEPENDENT current-state fields, not one
+    combined state: lifecycle_state answers "is this operationally
+    relevant right now" (new -> active -> dormant -> archived, reversible
+    via reactivated), trend answers "how is its evidence cadence
+    changing" (unknown -> growing/stable/declining), and confidence lives
+    entirely in the existing scorer model, untouched. Keeping these
+    separate avoids state-explosion and contradictory combinations (a
+    dormant Problem can still carry a last-known "declining" trend; a
+    freshly reactivated Problem's trend resets to 'unknown' independently
+    of its lifecycle_state also changing) — a single combined enum was
+    the first design tried here and was deliberately unwound in favor of
+    this before anything shipped, once the state-explosion cost became
+    concrete. See opportunity_engine/lifecycle.py's module docstring for
+    the full reasoning.
+
+    Every transition on either field is also written to problem_history
+    as a "status_changed" event (the event type schema v7 reserved for
+    exactly this and left unused until now), tagged with which axis
+    changed — so the full trajectory over time remains reconstructable
+    even though these columns themselves are overwritten on each
+    transition. Deliberately distinct from Opportunity.status
+    (new|validated|dismissed|archived — a pre-existing, human-curated
+    review field mutated via a separate PATCH endpoint, unrelated):
+    lifecycle_state/trend are system-derived from accumulated evidence,
+    never human-set. The vocabularies happen to share "archived" and
+    "new" — they are not the same concept.
     """
     title: str
     domain: str = "business"
@@ -353,6 +385,21 @@ class Problem:
     id: str = field(default_factory=_uuid)
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
+    lifecycle_state: str = "new"
+    lifecycle_updated_at: str = field(default_factory=_now)
+    trend: str = "unknown"
+    trend_updated_at: str = field(default_factory=_now)
+
+    def __post_init__(self):
+        if self.lifecycle_state not in VALID_PROBLEM_LIFECYCLE_STATES:
+            raise ValueError(
+                f"Invalid lifecycle_state '{self.lifecycle_state}'. "
+                f"Must be one of {VALID_PROBLEM_LIFECYCLE_STATES}"
+            )
+        if self.trend not in VALID_PROBLEM_TREND_STATES:
+            raise ValueError(
+                f"Invalid trend '{self.trend}'. Must be one of {VALID_PROBLEM_TREND_STATES}"
+            )
 
     def to_db_row(self) -> dict:
         import json
@@ -366,6 +413,10 @@ class Problem:
             "weeks_seen": self.weeks_seen,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "lifecycle_state":      self.lifecycle_state,
+            "lifecycle_updated_at": self.lifecycle_updated_at,
+            "trend":                self.trend,
+            "trend_updated_at":     self.trend_updated_at,
         }
 
 

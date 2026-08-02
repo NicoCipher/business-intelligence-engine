@@ -225,6 +225,8 @@ class TestFullUpgradePathV1ToV7:
         "idx_problem_history_problem",
         "idx_entities_lifecycle",
         "idx_rel_lifecycle",
+        "idx_problems_lifecycle",
+        "idx_problems_trend",
     ])
     def test_every_domain_or_problem_dependent_index_exists(self, v1_db, index_name):
         database.initialize()

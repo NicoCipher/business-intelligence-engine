@@ -25,6 +25,8 @@ Signal (immutable event, domain-scoped, dedup on source+source_id+domain)
         │
         ▼
    Problem (stable, long-lived identity — schema v6)
+        │  lifecycle: new → active → dormant → archived (schema v9, reversible)
+        │  trend: unknown → growing/stable/declining (schema v9, independent axis)
         │
         ├─ persistent memory: problem_history (schema v7, append-only)
         │
@@ -155,6 +157,46 @@ Full detail, including the two DDL-ordering-bug lessons this migration
 deliberately applied (index creation unconditional and outside any
 column-existence guard): `docs/SCHEMA.md`'s v8 entry.
 
+## Problem lifecycle & trend (schema v9)
+
+`Problem` carries two INDEPENDENT current-state fields, not one combined
+state: `lifecycle_state` (`new → active → dormant → archived`,
+reversible via `reactivated`) answers "is this operationally relevant
+right now"; `trend` (`unknown → growing/stable/declining`) answers "how
+is its evidence cadence changing." Confidence remains entirely in the
+existing scorer model, untouched.
+
+This is a corrected design. The first implementation used one combined
+`trajectory_state` field spanning both concepts — it was replaced
+before shipping, once a design review made the cost concrete: a
+combined enum either explodes combinatorially or produces
+contradictory-reading states (declining-but-just-reactivated; growing
+overall but the latest single point looks quiet). See
+`opportunity_engine/lifecycle.py`'s module docstring and `docs/SCHEMA.md`'s
+v9 entry for the full history.
+
+Mechanics mirror schema v8's decay/reactivation split exactly: forward
+progression on both axes runs once per domain per pipeline run
+(`pipeline.py` Stage 3.5, after detection, before report generation);
+reactivation is immediate and event-driven, checked inside
+`canonicalizer.resolve_problem()` the instant new evidence arrives, not
+swept periodically. Every transition on either axis writes a
+`status_changed` `problem_history` event (the type schema v7 reserved
+for exactly this, unused until now), tagged by which axis changed.
+
+Deliberately distinct from `Opportunity.status` (`new|validated|
+dismissed|archived` — a pre-existing, human-curated review field set via
+`PATCH /opportunities/{id}/status`, explicitly unenforced, discovered
+while designing this and unrelated to it entirely). The vocabularies
+share "new" and "archived"; they are not the same concept — see
+`docs/architecture/core/04_DATA_MODEL.md`'s Historical Evolution section
+for the underlying distinction this rests on (Opportunity is an
+immutable historical observation; Problem is a mutable canonical
+identity, and `lifecycle_state`/`trend` are exactly the kind of
+current-state field that distinction explicitly permits).
+
+Full transition-rule tables: `docs/SCHEMA.md`'s v9 entry.
+
 ## Explainability as an architectural constraint, not a feature
 
 This shows up in multiple decisions above, not just the matching
@@ -171,8 +213,10 @@ unrelated feature.
 
 Not a roadmap (see the handoff document for that) — just a list of
 things sometimes assumed to exist that don't:
-- No opportunity lifecycle state machine (Discovery/Validation/Growing/
-  Mature/Declining/Archived) — `Problem` has no `status` field.
+- Problem lifecycle exists (schema v9) but not in the shape originally
+  sketched on the roadmap (a single Discovery/Validation/Growing/Mature/
+  Declining/Archived state machine) — it's two independent axes instead
+  (`lifecycle_state`, `trend`), for the reasons above.
 - No merge/split logic for Problems (`merged`/`split` event types exist
   in the v7 enum, reserved, unused).
 - No evidence-quality weighting distinct from the scorer's composite

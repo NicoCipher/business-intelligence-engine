@@ -31,7 +31,7 @@ import logging
 import database
 from knowledge_graph import decay
 from knowledge_graph.extractor import EntityExtractor
-from opportunity_engine import problem_history
+from opportunity_engine import problem_history, lifecycle
 from opportunity_engine.similarity import title_tokens, jaccard, weighted_jaccard
 from models import Signal, Problem
 
@@ -245,14 +245,27 @@ def resolve_problem(
     already_counted_this_week = _week_key_from_iso(existing["last_seen"]) == week_key
     new_weeks_seen = existing["weeks_seen"] if already_counted_this_week else existing["weeks_seen"] + 1
 
+    now = database._now()
     conn.execute(
         """
         UPDATE problems
         SET entity_ids = ?, last_seen = ?, weeks_seen = ?, updated_at = ?
         WHERE id = ?
         """,
-        (json.dumps(merged_entity_ids), database._now(), new_weeks_seen, database._now(), problem_id),
+        (json.dumps(merged_entity_ids), now, new_weeks_seen, now, problem_id),
     )
+
+    # Trajectory reactivation (schema v9): if this Problem had gone quiet
+    # long enough to archive, new evidence reactivates it immediately,
+    # right here — the same event-driven principle schema v8 already
+    # established for entity/relationship reactivation. Checked (and, if
+    # applicable, written) BEFORE the evidence_added event below, so a
+    # reactivated Problem's problem_history reads in the natural order:
+    # status_changed (archived -> reactivated), then evidence_added.
+    lifecycle.reactivate_if_archived(
+        conn, problem_id, domain, now, week_key=week_key, opportunity_id=opportunity_id,
+    )
+
     problem_history.record_event(
         conn,
         problem_id,
@@ -260,6 +273,7 @@ def resolve_problem(
         "evidence_added",
         week_key=week_key,
         opportunity_id=opportunity_id,
+        occurred_at=now,
         metadata={
             "title": title,
             "matched_title": match["matched_title"],

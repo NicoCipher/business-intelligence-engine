@@ -9,7 +9,7 @@ read the corresponding `_migrate_vN()` docstring in `backend/database.py`
 directly; this file intentionally doesn't duplicate that reasoning in
 full, only enough to orient.
 
-Current version: **v8**. Defined by `database.SCHEMA_VERSION`.
+Current version: **v9**. Defined by `database.SCHEMA_VERSION`.
 
 ---
 
@@ -204,6 +204,104 @@ honest available proxy for "when did this become active," since there's
 no earlier truthful timestamp, and defaulting to the migration's own
 run-time would make every pre-existing row falsely look like it just
 became active.
+
+---
+
+## v9 — Problem lifecycle & trend (two independent axes)
+
+Added two INDEPENDENT current-state fields to `problems`, not one
+combined state:
+
+- `lifecycle_state` (`new → active → dormant → archived`, reversible via
+  `reactivated`) — "is this Problem operationally relevant right now?"
+- `trend` (`unknown → growing/stable/declining`) — "how is its evidence
+  cadence changing?"
+
+**This is a corrected design, not the first one built.** The initial
+implementation used a single combined `trajectory_state` field
+(`discovery → validation → growing/mature/declining → archived`,
+plus `reactivated`) spanning both concepts. Before anything was pushed,
+a design review argued for splitting it: one field should represent one
+concept, and a combined enum either explodes combinatorially or
+produces contradictory-reading states — a Problem that just came back
+from archival but also happens to be declining; a Problem that's
+growing but whose single most recent data point looks quiet. The split
+was adopted, and the single-field version was fully replaced (not
+patched around) before merging. See `opportunity_engine/lifecycle.py`'s
+module docstring for the complete reasoning, and `models.py`'s `Problem`
+docstring for the same point stated from the data-model side.
+
+**Mechanics**, mirroring schema v8's decay/reactivation split exactly:
+
+- **Forward progression** (both axes) happens in
+  `opportunity_engine/lifecycle.py::run_lifecycle_pass()`, run once per
+  domain per pipeline execution (`pipeline.py` Stage 3.5, after
+  detection so this run's `problem_history` events already exist, before
+  report generation so the report reflects this run's current state).
+- **Reactivation** (`archived → reactivated`, with `trend` reset to
+  `unknown` in the same moment — the old trend predates the dormancy and
+  is no longer meaningful) is immediate and event-driven:
+  `opportunity_engine/canonicalizer.py`'s `resolve_problem()` checks the
+  matched Problem's current `lifecycle_state` the instant new evidence
+  arrives. `reactivated` is a one-pass marker — the very next
+  `run_lifecycle_pass()` promotes it straight to `active` (the archive
+  check still takes precedence if it immediately goes quiet again).
+
+**Lifecycle transition rules** (evaluated fresh every pass, time-based
+check takes precedence over everything):
+1. No new evidence for `PROBLEM_ARCHIVE_DAYS` (default 180) → `archived`.
+2. No new evidence for `PROBLEM_DORMANT_DAYS` (default 90) → `dormant`.
+   Same `active → dormant → archived` shape as knowledge-graph decay,
+   mirrored here with its own thresholds — a Problem going quiet is a
+   different, higher-level signal than a single entity mention going
+   stale.
+3. Currently `reactivated` → `active` (one-pass promotion).
+4. `weeks_seen < PROBLEM_RECURRENCE_WEEKS` (default 2) → `new`.
+5. Otherwise → `active`.
+
+**Trend transition rules**, independent of lifecycle (skipped entirely
+if `lifecycle_state` is `archived` this pass — no point classifying a
+trend for something that just went fully quiet):
+- Anchor = the most recent reactivation timestamp if later than
+  `first_seen`, else `first_seen`.
+- Elapsed time since anchor `< 2 × PROBLEM_TREND_WINDOW_DAYS` (default
+  28, so 56 days) → `unknown` — not enough data to say anything.
+- Otherwise, compare `problem_history` evidence-event counts in the most
+  recent window against the window before it:
+  `recent/prior ≥ PROBLEM_GROWTH_RATIO` (default 1.5) → `growing`;
+  `recent/prior ≤ PROBLEM_DECLINE_RATIO` (default 0.5) → `declining`;
+  otherwise → `stable`. `prior_count == 0` is handled explicitly
+  (any evidence where there was none before is unambiguous growth; none
+  in either window stays `stable` rather than guessed at).
+
+**Every transition on either axis** writes a `status_changed`
+`problem_history` event — the event type schema v7 reserved for exactly
+this and left unused until now — tagged `metadata["axis"]` (`"lifecycle"`
+or `"trend"`) so the two never get conflated in the history log, even
+though both underlying columns are current-state fields, overwritten on
+each transition.
+
+**Deliberately distinct from `Opportunity.status`** (`new|validated|
+dismissed|archived` — a pre-existing, human-curated review field set via
+`PATCH /opportunities/{id}/status`, explicitly unenforced, discovered
+during this migration's design and unrelated to it entirely).
+`lifecycle_state`/`trend` are system-derived from accumulated evidence,
+never human-set. The vocabularies happen to share "new" and "archived";
+they are not the same concept.
+
+**Backfill:** every pre-v9 Problem gets `lifecycle_state='new'` and
+`trend='unknown'` (the DDL's own `NOT NULL DEFAULT`s handle this
+automatically), with both `*_updated_at` columns backfilled from the
+row's own `updated_at` — the same honest-backfill reasoning used in
+every prior migration in this file. The real lifecycle pass, run once
+after migration, promptly reclassifies anything with enough real history
+to be `active`/`dormant` or a real trend.
+
+**Index-creation lesson applied directly, a third time:** both
+`idx_problems_lifecycle` and `idx_problems_trend` are created
+unconditionally in `_migrate_v9()`, outside any column-existence guard —
+the same fix already applied to `idx_opp_problem` (`_migrate_v6`) and
+`idx_entities_lifecycle`/`idx_rel_lifecycle` (`_migrate_v8`).
 
 ---
 

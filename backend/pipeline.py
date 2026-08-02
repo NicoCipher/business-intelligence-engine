@@ -55,6 +55,7 @@ from domains.registry import DomainRegistry
 from knowledge_graph import decay
 from knowledge_graph.extractor import EntityExtractor
 from models import Signal
+from opportunity_engine import lifecycle
 from opportunity_engine.detector import PatternDetector
 from report.generator import ReportGenerator
 
@@ -74,6 +75,7 @@ class DomainRunResult:
     entities_decayed:        int  = 0   # entities newly moved to dormant or archived this run
     relationships_decayed:   int  = 0   # relationships newly moved to dormant or archived this run
     opportunities_detected:  int  = 0
+    problems_archived:       int  = 0   # problems newly moved to archived lifecycle_state this run
     report_generated:        bool = False
 
 
@@ -230,6 +232,26 @@ def _run_domain(
             )
     else:
         logger.info("[%s] not enough signals for pattern detection", domain.id)
+
+    # ── Stage 3.5: Problem trajectory lifecycle ─────────────────────────
+    # Runs after detection (this run's resolve_problem() calls have
+    # already written this week's problem_history events, which trend
+    # classification reads) and before report generation (so the report
+    # reflects this run's current lifecycle_state/trend, not last run's).
+    # Reactivation (archived -> reactivated) already happened earlier,
+    # inline inside resolve_problem() the moment new evidence matched —
+    # this pass only ever moves state forward. Skipped in dry_run,
+    # matching every other stage that writes to the database. See
+    # opportunity_engine/lifecycle.py.
+    if not dry_run:
+        with database.get_connection() as conn:
+            lifecycle_counts = lifecycle.run_lifecycle_pass(conn, domain=domain.id)
+        run_result.problems_archived = lifecycle_counts["archived"]
+        if lifecycle_counts["archived"]:
+            logger.info(
+                "[%s] lifecycle: %d problem(s) archived this run",
+                domain.id, lifecycle_counts["archived"],
+            )
 
     # ── Stage 4: Report ─────────────────────────────────────────────────
     if generate_report and not dry_run:
