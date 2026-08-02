@@ -246,10 +246,10 @@ Permanent:
 - Entities
 - Relationships
 - Problems
+- Opportunities
 
 Transient:
 
-- Opportunities
 - Reports
 
 Persistent intelligence accumulates.
