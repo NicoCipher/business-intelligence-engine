@@ -52,6 +52,7 @@ from config import (
     DEMAND_KEYWORDS, COMPLAINT_KEYWORDS, WILLINGNESS_TO_PAY,
     LOW_COMPETITION_SIGNALS, RISK_KEYWORDS,
 )
+from opportunity_engine.keyword_matching import count_keyword_hits
 
 
 class OpportunityScorer:
@@ -133,7 +134,7 @@ class OpportunityScorer:
         freq = min(4.0, math.log(n + 1, 5) * 2.0)
 
         # 2. Keyword matches (0–3 points)
-        hits = sum(1 for kw in DEMAND_KEYWORDS if kw in blob)
+        hits = count_keyword_hits(blob, DEMAND_KEYWORDS)
         keywords = min(3.0, hits * 0.4)
 
         # 3. Engagement (0–3 points). log₁₀: 10 pts→0.8, 100→1.5, 1000→2.3
@@ -168,7 +169,7 @@ class OpportunityScorer:
         Evidence of existing solutions (unnamed) leaves it at base.
         """
         base = 5.5
-        hits = sum(1 for kw in LOW_COMPETITION_SIGNALS if kw in blob)
+        hits = count_keyword_hits(blob, LOW_COMPETITION_SIGNALS)
         bonus = min(4.5, hits * 1.5)
         score = round(min(10.0, base + bonus), 2)
 
@@ -197,7 +198,7 @@ class OpportunityScorer:
         Default floor: 2.0 if there are 3+ demand signals (there must be some
         potential or people wouldn't be asking).
         """
-        pay_hits = sum(1 for kw in WILLINGNESS_TO_PAY if kw in blob)
+        pay_hits = count_keyword_hits(blob, WILLINGNESS_TO_PAY)
         direct = min(4.0, pay_hits * 0.8)
 
         b2b_terms = ["business", "enterprise", "b2b", "company", "team",
@@ -321,7 +322,7 @@ class OpportunityScorer:
         Default: 7.0 (moderate-low risk). We don't penalise unknown risk.
         Only detected risk evidence reduces this score.
         """
-        hits = sum(1 for kw in RISK_KEYWORDS if kw in blob)
+        hits = count_keyword_hits(blob, RISK_KEYWORDS)
         penalty = min(6.0, hits * 1.2)
         score = round(max(1.0, 7.0 - penalty), 2)
 

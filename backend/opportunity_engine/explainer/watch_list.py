@@ -11,6 +11,7 @@ from collections import defaultdict
 from config import DEMAND_KEYWORDS, COMPLAINT_KEYWORDS, WILLINGNESS_TO_PAY
 
 from opportunity_engine.explainer.historical import match_previous_opportunity
+from opportunity_engine.keyword_matching import any_keyword_hit
 
 _REJECTION_LABELS = {
     "too_small": "insufficient mention volume to qualify as a pattern",
@@ -43,9 +44,9 @@ def _is_business_signal(rejected) -> bool:
 
     blob = " ".join(s.full_text for s in rejected.signals)
     return (
-        any(kw in blob for kw in DEMAND_KEYWORDS)
-        or any(kw in blob for kw in WILLINGNESS_TO_PAY)
-        or any(kw in blob for kw in COMPLAINT_KEYWORDS)
+        any_keyword_hit(blob, DEMAND_KEYWORDS)
+        or any_keyword_hit(blob, WILLINGNESS_TO_PAY)
+        or any_keyword_hit(blob, COMPLAINT_KEYWORDS)
     )
 
 
