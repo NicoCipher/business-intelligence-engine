@@ -1,6 +1,6 @@
-# BIA Project Handoff (updated — schema v7 milestone closed)
+# BIA Project Handoff (updated — through `b616196`, domain-awareness on list endpoints)
 
-Supersedes the schema-v6-era handoff. Full architecture detail now lives
+Supersedes the schema-v7-era handoff. Full architecture detail now lives
 in `docs/ARCHITECTURE.md` (current state) and `docs/SCHEMA.md` (full
 version history) — this file is the orientation summary, not the whole
 picture.
@@ -63,13 +63,63 @@ immutable observation) → Report`.
     `trend`: unknown/growing/stable/declining) rather than one combined
     state — the first design used a single field and was fully replaced,
     before shipping, once a design review made the state-explosion cost
-    concrete. **Just completed, validated, and committed locally** (see
-    Part 5).
+    concrete. Pushed as `9a3b3b3`.
+14. ADR-006/ADR-007 subject confusion (which two decisions each was
+    actually about) corrected via supersession — `ADR-008`, `ADR-009`,
+    `ADR-010` added rather than editing the originals in place, to keep
+    the record of what was actually decided when intact (`b899793`).
+15. **Bug fix: reports were only ever generated on Sundays.**
+    `collect.py` gated Stage 4 on `args.report or is_sunday`; on every
+    non-Sunday run, no report was produced regardless of opportunity
+    count. Root-caused and fixed to run unconditionally; `is_sunday`
+    removed, `--report` kept as a harmless no-op flag for backward
+    compatibility. Separately investigated the same session: a
+    zero-entity/zero-opportunity HN batch, confirmed as correct
+    precision-tuned-vocabulary behavior on off-topic input rather than a
+    suppression bug — no thresholds changed (`e0a43d7`).
+16. Two deferred code-debt items closed: `opportunity_engine/explainer.py`
+    (~60KB, five-plus responsibilities) split into a package along its
+    own existing section boundaries, zero behavior change, same public
+    API (`9524d1e`); duplicated keyword-scanning logic across
+    `scorer.py`/`explainer/watch_list.py` consolidated into
+    `opportunity_engine/keyword_matching.py`, deliberately *not*
+    merged with `extractor.py`'s materially different word-boundary
+    algorithm (`dc193cd`).
+17. **RFC-001 (Accepted) / RFC-002 (Proposed).** New `docs/rfc/` track,
+    distinct from `docs/adr/` (RFCs cover pipeline-level architecture
+    spanning multiple stages; ADRs cover one bounded decision). RFC-001
+    replaces the six-layer model (Signal → Knowledge → Problem →
+    Opportunity → Intelligence → Presentation) with an eleven-stage
+    "Constitutional Analyst Pipeline" (Direction → Collection →
+    Processing → Correlation → Problem → Investigation → Findings →
+    Analysis → Opportunity → Advisory → Presentation → Feedback,
+    closing back to Direction) — accepted, **not yet implemented**.
+    RFC-002 specifies the data contract for the one new stage with no
+    existing implementation home (Investigation/Findings: seven
+    evidence-backed facets, immutable and dated like Opportunity) —
+    proposed, architecture only. Docs-only commit, no code changed
+    (`6895848`).
+18. **V1 security and production foundation.** Single-operator API-key
+    auth (`auth.py`, no-op when `BIA_API_KEY` unset), atomic
+    dependency-free pipeline/report file locking with stale-lock
+    recovery (`locking.py` — fixes a real concurrent-trigger SQLite
+    race), durable timestamped-snapshot backups (`persistence.py`),
+    request body size limits and security headers on every response
+    (`middleware.py`). Explicitly no multi-user/RBAC/MFA/BFF — out of
+    scope per the resolved threat model (`a90a95a`).
+19. **Domain-awareness on list endpoints.** Optional `domain` filter
+    added to `GET /opportunities` and `GET /signals` (unvalidated
+    equality, same treatment as existing filters; unknown domain →
+    empty list, not an error), closing a Domain Architecture (§7)
+    isolation gap — both tables have had an indexed `domain` column
+    since schema v2. `GET /reports` and a dedicated Problem endpoint
+    are explicitly out of scope for this change (`b616196`, current
+    `HEAD`).
 
-**Current code state:** `origin/main` at `50c75ac` (schema v8 +
-handbook reconciliation, both pushed), plus schema v9 work committed on
-top locally (not yet pushed — see Part 5). 467/467 tests passing.
-Schema version 9.
+**Current code state:** `origin/main` at `b616196` — everything above
+is committed and pushed; working tree is clean, nothing outstanding.
+Per `b616196`'s own commit message, full suite was 533/533 passing
+(522 baseline + 11 new) at that commit. Schema version 9.
 
 **Active problems:** none known/open. Every DDL-ordering-class bug found
 during the CI investigation is fixed and has dedicated regression
@@ -78,6 +128,13 @@ coverage (`test_migration_v5.py`, `test_migration_v6_upgrade.py`,
 exercises both failure modes (pre-migration database, and fresh database
 with guard-nested index creation) so neither recurs silently for a
 future migration.
+
+**Known gaps, explicitly out of scope of recent work (not bugs):** no
+Problem REST endpoint exists yet (`api/` has `opportunities.py`,
+`reports.py`, `signals.py` only); `GET /reports` has no `domain` filter
+despite `ReportDetail` already carrying the field; RFC-001's eleven-stage
+pipeline is accepted but the codebase still runs the six-layer model —
+no migration plan exists yet for that transition.
 
 ## Part 2: Product Vision
 
@@ -198,47 +255,70 @@ unrelated vocabularies that happen to share "archived" and "new."
 
 ## Part 4: Future Roadmap
 
-Per the RFC review's reprioritization (supersedes the pre-RFC ordering):
+Per the RFC review's reprioritization (supersedes the pre-RFC ordering).
+**Superseding note (RFC-001, `6895848`):** RFC-001 was accepted after
+this list was last ordered and replaces the six-layer architectural
+model this roadmap was framed against with an eleven-stage
+"Constitutional Analyst Pipeline." No implementation of that transition
+has started. Until a migration plan exists, treat RFC-001/RFC-002 as
+the dominant open architectural question — items below are still valid
+work, but a Problem-endpoint or pipeline-stage change made now should
+be checked against RFC-001's stage boundaries first, not just the
+six-layer model this list still describes.
 
 1. ~~Domain-scope knowledge graph~~ — done (v5).
 2. ~~`problems` table + canonical matching~~ — done (v6).
 3. ~~Persistent memory~~ — done (v7).
-4. ~~Time-decay on the knowledge graph~~ — **done (v8), this milestone.**
-   Scoped to entities/relationships only, per an explicit descope
-   decision during design (see Part 3) — Signal/Opportunity lifecycle
-   was requested but rejected as out of scope for this item.
-5. ~~Problem lifecycle~~ — **done (v9), this milestone.** Shipped as
-   two independent axes (`lifecycle_state`, `trend`), not the single
-   combined state machine originally sketched — see Part 3's decision
-   entry for why. Design was explained and iterated on before
-   implementation (per standing instruction): the RFC's proposed field
-   shape was itself corrected during that review, before any code
-   shipped.
+4. ~~Time-decay on the knowledge graph~~ — done (v8). Scoped to
+   entities/relationships only, per an explicit descope decision during
+   design (see Part 3) — Signal/Opportunity lifecycle was requested but
+   rejected as out of scope for this item.
+5. ~~Problem lifecycle~~ — done (v9). Shipped as two independent axes
+   (`lifecycle_state`, `trend`), not the single combined state machine
+   originally sketched — see Part 3's decision entry for why. Design
+   was explained and iterated on before implementation (per standing
+   instruction): the RFC's proposed field shape was itself corrected
+   during that review, before any code shipped.
 6. **Evidence-quality weighting** — as a separate signal informing
    confidence/verdict, not a rewrite of the scorer's composite formula.
    Schema v8/v9 both added extension-point *shapes* for this
    (`decay.decide_lifecycle_state()`'s `evidence_quality` parameter;
    nothing analogous yet on the Problem lifecycle side) but not the
    signal itself — nothing in the codebase computes evidence quality as
-   a distinct value yet.
+   a distinct value yet. Still open.
 7. Relationship hierarchy (multi-level `belongs_to`) — explicitly
    postponed by the RFC review; not enough real multi-hop data yet to
-   know what depth is actually useful. Building it now risks a
-   premature, likely-wrong abstraction.
-8. `explainer.py` split (~60KB, five-plus responsibilities) — code debt,
-   grows harder to split the longer it's deferred, still not urgent.
-9. Duplicated keyword-scanning logic across `scorer.py`/`extractor.py`/
-   `explainer.py` — consolidation candidate.
+   know what depth is actually useful. Still open.
+8. ~~`explainer.py` split~~ — done (`9524d1e`).
+9. ~~Duplicated keyword-scanning consolidation~~ — done, scoped to
+   `scorer.py`/`explainer/watch_list.py` only, deliberately excluding
+   `extractor.py`'s different algorithm (`dc193cd`).
 10. Multi-tenancy schema hook — RFC review flagged this as
-    cheap-now/expensive-later even though "not urgent"; worth a small
-    decision before Problem/Opportunity/history tables are full of real
-    data, not a v10 migration project later.
+    cheap-now/expensive-later even though "not urgent"; still not
+    started. Worth a small decision before Problem/Opportunity/history
+    tables are full of real data, not a later migration project.
 11. Clean read-only query interface for future agents — design once the
-    Problem/canonical data model has had more time to prove stable. Now
-    has two more real fields (`lifecycle_state`, `trend`) worth exposing
-    once this is built.
+    Problem/canonical data model has had more time to prove stable. Has
+    two more real fields (`lifecycle_state`, `trend`) worth exposing
+    once this is built. Still gated on RFC-001's Investigation/Findings
+    contract (item 13 below) if pipeline restructuring happens first.
 12. Market Intelligence, Writer/Sales/Outreach/Analytics agents
     themselves — explicitly out of scope until item 11 exists.
+13. **RFC-001 implementation** — no code yet. Migration plan from the
+    current six-layer pipeline to the eleven-stage constitutional
+    pipeline is undesigned. RFC-002's Findings data contract (Proposed,
+    not Accepted) needs resolution first, since Analysis's stage
+    contract can't be specified until what it consumes is defined.
+14. **Problem REST endpoint** — does not exist. `api/` currently
+    exposes `opportunities.py`, `reports.py`, `signals.py` only.
+    Explicitly flagged as a separate future item in `b616196`'s commit
+    message. No design work done yet on response shape, whether
+    `problem_history` is inlined or a sub-resource, filtering, or
+    pagination.
+15. `GET /reports` domain filter — `ReportDetail` already carries a
+    `domain` field (unlike Opportunities/Signals before `b616196`) but
+    the list endpoint has no filter for it. Small, same pattern as
+    `b616196`.
 
 **Frontend note (from the RFC review, worth restating):** the
 originally-planned "backend done → build Next.js frontend" ordering was
@@ -248,41 +328,33 @@ scaffolding/design-system work can start any time, but the Problem
 Memory screen specifically should wait until there's real accumulated
 history to design against, not be built thin on day one.
 
-## Part 5: Current Session Context
+## Part 5: Recent History
 
-**History across sessions, most recent last:**
+**History, most recent last (extends the log in the prior handoff
+revision, which covered through schema v7/v8/v9-drafting and the
+handbook merge — see git log for full detail on any commit below):**
 
-1. Schema v7 (persistent Problem memory) was implemented, validated, and
-   pushed — `origin/main` reached `a7519cd`. Full validation detail:
-   `docs/PROBLEM_MEMORY_VALIDATION.md`.
-2. A live CI failure ("Run collection pipeline" erroring) was diagnosed
-   and fixed across two more pushes (`d26e891`, then `bbf0722` after a
-   second, related error surfaced on the next run) — the DDL-ordering
-   bug class described in Part 3 and in full in `docs/SCHEMA.md`'s
-   v5/v6 entries. `origin/main` reached `bbf0722`.
-3. Schema v8 (knowledge-graph decay) was designed, descoped from a
-   larger initial request (see Part 3), implemented, validated, and
-   pushed (`89d56d3`).
-4. Push was rejected — an externally-authored architecture handbook
-   (`docs/architecture/`, 17 files) had landed on `origin/main` directly
-   during this session. Fetched, confirmed zero file overlap, merged
-   cleanly (`de334a2`), pushed.
-5. Reviewed the handbook in full and found three points of drift from
-   the actual implementation: a broken filename cross-reference in its
-   own reading order, an `Opportunity`-immutability contradiction
-   (`04_DATA_MODEL.md` said "Opportunities may expire," which is exactly
-   backwards), and an implicit ambiguity about current-state mutation
-   vs. rewriting history. All three fixed and pushed (`50c75ac`).
-6. This session: Problem lifecycle (RFC roadmap item 5) was designed
-   using the "explain transition logic before implementing" standing
-   instruction — proposed as a single `trajectory_state` field, fully
-   implemented and tested (23 passing tests: schema v9 migration,
-   `opportunity_engine/lifecycle.py`, canonicalizer integration, pipeline
-   wiring). A design review then rejected the single-field shape in
-   favor of two independent axes (`lifecycle_state`, `trend`) — see Part
-   3's decision entry. The single-field version was fully replaced, not
-   patched around, since nothing had been pushed yet. **Committed
-   locally, not yet pushed** — see below.
+1. Schema v9 (Problem lifecycle & trend, two independent axes — see
+   Part 3) was committed and pushed: `9a3b3b3`.
+2. ADR-006/007 subject confusion corrected via supersession
+   (ADR-008/009/010, not edits to the originals) — `b899793`.
+3. Live bug: reports were only generated on Sundays
+   (`args.report or is_sunday` gate in `collect.py`). Root-caused,
+   fixed to run unconditionally, `is_sunday` removed — `e0a43d7`.
+4. Two previously-deferred code-debt items closed back to back:
+   `explainer.py` package split (`9524d1e`), keyword-scanning
+   consolidation into `opportunity_engine/keyword_matching.py`
+   (`dc193cd`).
+5. RFC-001 (Constitutional Analyst Pipeline, Accepted) and RFC-002
+   (Investigation Findings contract, Proposed) — a new `docs/rfc/`
+   track and a major accepted pipeline redesign (six-layer model →
+   eleven-stage pipeline). Docs only, no code — `6895848`.
+6. V1 security and production foundation: single-operator API-key auth,
+   file locking (fixes a real concurrent-write SQLite race), durable
+   backup snapshots, request size limits and security headers —
+   `a90a95a`.
+7. Domain-awareness filter added to `GET /opportunities` and
+   `GET /signals` — `b616196`, current `HEAD`.
 
 **Token handling note, still relevant for whoever continues this:**
 every GitHub Personal Access Token used in this project's history was
@@ -293,30 +365,35 @@ anything, confirm no stale token is still live at
 https://github.com/settings/tokens**, and treat any newly-provided token
 the same way — use once, then revoke.
 
-**What's sitting locally, unpushed, right now:** schema v9 — Problem
-`lifecycle_state`/`trend` as two independent current-state axes,
-`opportunity_engine/lifecycle.py` (trend classification, the periodic
-forward-progression pass, event-driven reactivation), canonicalizer
-integration, pipeline Stage 3.5. 467/467 tests passing. Verified via
-direct calls to `pipeline._run_domain()` with real injected signals,
-dry_run=False, across two separate runs specifically to exercise the
-full archive → reactivate → promote-to-active cycle through the real
-matching code path (not just direct function calls) — confirmed both
-axis-tagged `status_changed` events write correctly and Stage 3.5's
-one-pass `reactivated → active` promotion fires within the same
-pipeline run as the reactivation itself.
+**Current state:** working tree clean, nothing uncommitted, `origin/main`
+and local `main` both at `b616196`. Nothing pending push.
 
-**Next steps:** commit and push schema v9, then move to Part 4 item 6
-(evidence-quality weighting) or item 7 (relationship hierarchy) — both
-still explicitly gated (evidence-quality needs a real signal to weight,
-which doesn't exist yet; hierarchy needs real multi-hop data). Given
-neither is truly ready, it may be worth spending the next session on
-Part 4 items 8–9 (the `explainer.py` split and duplicated
-keyword-scanning consolidation) instead — pure code debt with no design
-gate, unlike everything else currently at the top of the list. Whoever
-picks this up should also note the pattern that's now repeated twice
-(schema v8's `idx_opp_problem`-style fresh-database gap, schema v9's
-initial single-field design): proposing a design, implementing it fully
-with tests, and *then* finding a better shape through review is
-apparently how this project's best schema decisions actually get made
-here — not a failure mode to avoid, a process to expect and budget for.
+**Next steps — three independent open threads, pick based on priority:**
+
+- **RFC-001 implementation** (Part 4 item 13): the largest open item.
+  No migration plan exists yet from the current six-layer pipeline to
+  the eleven-stage constitutional pipeline. RFC-002 (Findings contract)
+  is still Proposed, not Accepted — likely needs to resolve first,
+  since it's on RFC-001's critical path.
+- **Problem REST endpoint** (Part 4 item 14): explicitly deferred by
+  `b616196`'s own commit message. No design work started — response
+  shape, whether `problem_history` is inlined or a sub-resource,
+  filtering, and pagination are all open questions. Should be checked
+  against RFC-002's Findings shape and RFC-001's stage boundaries
+  before implementation, given RFC-001 is now Accepted, to avoid
+  building API surface against the six-layer model right as it's
+  being superseded.
+- **Small, ungated cleanup** (Part 4 item 15): `GET /reports` domain
+  filter, same small pattern as `b616196`, no design gate.
+
+Whoever picks this up should keep the pattern noted in the prior
+handoff revision in mind: this project's best schema/design decisions
+have repeatedly come from proposing a shape, implementing it fully with
+tests, and *then* finding a better shape through review (schema v8's
+fresh-database DDL gap, schema v9's single-field-to-two-axis
+correction) — not a failure mode to avoid, a process to expect and
+budget for. Given that pattern, and the standing "explain before
+implementing" instruction, the Problem REST endpoint in particular
+should get an explicit design discussion — including how it relates to
+RFC-002's Findings facets, since both are new API-shaped surfaces
+touching Problem-adjacent data — before any code is written.

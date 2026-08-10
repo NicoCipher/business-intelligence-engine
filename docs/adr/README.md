@@ -145,6 +145,7 @@ Withdrawn ADRs remain part of the historical record.
 | ADR-008 | Entity & Relationship Lifecycle Decay | Accepted |
 | ADR-009 | Weighted Canonical Matching (Corrected) | Accepted |
 | ADR-010 | Problem Lifecycle & Trend | Accepted |
+| ADR-011 | Domain-Generalized Opportunity Scoring | Accepted (design locked, not yet implemented) |
 
 ADR-006 and ADR-007 conflated Problem-level and Entity/Relationship-level
 lifecycle concepts under the wrong subject. Per this directory's own
