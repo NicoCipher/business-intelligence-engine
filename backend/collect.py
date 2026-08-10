@@ -74,6 +74,14 @@ def main() -> int:
         # DomainRegistry is the single source of truth for which domains run
         # — pipeline.py reads it directly, so registration must happen here,
         # before run_full_pipeline() is called.
+        #
+        # persistence.pull() restores the most recent durable snapshot on a
+        # cold start (never overwrites a live database) -- this is the fix
+        # for the CI database durability gap: GitHub Actions cache alone is
+        # not a durable storage guarantee (subject to eviction with no
+        # restore path). See persistence.py and collect.yml.
+        import persistence
+        persistence.pull()
         database.initialize()
         DomainRegistry.discover_and_register()
         stats = database.get_stats()
@@ -95,6 +103,9 @@ def main() -> int:
             # correctly on their own -- see report/generator.py).
             generate_report=True,
         )
+
+        if not args.dry_run:
+            persistence.push()
 
         for d in result.domains:
             logger.info(

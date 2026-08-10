@@ -3,15 +3,24 @@ main.py — FastAPI application for BIA-OS Version 1
 
 Responsibilities:
   - Configure logging
-  - Initialise the database on startup
+  - Restore the database from durable storage if needed, then initialise it
   - Mount all API routers
   - Provide a health endpoint and a pipeline trigger endpoint
   - Configure CORS for the local React dev server
+  - Apply cross-cutting security middleware (body size limits, headers)
 
 What does NOT live here:
   - Business logic (that's in opportunity_engine/)
   - Data collection (that's in collectors/)
   - Database queries (that's in api/*)
+  - Auth logic (that's in auth.py)
+  - Locking logic (that's in locking.py)
+  - Durable persistence logic (that's in persistence.py)
+
+V1 is kept private by design (no public network exposure) -- see the
+accepted V1 security review. Auth (auth.py) is real and enforced on
+every mutating endpoint regardless, as defense-in-depth today and the
+primary boundary the moment network isolation is ever lifted.
 
 Running locally:
   uvicorn main:app --reload --host 127.0.0.1 --port 8000
@@ -24,10 +33,14 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+import auth
+import config
 import database
+import locking
+import persistence
 from config import API_HOST, API_PORT
 from api import opportunities, signals, reports
 from domains.registry import DomainRegistry
@@ -44,6 +57,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bia-os")
 
+PIPELINE_LOCK_PATH = config.DATA_DIR / "pipeline.lock"
+REPORT_LOCK_PATH = config.DATA_DIR / "report.lock"
+
 
 # ── Lifespan ──────────────────────────────────────────────────────────────
 
@@ -54,6 +70,8 @@ async def lifespan(app: FastAPI):
     and cleanup tasks after the last request is served.
 
     Startup:
+      - Restore the database from durable storage if this is a cold
+        start (persistence.pull() -- never overwrites a live database)
       - Initialise SQLite schema (idempotent — safe on every restart)
 
     Shutdown:
@@ -61,6 +79,7 @@ async def lifespan(app: FastAPI):
         we ever move to a server database.
     """
     logger.info("BIA-OS starting up…")
+    persistence.pull()
     database.initialize()
     DomainRegistry.discover_and_register()
 
@@ -103,9 +122,16 @@ app.add_middleware(
         "http://127.0.0.1:5173",
     ],
     allow_methods=["GET", "POST", "PATCH"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization"],
     allow_credentials=False,
 )
+
+# Security middleware: request body size limits and defensive headers.
+# See middleware.py for why these exist and what they don't replace
+# (frontend-side safe rendering of Signal-derived text).
+from middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware  # noqa: E402
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(BodySizeLimitMiddleware)
 
 
 # ── Routers ───────────────────────────────────────────────────────────────
@@ -134,6 +160,10 @@ def health():
     """
     Returns 200 when the server is running.
     The React frontend polls this to display the connection status badge.
+
+    Deliberately unauthenticated -- a health check needs to work even
+    for monitoring tooling that predates or sits outside any API key
+    configuration. It reveals no sensitive data.
     """
     stats = database.get_stats()
     return {
@@ -144,16 +174,27 @@ def health():
 
 
 @app.post("/api/v1/pipeline/run", tags=["system"])
-async def run_pipeline(background_tasks: BackgroundTasks):
+async def run_pipeline(
+    background_tasks: BackgroundTasks,
+    actor: auth.Actor = Depends(auth.get_current_actor),
+):
     """
     Trigger a full collection + detection cycle in the background.
 
     Returns immediately. The pipeline runs asynchronously.
     Poll GET /api/v1/signals/stats to see when new signals arrive.
 
+    Returns 409 if a pipeline run is already in progress -- checked
+    here for immediate feedback; _pipeline_sync's own lock is the real,
+    race-free guarantee (see locking.py).
+
     In production, replace this with a scheduled cron job or GitHub Action.
     This endpoint exists for manual triggering during development.
     """
+    if locking.is_locked(PIPELINE_LOCK_PATH):
+        raise HTTPException(status_code=409, detail="A pipeline run is already in progress")
+
+    logger.info(f"Pipeline run triggered by {actor}")
     background_tasks.add_task(_run_pipeline_task)
     return {"status": "pipeline started", "message": "Collection running in background"}
 
@@ -177,23 +218,36 @@ def _pipeline_sync():
     collect.py's CLI entry point calls. There is no pipeline logic here;
     this function only exists to bridge FastAPI's background-task/executor
     machinery to the synchronous pipeline implementation.
+
+    Guarded by an exclusive file lock (locking.py) so a second concurrent
+    trigger can never write to SQLite at the same time as this one --
+    previously a real, silent failure mode (a lock-collision exception
+    that a narrow except clause didn't catch). Any exception is now
+    caught broadly and logged with a full traceback, never swallowed.
+    On success, the database is snapshotted to durable storage
+    (persistence.push()).
     """
     from pipeline import run_full_pipeline
 
-    logger.info("Pipeline run started")
     try:
-        result = run_full_pipeline(generate_report=False)
-    except RuntimeError:
-        logger.exception("Pipeline run aborted")
-        return
+        with locking.exclusive_lock(PIPELINE_LOCK_PATH):
+            logger.info("Pipeline run started")
+            try:
+                result = run_full_pipeline(generate_report=False)
+            except Exception:
+                logger.exception("Pipeline run failed")
+                return
 
-    for d in result.domains:
-        logger.info(
-            f"[{d.domain_id}] {d.signals_persisted} new signals, "
-            f"{d.opportunities_detected} new opportunities"
-        )
-    logger.info(
-        f"Pipeline complete — {result.total_signals} total signals, "
-        f"{result.total_opportunities} total opportunities across "
-        f"{len(result.domains)} domain(s)"
-    )
+            for d in result.domains:
+                logger.info(
+                    f"[{d.domain_id}] {d.signals_persisted} new signals, "
+                    f"{d.opportunities_detected} new opportunities"
+                )
+            logger.info(
+                f"Pipeline complete — {result.total_signals} total signals, "
+                f"{result.total_opportunities} total opportunities across "
+                f"{len(result.domains)} domain(s)"
+            )
+            persistence.push()
+    except locking.LockBusyError:
+        logger.warning("Pipeline run skipped -- another run is already in progress")

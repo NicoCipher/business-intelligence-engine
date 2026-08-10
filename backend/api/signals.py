@@ -13,6 +13,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
 import database
 from database import decode_json, get_stats
@@ -21,7 +22,43 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("", response_model=dict)
+# ── Response models ─────────────────────────────────────────────────────
+# Real, enforced models (not response_model=dict), matching the pattern
+# applied to api/opportunities.py and api/reports.py.
+
+class SignalItem(BaseModel):
+    id: str
+    source: str
+    title: str
+    url: str
+    engagement: int
+    tags: list[str]
+    collected_at: str
+    processed: bool
+
+
+class SignalListResponse(BaseModel):
+    signals: list[SignalItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class TagCount(BaseModel):
+    tag: str
+    count: int
+
+
+class SignalStats(BaseModel):
+    total_signals: int
+    total_opps: int
+    signals_this_week: int
+    latest_collection: Optional[str] = None
+    by_source: dict[str, int]
+    top_tags: list[TagCount]
+
+
+@router.get("", response_model=SignalListResponse)
 def list_signals(
     source: Optional[str] = Query(
         None,
@@ -98,7 +135,7 @@ def list_signals(
     }
 
 
-@router.get("/stats", response_model=dict)
+@router.get("/stats", response_model=SignalStats)
 def get_signal_stats():
     """
     Return collection statistics for the dashboard status panel.

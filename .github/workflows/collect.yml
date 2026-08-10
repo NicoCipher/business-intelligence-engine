@@ -17,6 +17,14 @@ on:
         type: boolean
         default: false
 
+# Least-privilege: this workflow only needs to read the repo, manage its
+# own cache, and read/list workflow artifacts (to restore the database
+# backup). No write access to repository contents is needed. See the V1
+# security review's CI/CD permissions finding.
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   collect:
     name: Collect · Extract · Detect · (Report on Sundays)
@@ -40,6 +48,29 @@ jobs:
           key: bia-database-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             bia-database-${{ runner.os }}-
+
+      # ── Durable backup restore ───────────────────────────────────────────
+      # The cache above is best-effort and evictable. This finds the most
+      # recent successful run's artifact snapshot (see the upload step
+      # further down) and restores it into backend/data/backups/, which
+      # collect.py's persistence.pull() then restores from if the
+      # cache-provided database doesn't already exist. actions/download-
+      # artifact alone can't do this (it only sees the current run without
+      # an explicit prior run-id) -- gh CLI (preinstalled, no third-party
+      # action) finds that run-id first. Expected to find nothing on the
+      # very first run ever; continue-on-error handles that startup case.
+      - name: Restore database backup artifact
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN_ID=$(gh run list --workflow=collect.yml --status=success --limit=1 --json databaseId --jq '.[0].databaseId')
+          if [ -n "$RUN_ID" ]; then
+            echo "Restoring backup artifact from run $RUN_ID"
+            gh run download "$RUN_ID" -n bia-database-backup -D backend/data/backups/ || echo "No backup artifact found on run $RUN_ID"
+          else
+            echo "No previous successful run found -- starting fresh"
+          fi
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -79,6 +110,24 @@ jobs:
           REDDIT_CLIENT_ID:     ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           BIA_DATA_DIR:         backend/data
+
+      # ── Durable backup ───────────────────────────────────────────────────
+      # The database cache above is NOT a durability guarantee -- GitHub
+      # Actions cache is explicitly subject to eviction with no restore
+      # path. collect.py calls persistence.pull()/push() around every run,
+      # snapshotting to backend/data/backups/; this step uploads that
+      # directory as a build artifact, which has far longer, more explicit
+      # retention than the cache. See persistence.py for the pull/push seam
+      # this can later be pointed at real durable storage through, without
+      # any caller needing to change.
+      - name: Upload database backup artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bia-database-backup
+          path: backend/data/backups/
+          retention-days: 90
+          if-no-files-found: warn
 
       # ── Upload pipeline summary ─────────────────────────────────────────
       - name: Write job summary

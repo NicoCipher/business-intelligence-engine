@@ -15,6 +15,12 @@ on:
       - 'backend/**'
       - '.github/workflows/ci.yml'
 
+# Least-privilege: this workflow only reads the repo and runs tests --
+# no write access to contents, packages, or anything else is needed.
+# See the V1 security review's CI/CD permissions finding.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: pytest

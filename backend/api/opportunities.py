@@ -4,7 +4,7 @@ api/opportunities.py — Opportunity API endpoints
 Routes:
   GET  /api/v1/opportunities                list, sorted by composite score
   GET  /api/v1/opportunities/{id}           single opportunity with evidence
-  PATCH /api/v1/opportunities/{id}/status   update lifecycle status
+  PATCH /api/v1/opportunities/{id}/status   update lifecycle status (protected)
 
 No business logic lives here. These handlers:
   1. Parse and validate request parameters (Pydantic handles this)
@@ -15,13 +15,13 @@ If a route grows complex, extract a service function in opportunity_engine/
 and call it from here. Routes stay thin.
 """
 
-import json
 import logging
 from typing import Optional, Literal
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
+import auth
 import database
 from database import decode_json
 
@@ -30,6 +30,9 @@ router = APIRouter()
 
 
 # ── Request / Response schemas ─────────────────────────────────────────────
+# Real, enforced models -- wired via response_model= below, not
+# response_model=dict. FastAPI validates every response against these
+# and generates an accurate OpenAPI schema from them.
 
 class StatusUpdate(BaseModel):
     status: Literal["validated", "dismissed", "archived"]
@@ -55,9 +58,21 @@ class OpportunityDetail(OpportunitySummary):
     evidence: list[dict]
 
 
+class OpportunityListResponse(BaseModel):
+    opportunities: list[OpportunitySummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class StatusUpdateResponse(BaseModel):
+    id: str
+    status: str
+
+
 # ── Routes ────────────────────────────────────────────────────────────────
 
-@router.get("", response_model=dict)
+@router.get("", response_model=OpportunityListResponse)
 def list_opportunities(
     status: Optional[str] = Query(
         None,
@@ -124,7 +139,7 @@ def list_opportunities(
     }
 
 
-@router.get("/{opp_id}", response_model=dict)
+@router.get("/{opp_id}", response_model=OpportunityDetail)
 def get_opportunity(opp_id: str):
     """
     Return a single opportunity with its full evidence chain.
@@ -177,10 +192,15 @@ def get_opportunity(opp_id: str):
     return result
 
 
-@router.patch("/{opp_id}/status", response_model=dict)
-def update_status(opp_id: str, body: StatusUpdate):
+@router.patch("/{opp_id}/status", response_model=StatusUpdateResponse)
+def update_status(
+    opp_id: str,
+    body: StatusUpdate,
+    actor: auth.Actor = Depends(auth.get_current_actor),
+):
     """
-    Update an opportunity's lifecycle status.
+    Update an opportunity's lifecycle status. Protected -- requires a
+    valid API key when BIA_API_KEY is configured (see auth.py).
 
     Valid transitions:
       new → validated  (human confirmed this is worth pursuing)
@@ -203,7 +223,7 @@ def update_status(opp_id: str, body: StatusUpdate):
             raise HTTPException(status_code=404, detail="Opportunity not found")
         conn.commit()
 
-    logger.info(f"Opportunity {opp_id} status → {body.status}")
+    logger.info(f"Opportunity {opp_id} status → {body.status} (by {actor})")
     return {"id": opp_id, "status": body.status}
 
 
