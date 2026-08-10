@@ -31,6 +31,7 @@ class SignalItem(BaseModel):
     source: str
     title: str
     url: str
+    domain: str
     engagement: int
     tags: list[str]
     collected_at: str
@@ -68,6 +69,10 @@ def list_signals(
         None,
         description="Filter by tag (e.g. demand_signal, complaint_signal)"
     ),
+    domain: Optional[str] = Query(
+        None,
+        description="Filter by domain id, e.g. business | cybersecurity"
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
@@ -78,6 +83,10 @@ def list_signals(
     This is not the most efficient approach for very large tables, but it
     is correct and simple. Add a full-text search index here when signal
     volume exceeds ~100k rows.
+
+    The domain filter is an unvalidated equality match against the stored
+    `domain` column (same treatment as `source`/`tag`) -- an unknown domain
+    id returns an empty list rather than an error.
     """
     conditions = ["1=1"]
     params: dict = {}
@@ -91,6 +100,10 @@ def list_signals(
         conditions.append("tags LIKE :tag_pattern")
         params["tag_pattern"] = f'%"{tag}"%'
 
+    if domain:
+        conditions.append("domain = :domain")
+        params["domain"] = domain
+
     where = " AND ".join(conditions)
     params["limit"] = limit
     params["offset"] = offset
@@ -98,7 +111,7 @@ def list_signals(
     with database.get_connection() as conn:
         rows = conn.execute(
             f"""
-            SELECT id, source, title, url, platform_score,
+            SELECT id, source, title, url, domain, platform_score,
                    comment_count, tags, collected_at, processed
             FROM   signals
             WHERE  {where}
@@ -119,6 +132,7 @@ def list_signals(
             "source":       row["source"],
             "title":        row["title"],
             "url":          row["url"],
+            "domain":       row["domain"],
             "engagement":   row["platform_score"] + row["comment_count"],
             "tags":         decode_json(row["tags"], []),
             "collected_at": row["collected_at"],

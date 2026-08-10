@@ -47,6 +47,7 @@ class OpportunitySummary(BaseModel):
     tier: str
     status: str
     week_key: str
+    domain: str
     evidence_count: int
     scores: dict
     created_at: str
@@ -82,6 +83,10 @@ def list_opportunities(
         None,
         description="Filter by ISO week key, e.g. 2026-W28"
     ),
+    domain: Optional[str] = Query(
+        None,
+        description="Filter by domain id, e.g. business | cybersecurity"
+    ),
     min_score: float = Query(
         0.0, ge=0.0, le=10.0,
         description="Minimum composite score (0–10)"
@@ -95,6 +100,13 @@ def list_opportunities(
     The response includes summary-level scores but not full signal evidence.
     Use GET /{id} to retrieve the complete evidence chain for a single
     opportunity.
+
+    The domain filter is an unvalidated equality match against the stored
+    `domain` column (same treatment as `status`/`week`) -- an unknown
+    domain id returns an empty list rather than an error, consistent with
+    every other filter on this endpoint. No dedicated index exists on
+    `domain` alone yet (see database.py); acceptable at V1 scale, same
+    tolerance already applied to the tag LIKE-scan in signals.py.
     """
     conditions = ["composite_score >= :min_score"]
     params: dict = {"min_score": min_score}
@@ -107,6 +119,10 @@ def list_opportunities(
         conditions.append("week_key = :week")
         params["week"] = week
 
+    if domain:
+        conditions.append("domain = :domain")
+        params["domain"] = domain
+
     where = " AND ".join(conditions)
     params["limit"] = limit
     params["offset"] = offset
@@ -115,7 +131,7 @@ def list_opportunities(
         rows = conn.execute(
             f"""
             SELECT id, title, description, composite_score, status,
-                   week_key, scores, created_at
+                   week_key, domain, scores, created_at
             FROM   opportunities
             WHERE  {where}
             ORDER  BY composite_score DESC
@@ -245,6 +261,7 @@ def _row_to_summary(row) -> dict:
         "tier":            tier,
         "status":          row["status"],
         "week_key":        row["week_key"],
+        "domain":          row["domain"],
         "scores":          scores,
         "evidence_count":  scores.get("evidence_count", 0),
         "created_at":      row["created_at"],
