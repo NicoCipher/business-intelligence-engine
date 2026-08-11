@@ -34,6 +34,12 @@ HN_REQUEST_DELAY_S   = float(os.getenv("HN_REQUEST_DELAY", "0.15"))   # seconds 
 REDDIT_POST_LIMIT    = int(os.getenv("REDDIT_POST_LIMIT", "25"))       # per subreddit
 REDDIT_REQUEST_DELAY = float(os.getenv("REDDIT_REQUEST_DELAY", "1.0")) # PRAW handles rate limits; this is extra
 
+GITHUB_SEARCH_LIMIT   = int(os.getenv("GITHUB_SEARCH_LIMIT", "20"))        # per query, per endpoint (issues/repos)
+GITHUB_REQUEST_DELAY  = float(os.getenv("GITHUB_REQUEST_DELAY", "2.5"))    # seconds between search calls --
+                                                                             # the Search API's 30 req/min limit is
+                                                                             # far stricter than GitHub's general
+                                                                             # 5000 req/hr authenticated limit
+
 # Subreddits monitored. Ordered by signal quality for this system's purpose.
 REDDIT_SUBREDDITS = [
     "entrepreneur",

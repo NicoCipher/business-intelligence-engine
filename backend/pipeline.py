@@ -49,6 +49,7 @@ from collectors.base import persist_signals
 from collectors.hn_collector import HNCollector
 from collectors.reddit_collector import RedditCollector
 from collectors.rss_collector import RSSCollector
+from collectors.github_collector import GitHubCollector
 import database
 from domains.base import DomainConfig
 from domains.registry import DomainRegistry
@@ -176,6 +177,13 @@ def _run_domain(
                 domain=domain.id,
             )
             domain_signals.extend(rss.collect())
+
+        if domain.sources.github_queries:
+            github = GitHubCollector(
+                queries=domain.sources.github_queries,
+                domain=domain.id,
+            )
+            domain_signals.extend(github.collect())
 
     run_result.signals_collected = len(domain_signals)
     logger.info("[%s] collected %d signals this run", domain.id, len(domain_signals))

@@ -22,6 +22,13 @@ SOURCES = DomainSources(
         "digitalnomad",
         "juststart",
     ],
+    github_queries=[
+        "feature request saas",
+        "looking for a tool",
+        "no code automation",
+        "freelance workflow",
+        "small business tool",
+    ],
     rss_feeds=[
         RSSFeed(
             url="https://hnrss.org/ask",

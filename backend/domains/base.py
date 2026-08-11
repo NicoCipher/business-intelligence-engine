@@ -79,6 +79,13 @@ class DomainSources:
     rss_feeds      — RSS/Atom feeds this domain monitors.
                      The core RSS collector fetches these.
 
+    github_queries — plain search phrases (not raw GitHub query syntax —
+                     the collector appends is:issue/is:public qualifiers
+                     itself). Run against both GitHub's issue search
+                     (demand signal) and repository search (competition/
+                     opportunity signal: does something matching this
+                     already exist, and how much traction does it have).
+
     Shared collectors (Hacker News) run at the platform level and produce
     signals that every active domain processes. They are not configured here.
     Domain-specific API collectors (e.g. NVD for cybersecurity) will be
@@ -86,6 +93,7 @@ class DomainSources:
     """
     reddit_sources: list[str]    = field(default_factory=list)
     rss_feeds:      list[RSSFeed] = field(default_factory=list)
+    github_queries: list[str]    = field(default_factory=list)
 
 
 # ── Keywords ──────────────────────────────────────────────────────────────
