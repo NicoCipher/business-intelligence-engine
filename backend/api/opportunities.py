@@ -248,11 +248,15 @@ def update_status(
 def _row_to_summary(row) -> dict:
     """Convert a database row to an API summary dict."""
     scores = decode_json(row["scores"], {})
-    tier = (
-        "gold"   if row["composite_score"] >= 8.0 else
-        "silver" if row["composite_score"] >= 6.5 else
-        "bronze"
-    )
+    # Tier is read from the persisted scores JSON (written by
+    # OpportunityScores.to_dict() at scoring time, using whichever
+    # domain's thresholds actually applied) rather than recomputed here
+    # from composite_score against literal thresholds. Recomputing with
+    # hardcoded 8.0/6.5 was ADR-011's fourth hardcode site: it silently
+    # ignored a non-Business domain's own ScoringThresholds. "bronze"
+    # fallback matches explainer/opportunity.py's existing convention
+    # for a missing/legacy tier value.
+    tier = scores.get("tier", "bronze")
     return {
         "id":              row["id"],
         "title":           row["title"],

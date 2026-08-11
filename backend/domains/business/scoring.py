@@ -24,6 +24,22 @@ Weights are unchanged from config.SCORE_WEIGHTS (sum = 1.0 exactly).
 """
 
 from domains.base import DomainScoring, ScoringDimension, ScoringThresholds
+from domains.business.scoring_functions import (
+    compute_demand, compute_competition, compute_revenue_potential,
+    compute_confidence, compute_execution_difficulty,
+    compute_time_to_revenue, compute_risk,
+)
+
+# NOTE on positive_keywords below vs. compute_demand()'s actual behavior:
+# "demand"'s positive_keywords documents a broader vocabulary (including
+# complaint/frustration phrasing) than compute_demand() (Tier-2, see
+# scoring_functions.py) actually checks — a pre-existing documentation/
+# implementation gap, not introduced by this change. Since every
+# dimension below supplies compute_fn, positive_keywords/negative_keywords
+# are not currently consumed by the engine for this domain (see
+# opportunity_engine/scorer.py) — they are reference/intent documentation
+# and the Tier-1 generic fallback's input, unused here since Tier-1 never
+# runs for a dimension that has a compute_fn.
 
 SCORING = DomainScoring(
     dimensions=[
@@ -51,6 +67,7 @@ SCORING = DomainScoring(
                 "why doesn't", "nobody does",
             ]),
             negative_keywords=frozenset(),
+            compute_fn=compute_demand,
         ),
         ScoringDimension(
             id="competition",
@@ -67,6 +84,7 @@ SCORING = DomainScoring(
                 "underserved", "no competitor",
             ]),
             negative_keywords=frozenset(),
+            compute_fn=compute_competition,
         ),
         ScoringDimension(
             id="revenue_potential",
@@ -83,6 +101,7 @@ SCORING = DomainScoring(
                 "commercial license",
             ]),
             negative_keywords=frozenset(),
+            compute_fn=compute_revenue_potential,
         ),
         ScoringDimension(
             id="confidence",
@@ -95,6 +114,7 @@ SCORING = DomainScoring(
             weight=0.15,
             positive_keywords=frozenset(),
             negative_keywords=frozenset(),
+            compute_fn=compute_confidence,
         ),
         ScoringDimension(
             id="execution_difficulty",
@@ -113,6 +133,7 @@ SCORING = DomainScoring(
                 "hardware", "biotech", "clinical trial", "semiconductor",
                 "patent", "novel research", "phd", "fda approval",
             ]),
+            compute_fn=compute_execution_difficulty,
         ),
         ScoringDimension(
             id="time_to_revenue",
@@ -128,6 +149,7 @@ SCORING = DomainScoring(
             negative_keywords=frozenset([
                 "marketplace", "platform", "community", "network effect",
             ]),
+            compute_fn=compute_time_to_revenue,
         ),
         ScoringDimension(
             id="risk",
@@ -145,6 +167,7 @@ SCORING = DomainScoring(
                 "openai announced", "microsoft announced",
                 "overhyped", "bubble",
             ]),
+            compute_fn=compute_risk,
         ),
     ],
     thresholds=ScoringThresholds(

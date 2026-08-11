@@ -18,10 +18,21 @@ Serialisation:
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, InitVar
 from datetime import datetime, timezone
 from typing import Optional
 
+# SCORE_WEIGHTS/TIER_GOLD/TIER_SILVER are used only as OpportunityScores'
+# *default* weights/thresholds (ADR-011) — for objects built without a
+# domain context: direct test construction, and from_dict() on any
+# persisted row. A domain-aware caller (OpportunityScorer) always supplies
+# its own DomainScoring-derived weights/thresholds explicitly at
+# construction time and never relies on this default. Values here are
+# identical to domains.business.scoring.SCORING's, by design (see that
+# module's docstring) — this file does not import domains.* to keep
+# models.py free of any dependency beyond config.py, per its own
+# docstring ("no dependency on the database, the API framework, or any
+# external library").
 from config import SCORE_WEIGHTS, TIER_GOLD, TIER_SILVER
 
 
@@ -242,61 +253,203 @@ class DimensionExplanation:
 
 # ── OpportunityScores ─────────────────────────────────────────────────────
 
-@dataclass
+# Keys in to_dict()'s flat serialization that are not dimension ids.
+# from_dict() treats every other key as a dimension. This is what makes
+# to_dict()/from_dict() work for any domain's dimension id set, not just
+# Business's seven, while staying byte-compatible with every row
+# persisted before ADR-011 (see that ADR's "flat JSON compatibility"
+# invariant).
+_SCORES_META_KEYS = frozenset({"evidence_count", "composite", "tier", "explanations"})
+
+
 class OpportunityScores:
     """
-    Fully transparent scoring breakdown for one opportunity.
+    Fully transparent scoring breakdown for one opportunity (ADR-011:
+    Domain-Generalized Opportunity Scoring).
 
     Every dimension is 0–10. Higher is always better (difficulty and risk
     are already inverted by the scorer before reaching this model).
 
-    The composite() method applies documented weights from config.py.
-    Anyone can inspect, question, or adjust the weights.
+    `dimensions` is a dict keyed by dimension id (e.g. "demand" for
+    Business; a future domain's ids, e.g. "severity", equally at home
+    here) — not a fixed set of named fields. `weights` and `thresholds`
+    are supplied by whichever DomainScoring produced this object
+    (OpportunityScorer, see opportunity_engine/scorer.py) and default to
+    Business's current values if omitted, for any caller with no domain
+    context (see the config import note above).
+
+    A plain class with a hand-written __init__, not @dataclass: the
+    seven legacy keyword arguments below (demand=, competition=, ...)
+    need to be accepted by the constructor without becoming stored
+    fields — dataclass's InitVar mechanism can do that, but only if no
+    same-named @property also exists on the class, since both share the
+    same class-attribute slot at class-definition time and one silently
+    clobbers the other. A plain __init__ has no such collision: the
+    parameter names are local to the function, unrelated to the
+    same-named read-only properties below. No __getattr__ or
+    __getattribute__ override is used or needed.
+
+    Backward compatibility, both deliberate and load-bearing:
+      - Construction accepts Business's original flat keyword arguments
+        (OpportunityScores(demand=10, competition=9, ...)), merged into
+        `dimensions`. Existing callers using this form are unaffected
+        (see test_scorer.py, test_scoring_explanations.py).
+      - Read-only properties (.demand, .competition, etc.) delegate to
+        `dimensions.get(id, 0.0)`, so existing read access (including
+        opportunity_engine/detector.py's `scores.confidence`, which this
+        change does not modify) keeps working unchanged.
+      - to_dict()'s shape is unchanged: dimension ids as flat top-level
+        keys, alongside evidence_count/composite/tier/explanations —
+        every row persisted before this change round-trips through
+        from_dict() identically. Tier labels remain the literal strings
+        "gold"/"silver"/"bronze" (not domain-neutral "high"/"medium"/
+        "low") because opportunity_engine/explainer/{opportunity,
+        summary}.py and report/generator.py match on those exact
+        strings and are out of scope for this change (ADR-011).
     """
-    demand: float = 0.0              # evidence of active unmet demand
-    competition: float = 0.0        # inverse of market saturation
-    revenue_potential: float = 0.0  # signals of willingness to pay
-    execution_difficulty: float = 0.0  # inverted: 10 = trivially easy
-    time_to_revenue: float = 0.0    # inverted: 10 = can earn this week
-    risk: float = 0.0               # inverted: 10 = very low risk
-    confidence: float = 0.0         # quality of evidence (count + diversity)
-    evidence_count: int = 0         # raw number of signals in the cluster
-    # Per-dimension reason + evidence, keyed by dimension name (e.g. "demand").
-    # Optional: defaults to {} so every existing caller that builds
-    # OpportunityScores with numeric kwargs only (tests, from_dict on old
-    # rows) keeps working unchanged. Populated by OpportunityScorer.score().
-    explanations: dict[str, "DimensionExplanation"] = field(default_factory=dict)
+
+    def __init__(
+        self,
+        dimensions: Optional[dict[str, float]] = None,
+        evidence_count: int = 0,
+        explanations: Optional[dict[str, "DimensionExplanation"]] = None,
+        weights: Optional[dict[str, float]] = None,
+        thresholds: Optional[tuple[float, float]] = None,
+        *,
+        demand: Optional[float] = None,
+        competition: Optional[float] = None,
+        revenue_potential: Optional[float] = None,
+        execution_difficulty: Optional[float] = None,
+        time_to_revenue: Optional[float] = None,
+        risk: Optional[float] = None,
+        confidence: Optional[float] = None,
+    ):
+        self.dimensions = dict(dimensions) if dimensions else {}
+
+        # Legacy flat-kwarg construction — merged into `dimensions`.
+        legacy = {
+            "demand": demand, "competition": competition,
+            "revenue_potential": revenue_potential,
+            "execution_difficulty": execution_difficulty,
+            "time_to_revenue": time_to_revenue, "risk": risk,
+            "confidence": confidence,
+        }
+        for key, value in legacy.items():
+            if value is not None:
+                self.dimensions[key] = value
+
+        self.evidence_count = evidence_count
+        self.explanations = explanations if explanations is not None else {}
+        # None -> Business's current values, for any caller with no
+        # domain context (direct construction, from_dict() on a
+        # persisted row). A domain-aware caller (OpportunityScorer)
+        # always supplies its own explicitly.
+        self.weights = weights if weights is not None else dict(SCORE_WEIGHTS)
+        self.thresholds = thresholds if thresholds is not None else (TIER_GOLD, TIER_SILVER)
+
+    # ── Legacy read-only accessors ──────────────────────────────────────
+    # Ordinary properties (get + set), delegating to `dimensions`. Kept
+    # specifically because opportunity_engine/detector.py reads
+    # `.confidence` directly, and tests/test_explainer.py constructs
+    # fixtures by assigning post-construction (e.g. `scores.demand = 9.0`)
+    # — both are out of scope for this change (ADR-011) and unmodified.
+    # Kept symmetrically for all seven so existing test assertions (e.g.
+    # `scorer.score(x).demand`) are unaffected. Not part of the
+    # generalized contract — a future domain's own dimension ids are
+    # read/written via `.dimensions[id]`, not a matching attribute.
+
+    @property
+    def demand(self) -> float:
+        return self.dimensions.get("demand", 0.0)
+
+    @demand.setter
+    def demand(self, value: float) -> None:
+        self.dimensions["demand"] = value
+
+    @property
+    def competition(self) -> float:
+        return self.dimensions.get("competition", 0.0)
+
+    @competition.setter
+    def competition(self, value: float) -> None:
+        self.dimensions["competition"] = value
+
+    @property
+    def revenue_potential(self) -> float:
+        return self.dimensions.get("revenue_potential", 0.0)
+
+    @revenue_potential.setter
+    def revenue_potential(self, value: float) -> None:
+        self.dimensions["revenue_potential"] = value
+
+    @property
+    def execution_difficulty(self) -> float:
+        return self.dimensions.get("execution_difficulty", 0.0)
+
+    @execution_difficulty.setter
+    def execution_difficulty(self, value: float) -> None:
+        self.dimensions["execution_difficulty"] = value
+
+    @property
+    def time_to_revenue(self) -> float:
+        return self.dimensions.get("time_to_revenue", 0.0)
+
+    @time_to_revenue.setter
+    def time_to_revenue(self, value: float) -> None:
+        self.dimensions["time_to_revenue"] = value
+
+    @property
+    def risk(self) -> float:
+        return self.dimensions.get("risk", 0.0)
+
+    @risk.setter
+    def risk(self, value: float) -> None:
+        self.dimensions["risk"] = value
+
+    @property
+    def confidence(self) -> float:
+        return self.dimensions.get("confidence", 0.0)
+
+    @confidence.setter
+    def confidence(self, value: float) -> None:
+        self.dimensions["confidence"] = value
+
+    # ── Computed values ──────────────────────────────────────────────────
 
     def composite(self) -> float:
         """
-        Weighted average of all dimensions.
-        Weights are defined in config.SCORE_WEIGHTS to keep them adjustable.
+        Weighted average of all dimensions, using this object's own
+        `weights` (domain-supplied at construction, or Business's
+        defaults). No global import: two OpportunityScores from two
+        different domains can each carry their own weights simultaneously.
         """
         score = sum(
-            getattr(self, dim) * weight
-            for dim, weight in SCORE_WEIGHTS.items()
+            self.dimensions.get(dim_id, 0.0) * weight
+            for dim_id, weight in self.weights.items()
         )
         return round(min(10.0, max(0.0, score)), 2)
 
     def tier(self) -> str:
+        """
+        Classify composite() against this object's own `thresholds`
+        (high, medium). Labels stay "gold"/"silver"/"bronze" — see class
+        docstring for why these are not generalized in this change.
+        """
         s = self.composite()
-        if s >= TIER_GOLD:   return "gold"
-        if s >= TIER_SILVER: return "silver"
+        high, medium = self.thresholds
+        if s >= high:   return "gold"
+        if s >= medium: return "silver"
         return "bronze"
 
     def to_dict(self) -> dict:
-        """Serialise to dict for JSON storage and API responses."""
+        """Serialise to dict for JSON storage and API responses. Flat
+        shape preserved exactly (ADR-011): dimension ids as top-level
+        keys, unchanged from every row persisted before this change."""
         return {
-            "demand":              round(self.demand, 2),
-            "competition":         round(self.competition, 2),
-            "revenue_potential":   round(self.revenue_potential, 2),
-            "execution_difficulty": round(self.execution_difficulty, 2),
-            "time_to_revenue":     round(self.time_to_revenue, 2),
-            "risk":                round(self.risk, 2),
-            "confidence":          round(self.confidence, 2),
-            "evidence_count":      self.evidence_count,
-            "composite":           self.composite(),
-            "tier":                self.tier(),
+            **{dim_id: round(value, 2) for dim_id, value in self.dimensions.items()},
+            "evidence_count": self.evidence_count,
+            "composite":      self.composite(),
+            "tier":           self.tier(),
             "explanations": {
                 dim: exp.to_dict() for dim, exp in self.explanations.items()
             },
@@ -304,14 +457,13 @@ class OpportunityScores:
 
     @classmethod
     def from_dict(cls, d: dict) -> "OpportunityScores":
+        """Reconstruct from to_dict()'s flat shape. Any key not in
+        _SCORES_META_KEYS is treated as a dimension id — works for
+        Business's seven ids on every pre-existing row, and equally for
+        any future domain's own ids, with no hardcoded key list."""
+        dimensions = {k: v for k, v in d.items() if k not in _SCORES_META_KEYS}
         return cls(
-            demand=d.get("demand", 0.0),
-            competition=d.get("competition", 0.0),
-            revenue_potential=d.get("revenue_potential", 0.0),
-            execution_difficulty=d.get("execution_difficulty", 0.0),
-            time_to_revenue=d.get("time_to_revenue", 0.0),
-            risk=d.get("risk", 0.0),
-            confidence=d.get("confidence", 0.0),
+            dimensions=dimensions,
             evidence_count=d.get("evidence_count", 0),
             explanations={
                 dim: DimensionExplanation.from_dict(exp)

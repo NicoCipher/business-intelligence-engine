@@ -32,7 +32,7 @@ Type hierarchy:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import Callable, NamedTuple, Optional
 
 
 # ── Identity ──────────────────────────────────────────────────────────────
@@ -191,8 +191,23 @@ class ScoringDimension:
     positive_keywords — presence boosts this dimension's score.
     negative_keywords — presence reduces this dimension's score.
 
-    Note: For Milestones 1–4, the core scorer still uses config.py values.
-    In Milestone 5, it will be updated to consume these keyword sets directly.
+    compute_fn — optional Tier-2 extension point (ADR-011). A callable
+    with signature (signals, blob) -> (score, reason, evidence), for
+    dimensions whose value requires signal-structure reasoning that a
+    keyword list alone cannot express (e.g. source diversity, engagement,
+    frequency). Loosely typed here (Callable[..., tuple[float, str, str]])
+    rather than importing models.Signal, to keep this module free of any
+    dependency beyond the standard library.
+
+    When compute_fn is None, the engine falls back to a generic Tier-1
+    keyword-presence scorer using positive_keywords/negative_keywords —
+    a reasonable default for a simple dimension, not a claim of
+    replicating any particular domain's tuned formula. A domain with a
+    dimension that needs bespoke reasoning should always supply compute_fn
+    explicitly rather than rely on the generic fallback approximating it.
+
+    Milestone 5 (ADR-011): the core scorer now consumes this contract —
+    see opportunity_engine/scorer.py.
     """
     id:                str
     label:             str
@@ -200,6 +215,7 @@ class ScoringDimension:
     weight:            float
     positive_keywords: frozenset[str] = field(default_factory=frozenset)
     negative_keywords: frozenset[str] = field(default_factory=frozenset)
+    compute_fn:        Optional[Callable[..., tuple[float, str, str]]] = None
 
 
 @dataclass(frozen=True)
