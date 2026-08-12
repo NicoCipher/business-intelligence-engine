@@ -50,6 +50,7 @@ from collectors.hn_collector import HNCollector
 from collectors.reddit_collector import RedditCollector
 from collectors.rss_collector import RSSCollector
 from collectors.github_collector import GitHubCollector
+from collectors.trends_collector import TrendsCollector
 import database
 from domains.base import DomainConfig
 from domains.registry import DomainRegistry
@@ -184,6 +185,13 @@ def _run_domain(
                 domain=domain.id,
             )
             domain_signals.extend(github.collect())
+
+        if domain.sources.trends_keywords:
+            trends = TrendsCollector(
+                keywords=domain.sources.trends_keywords,
+                domain=domain.id,
+            )
+            domain_signals.extend(trends.collect())
 
     run_result.signals_collected = len(domain_signals)
     logger.info("[%s] collected %d signals this run", domain.id, len(domain_signals))

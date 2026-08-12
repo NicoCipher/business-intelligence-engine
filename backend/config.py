@@ -40,6 +40,12 @@ GITHUB_REQUEST_DELAY  = float(os.getenv("GITHUB_REQUEST_DELAY", "2.5"))    # sec
                                                                              # far stricter than GitHub's general
                                                                              # 5000 req/hr authenticated limit
 
+GOOGLE_TRENDS_KEYWORD_LIMIT  = int(os.getenv("GOOGLE_TRENDS_KEYWORD_LIMIT", "20"))     # rising-query signals, total across all keywords
+GOOGLE_TRENDS_REQUEST_DELAY  = float(os.getenv("GOOGLE_TRENDS_REQUEST_DELAY", "30.0")) # seconds between keywords --
+                                                                             # pytrends is unofficial/reverse-
+                                                                             # engineered with no documented rate
+                                                                             # limit; deliberately conservative
+
 # Subreddits monitored. Ordered by signal quality for this system's purpose.
 REDDIT_SUBREDDITS = [
     "entrepreneur",

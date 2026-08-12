@@ -29,6 +29,13 @@ SOURCES = DomainSources(
         "freelance workflow",
         "small business tool",
     ],
+    trends_keywords=[
+        "invoicing software",
+        "freelance tools",
+        "no code platform",
+        "side hustle ideas",
+        "small business automation",
+    ],
     rss_feeds=[
         RSSFeed(
             url="https://hnrss.org/ask",

@@ -86,6 +86,13 @@ class DomainSources:
                      opportunity signal: does something matching this
                      already exist, and how much traction does it have).
 
+    trends_keywords — search terms tracked via Google Trends. For each,
+                     the collector surfaces currently-rising related
+                     queries as signals (emerging, specific demand
+                     adjacent to the tracked term) and tags them
+                     trending_up when the tracked term's own search
+                     interest is currently increasing.
+
     Shared collectors (Hacker News) run at the platform level and produce
     signals that every active domain processes. They are not configured here.
     Domain-specific API collectors (e.g. NVD for cybersecurity) will be
@@ -94,6 +101,7 @@ class DomainSources:
     reddit_sources: list[str]    = field(default_factory=list)
     rss_feeds:      list[RSSFeed] = field(default_factory=list)
     github_queries: list[str]    = field(default_factory=list)
+    trends_keywords: list[str]   = field(default_factory=list)
 
 
 # ── Keywords ──────────────────────────────────────────────────────────────

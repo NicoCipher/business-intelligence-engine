@@ -14,7 +14,13 @@ requests==2.32.3
 
 # ── Data sources ───────────────────────────────────────────────────────────
 praw==7.7.1               # Official Reddit API wrapper (read-only, free)
-# HN uses the Firebase public API via requests — no extra package needed.
+# HN and GitHub use plain requests against their official REST APIs — no
+# extra package needed for either.
+pytrends==4.9.2            # Unofficial Google Trends client — see
+                            # collectors/trends_collector.py's module
+                            # docstring for the reliability caveat this
+                            # implies (no official API, no documented
+                            # rate limit).
 
 # ── Testing ────────────────────────────────────────────────────────────────
 pytest==8.3.2
