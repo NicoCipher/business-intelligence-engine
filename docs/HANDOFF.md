@@ -1,4 +1,4 @@
-# BIA Project Handoff (updated — through `b616196`, domain-awareness on list endpoints)
+# BIA Project Handoff (updated — through `c45e612`, pipeline test network-isolation fix)
 
 Supersedes the schema-v7-era handoff. Full architecture detail now lives
 in `docs/ARCHITECTURE.md` (current state) and `docs/SCHEMA.md` (full
@@ -113,13 +113,82 @@ immutable observation) → Report`.
     empty list, not an error), closing a Domain Architecture (§7)
     isolation gap — both tables have had an indexed `domain` column
     since schema v2. `GET /reports` and a dedicated Problem endpoint
-    are explicitly out of scope for this change (`b616196`, current
-    `HEAD`).
+    are explicitly out of scope for this change (`b616196`).
+20. **ADR-011: Domain-Generalized Opportunity Scoring** — designed
+    (`a58733a`) then implemented (`665631a`). Followed a domain/plugin
+    architecture audit that found `OpportunityScores`, `config.py`'s
+    `SCORE_WEIGHTS`/`TIER_GOLD`/`TIER_SILVER`, and a fourth,
+    independently-hardcoded tier-threshold check in
+    `api/opportunities.py` were all coupled to Business's specific
+    seven dimensions, none reachable from `DomainConfig.scoring` (which
+    had existed, unused, since the domain architecture was introduced).
+    `OpportunityScores.dimensions` is now a dict keyed by domain-
+    supplied dimension ids, computed via two tiers — Tier 1
+    (data-driven, keyword-presence) and Tier 2 (a registered
+    `compute_fn`, for signal-structure logic a keyword list can't
+    express). Flat `to_dict()` serialization preserved exactly, zero DB
+    migration. `OpportunityScores` ended up a plain class with a
+    hand-written `__init__`, not `@dataclass` — an `InitVar`+`@property`
+    combination was tried first and reverted: both claim the same class
+    attribute at class-definition time, and one silently clobbers the
+    other, breaking either construction or reads. Explicitly out of
+    scope, per the ADR: `explainer/*`'s narrative logic and
+    `detector.py`'s cluster-acceptance gate stay hardcoded to Business's
+    seven dimensions — not touched, not generalized. 547/547 passing at
+    this commit.
+21. **GitHub collector** (`b5afceb`) — `GitHubCollector`, domain-scoped
+    like Reddit (not shared/unauthenticated like HN, since GitHub
+    search needs a token and is meaningfully domain-specific). Searches
+    `/search/issues` (demand signal) and `/search/repositories`
+    (competition/opportunity signal — direct, checkable evidence
+    whether a similar solution already exists, which no prior source
+    gave). `source_id` prefixed `issue-`/`repo-` since GitHub's issue
+    and repo numeric ids are separate namespaces. Validated during
+    development against live (unauthenticated) GitHub API responses,
+    not just synthetic fixtures. 570/570 passing at this commit.
+22. **Google Trends collector, plus GitHub/Reddit credential setup**
+    (`cfa8624`) — `TrendsCollector`, via `pytrends` (unofficial,
+    reverse-engineered, no documented rate limit — explicitly treated
+    in its own module docstring as the least reliable source in the
+    system, not a peer of Reddit/GitHub/HN's official APIs). Also
+    domain-scoped, a correction from an earlier "shared like HN"
+    framing: Trends has no global feed, it's entirely keyword-driven.
+    Rising related queries become signals (`demand_signal` applied
+    unconditionally — surging search volume is inherently a demand
+    signal, unlike the marker-matching the other three collectors use).
+    `source_id` is date-scoped, not deduplicated across days — the same
+    rising query surging again later is a new, true observation
+    (recurrence), not a stale repeat. One real bug caught by the new
+    tests, not by inspection: the `trending_up` heuristic returned a
+    numpy `bool_` scalar instead of a native Python `bool` — fixed. Also:
+    `.env.example` updated with `GITHUB_TOKEN` and an explicit
+    "Trends needs no credentials" note; `requirements.txt` gained
+    `pytrends==4.9.2` (had been installed manually during development,
+    never pinned). Live-validated for GitHub only during that session —
+    `trends.google.com` was not reachable from the development sandbox,
+    so Trends' parsing is fixture-based, not live-cross-checked. 593/593
+    passing at this commit.
+23. **CI regression, pipeline test network isolation** (`c45e612`) —
+    two tests failed on stale signal counts after GitHub/Trends were
+    wired into `pipeline.py`; root cause was worse than a stale count:
+    `_patch_collectors()` (test helper) was never updated to patch the
+    two new collectors, and three tests register the real
+    `domains.business.DOMAIN_CONFIG` (which carries real
+    `github_queries`/`trends_keywords`) then call `run_full_pipeline()`
+    unpatched — CI logs showed a live Google Trends 429 mid-run, which
+    is what surfaced this. Fixed structurally: `_patch_collectors()`
+    itself now patches all five collectors, defaulting GitHub/Trends to
+    `[]` — the three existing test bodies needed zero argument changes,
+    which is why expected counts stayed at their original 6/4, not
+    bumped to 9/11. Added one new test proving the positive path
+    (GitHub/Trends signals, when present, get the correct domain tag).
+    594/594 passing at this commit, current `HEAD`.
 
-**Current code state:** `origin/main` at `b616196` — everything above
+**Current code state:** `origin/main` at `c45e612` — everything above
 is committed and pushed; working tree is clean, nothing outstanding.
-Per `b616196`'s own commit message, full suite was 533/533 passing
-(522 baseline + 11 new) at that commit. Schema version 9.
+594/594 tests passing. Schema version 9 (unchanged by any of items
+20–23 — ADR-011's storage-layer generalization required zero DB
+migration).
 
 **Active problems:** none known/open. Every DDL-ordering-class bug found
 during the CI investigation is fixed and has dedicated regression
@@ -127,14 +196,31 @@ coverage (`test_migration_v5.py`, `test_migration_v6_upgrade.py`,
 `test_migration_v8.py`, `test_migration_v9.py`) that specifically
 exercises both failure modes (pre-migration database, and fresh database
 with guard-nested index creation) so neither recurs silently for a
-future migration.
+future migration. The GitHub/Trends network-isolation gap (item 23) is
+also fixed and covered — `_patch_collectors()` patching all five
+collectors is a structural fix, not a per-test one, so a future new
+collector being added without updating that helper is the only way to
+reintroduce a similar leak.
 
 **Known gaps, explicitly out of scope of recent work (not bugs):** no
 Problem REST endpoint exists yet (`api/` has `opportunities.py`,
 `reports.py`, `signals.py` only); `GET /reports` has no `domain` filter
 despite `ReportDetail` already carrying the field; RFC-001's eleven-stage
 pipeline is accepted but the codebase still runs the six-layer model —
-no migration plan exists yet for that transition.
+no migration plan exists yet for that transition. From the domain/plugin
+audit that produced ADR-011: `knowledge_graph/extractor.py`,
+`opportunity_engine/detector.py`, and `opportunity_engine/explainer/*`
+still consume `knowledge_graph/schema.py`'s and `config.py`'s hardcoded
+Business vocabulary directly, not `domain.graph`/`domain.keywords` —
+ADR-011 deliberately scoped only the scoring-storage layer; these three
+are separate, not-yet-designed follow-on work, still blocking an actual
+second domain from working correctly even with scoring now generalized.
+Operationally: Reddit credentials are not configured in the only
+environment that's touched this project so far, so the Reddit collector
+has never been live-validated, only unit-tested; Google Trends has been
+unit-tested against fixtures built from `pytrends`' own source, never
+against a live response, since `trends.google.com` wasn't reachable
+from that environment either.
 
 ## Part 2: Product Vision
 
@@ -319,6 +405,29 @@ six-layer model this list still describes.
     `domain` field (unlike Opportunities/Signals before `b616196`) but
     the list endpoint has no filter for it. Small, same pattern as
     `b616196`.
+16. ~~Domain-generalized opportunity scoring~~ — done, ADR-011
+    (`665631a`). See Part 1 item 20. Deliberately scoped to the
+    storage/composite-calculation layer only.
+17. **Second-domain data-source generalization** — the follow-on ADR-011
+    deliberately didn't do. `knowledge_graph/extractor.py` still reads
+    `knowledge_graph/schema.py`'s hardcoded Business entity vocabulary,
+    not `domain.graph`; `opportunity_engine/detector.py`'s
+    cluster-acceptance gate and `opportunity_engine/explainer/*`'s
+    narrative logic are still hardcoded to Business's specific
+    dimensions and keyword sets. Scoring being domain-generic now
+    doesn't mean a second domain would actually work end-to-end — these
+    three are what would still block it. No design started.
+18. ~~Add GitHub and Google Trends collectors~~ — done (`b5afceb`,
+    `cfa8624`). Not originally on this list — added by direct request
+    mid-session, not from the RFC review's prioritization. Google
+    Trends' parsing has never been live-validated (see Part 1's "Known
+    gaps"); worth a real validation pass before leaning on its output
+    for anything scored/reported.
+19. Reddit live validation — credentials were never configured in the
+    environment this project has been developed in so far; the
+    collector has only ever been exercised via its unit tests (canned
+    fixtures) and its graceful-failure path (missing credentials),
+    never against the real Reddit API.
 
 **Frontend note (from the RFC review, worth restating):** the
 originally-planned "backend done → build Next.js frontend" ordering was
@@ -331,30 +440,23 @@ history to design against, not be built thin on day one.
 ## Part 5: Recent History
 
 **History, most recent last (extends the log in the prior handoff
-revision, which covered through schema v7/v8/v9-drafting and the
-handbook merge — see git log for full detail on any commit below):**
+revision, which covered through `b616196` — see git log for full detail
+on any commit below):**
 
-1. Schema v9 (Problem lifecycle & trend, two independent axes — see
-   Part 3) was committed and pushed: `9a3b3b3`.
-2. ADR-006/007 subject confusion corrected via supersession
-   (ADR-008/009/010, not edits to the originals) — `b899793`.
-3. Live bug: reports were only generated on Sundays
-   (`args.report or is_sunday` gate in `collect.py`). Root-caused,
-   fixed to run unconditionally, `is_sunday` removed — `e0a43d7`.
-4. Two previously-deferred code-debt items closed back to back:
-   `explainer.py` package split (`9524d1e`), keyword-scanning
-   consolidation into `opportunity_engine/keyword_matching.py`
-   (`dc193cd`).
-5. RFC-001 (Constitutional Analyst Pipeline, Accepted) and RFC-002
-   (Investigation Findings contract, Proposed) — a new `docs/rfc/`
-   track and a major accepted pipeline redesign (six-layer model →
-   eleven-stage pipeline). Docs only, no code — `6895848`.
-6. V1 security and production foundation: single-operator API-key auth,
-   file locking (fixes a real concurrent-write SQLite race), durable
-   backup snapshots, request size limits and security headers —
-   `a90a95a`.
-7. Domain-awareness filter added to `GET /opportunities` and
-   `GET /signals` — `b616196`, current `HEAD`.
+1. Domain/plugin architecture audit (no commit — analysis only) found
+   `OpportunityScores` and three other sites coupled to Business's
+   seven hardcoded scoring dimensions, none reachable from
+   `DomainConfig.scoring`.
+2. ADR-011 designed and locked (`a58733a`), then implemented
+   (`665631a`) — see Part 1 item 20 for full detail.
+3. GitHub collector added (`b5afceb`) — see Part 1 item 21.
+4. Google Trends collector added, plus GitHub/Reddit credential setup
+   (`cfa8624`) — see Part 1 item 22.
+5. CI regression: two pipeline tests failed on stale signal counts;
+   root cause was a test-isolation gap letting live GitHub/Trends
+   network calls happen during "unit" tests. Fixed structurally, not
+   with a stale-count bump (`c45e612`, current `HEAD`) — see Part 1
+   item 23.
 
 **Token handling note, still relevant for whoever continues this:**
 every GitHub Personal Access Token used in this project's history was
@@ -366,34 +468,37 @@ https://github.com/settings/tokens**, and treat any newly-provided token
 the same way — use once, then revoke.
 
 **Current state:** working tree clean, nothing uncommitted, `origin/main`
-and local `main` both at `b616196`. Nothing pending push.
+and local `main` both at `c45e612`. Nothing pending push.
 
-**Next steps — three independent open threads, pick based on priority:**
+**Next steps — four independent open threads, pick based on priority:**
 
-- **RFC-001 implementation** (Part 4 item 13): the largest open item.
-  No migration plan exists yet from the current six-layer pipeline to
-  the eleven-stage constitutional pipeline. RFC-002 (Findings contract)
-  is still Proposed, not Accepted — likely needs to resolve first,
-  since it's on RFC-001's critical path.
-- **Problem REST endpoint** (Part 4 item 14): explicitly deferred by
-  `b616196`'s own commit message. No design work started — response
-  shape, whether `problem_history` is inlined or a sub-resource,
-  filtering, and pagination are all open questions. Should be checked
-  against RFC-002's Findings shape and RFC-001's stage boundaries
-  before implementation, given RFC-001 is now Accepted, to avoid
-  building API surface against the six-layer model right as it's
-  being superseded.
-- **Small, ungated cleanup** (Part 4 item 15): `GET /reports` domain
-  filter, same small pattern as `b616196`, no design gate.
+- **Second-domain data-source generalization** (Part 4 item 17): the
+  most direct follow-on to ADR-011. `extractor.py`, `detector.py`, and
+  `explainer/*` are still Business-hardcoded — scoring alone being
+  generic doesn't make a second domain work.
+- **RFC-001 implementation** (Part 4 item 13): still the largest
+  standing open item, unchanged since the last revision. RFC-002's
+  Findings contract still needs to move from Proposed to Accepted first.
+- **Problem REST endpoint** (Part 4 item 14): still not designed. Should
+  be checked against RFC-002's Findings shape and RFC-001's stage
+  boundaries before implementation, same caveat as last revision.
+- **Collector live-validation debt** (Part 4 items 18–19): Google
+  Trends has never been checked against a real response — only
+  fixture-based tests, built from reading `pytrends`' own source, not
+  from an actual live call. Reddit has never been exercised at all
+  beyond its graceful-failure path. Worth resolving before leaning on
+  either collector's output for anything that gets scored or reported
+  on.
 
 Whoever picks this up should keep the pattern noted in the prior
 handoff revision in mind: this project's best schema/design decisions
 have repeatedly come from proposing a shape, implementing it fully with
 tests, and *then* finding a better shape through review (schema v8's
 fresh-database DDL gap, schema v9's single-field-to-two-axis
-correction) — not a failure mode to avoid, a process to expect and
+correction, ADR-011's `OpportunityScores` construction mechanism going
+through two failed designs before landing on a plain hand-written
+`__init__`) — not a failure mode to avoid, a process to expect and
 budget for. Given that pattern, and the standing "explain before
-implementing" instruction, the Problem REST endpoint in particular
-should get an explicit design discussion — including how it relates to
-RFC-002's Findings facets, since both are new API-shaped surfaces
-touching Problem-adjacent data — before any code is written.
+implementing" instruction, the Problem REST endpoint and the
+second-domain generalization work in particular should both get an
+explicit design discussion before any code is written.
