@@ -3,10 +3,23 @@ tests/test_pipeline_domains.py — Integration tests for the domain-aware
 pipeline (Milestone 4a).
 
 These tests exercise pipeline.run_full_pipeline() end-to-end against a
-real (temporary, file-based) SQLite database, with the three collectors
-monkeypatched to return canned Signal objects instead of making network
-calls — collectors themselves are unit-tested elsewhere; this file tests
-the wiring between DomainRegistry, the pipeline, and the database.
+real (temporary, file-based) SQLite database, with all five collectors
+(HN, Reddit, RSS, GitHub, Trends) monkeypatched to return canned Signal
+objects instead of making network calls — collectors themselves are
+unit-tested elsewhere (test_reddit_collector.py [pending],
+test_rss_collector.py, test_github_collector.py,
+test_trends_collector.py); this file tests the wiring between
+DomainRegistry, the pipeline, and the database.
+
+GitHub and Trends are patched to return [] by default even in tests
+that don't explicitly care about them (see _patch_collectors below) —
+BUSINESS_DOMAIN_CONFIG is the real production domain config and does
+carry real github_queries/trends_keywords, so leaving either
+unpatched means a live network call, not a test failure with a wrong
+count. This was a real regression once (CI hit a live Google Trends
+429 mid-test-run) and the fix is structural: _patch_collectors always
+patches all five, so no future test using it can reintroduce the leak
+by simply forgetting to pass a kwarg.
 
 Covered:
   - a single active domain (the real "business" domain) runs correctly
@@ -98,15 +111,32 @@ def _fake_signals(prefix: str, source: str, n: int, offset: int = 0) -> list[Sig
     ]
 
 
-def _patch_collectors(monkeypatch, hn_signals, reddit_by_domain, rss_by_domain=None):
+def _patch_collectors(
+    monkeypatch, hn_signals, reddit_by_domain,
+    rss_by_domain=None, github_by_domain=None, trends_by_domain=None,
+):
     """
-    Replace HNCollector/RedditCollector/RSSCollector.collect() with canned
-    data so pipeline tests never make a real HTTP request. Each fake
-    respects `self.domain`, matching how the real collectors are used.
+    Replace every collector's .collect() with canned data so pipeline
+    tests never make a real HTTP request. Each fake respects
+    `self.domain`, matching how the real collectors are used.
+
+    GitHub and Trends default to an empty dict, i.e. every domain gets
+    []. This is a deliberate choice, not an oversight: BUSINESS_DOMAIN_
+    CONFIG (used directly by several tests below, since it's the real
+    production domain config) carries real github_queries/trends_keywords
+    -- pipeline._run_domain() calls those collectors unconditionally
+    whenever a domain configures them, live network calls and all, if
+    they aren't patched. This file's own docstring says collectors are
+    unit-tested elsewhere (see test_github_collector.py,
+    test_trends_collector.py) -- these tests exist to prove pipeline/
+    DomainRegistry/database wiring, not GitHub/Trends collection
+    behavior, so silencing them to [] here is correct, not a gap.
     """
     import collectors.hn_collector as hn_mod
     import collectors.reddit_collector as reddit_mod
     import collectors.rss_collector as rss_mod
+    import collectors.github_collector as github_mod
+    import collectors.trends_collector as trends_mod
 
     def fake_hn_collect(self, limit=None):
         return list(hn_signals)
@@ -117,9 +147,17 @@ def _patch_collectors(monkeypatch, hn_signals, reddit_by_domain, rss_by_domain=N
     def fake_rss_collect(self, limit=None):
         return list((rss_by_domain or {}).get(self.domain, []))
 
+    def fake_github_collect(self, limit=None):
+        return list((github_by_domain or {}).get(self.domain, []))
+
+    def fake_trends_collect(self, limit=None):
+        return list((trends_by_domain or {}).get(self.domain, []))
+
     monkeypatch.setattr(hn_mod.HNCollector, "collect", fake_hn_collect)
     monkeypatch.setattr(reddit_mod.RedditCollector, "collect", fake_reddit_collect)
     monkeypatch.setattr(rss_mod.RSSCollector, "collect", fake_rss_collect)
+    monkeypatch.setattr(github_mod.GitHubCollector, "collect", fake_github_collect)
+    monkeypatch.setattr(trends_mod.TrendsCollector, "collect", fake_trends_collect)
 
 
 def _rows(query: str) -> list:
@@ -218,6 +256,47 @@ class TestMultiDomain:
     def test_no_active_domains_raises(self, fresh_db):
         with pytest.raises(RuntimeError):
             pipeline.run_full_pipeline()
+
+    def test_github_and_trends_signals_get_correct_domain_when_present(self, fresh_db, monkeypatch):
+        """
+        Coverage gap this fix closes: BUSINESS_DOMAIN_CONFIG has real
+        github_queries/trends_keywords, so _run_domain() does call both
+        collectors for it — but until now nothing verified their output
+        actually gets persisted with the right domain tag in a
+        controlled way. Before this fix, either they were unpatched (a
+        live network call producing an untested, uncontrolled count) or
+        they're patched to []. This proves the wiring itself is correct
+        when they DO return signals, without depending on live data.
+        """
+        DomainRegistry.register(BUSINESS_DOMAIN_CONFIG)
+        DomainRegistry.register(_second_domain())
+
+        hn_signals = _fake_signals("shared", "hn", 1)
+        _patch_collectors(
+            monkeypatch, hn_signals,
+            reddit_by_domain={"business": [], "test_intel": []},
+            github_by_domain={"business": _fake_signals("business", "github", 2)},
+            trends_by_domain={"business": _fake_signals("business", "trends", 3)},
+        )
+
+        result = pipeline.run_full_pipeline()
+
+        business = next(d for d in result.domains if d.domain_id == "business")
+        test_intel = next(d for d in result.domains if d.domain_id == "test_intel")
+
+        # business: 1 shared HN + 2 github + 3 trends = 6
+        assert business.signals_collected == 6
+        # test_intel: github_queries/trends_keywords are empty for this
+        # fixture domain (see _second_domain()), so only shared HN applies
+        assert test_intel.signals_collected == 1
+
+        github_rows = _rows("SELECT domain FROM signals WHERE source = 'github'")
+        assert len(github_rows) == 2
+        assert all(r["domain"] == "business" for r in github_rows)
+
+        trends_rows = _rows("SELECT domain FROM signals WHERE source = 'trends'")
+        assert len(trends_rows) == 3
+        assert all(r["domain"] == "business" for r in trends_rows)
 
 
 # ── Entry-point parity ───────────────────────────────────────────────
