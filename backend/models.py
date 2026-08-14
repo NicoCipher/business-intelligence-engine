@@ -48,10 +48,20 @@ def _uuid() -> str:
 
 # ── Entity ────────────────────────────────────────────────────────────────
 
-VALID_ENTITY_TYPES = frozenset([
-    "problem", "market", "technology", "company",
-    "skill", "product", "regulation", "person",
-])
+# Entity type names are intentionally NOT validated against a fixed set
+# here. This dataclass is domain-agnostic core code (see models.py's own
+# docstring) — the set of valid types is determined by whichever
+# domain's DomainKnowledgeGraph.entity_types produced this Entity (see
+# knowledge_graph/extractor.py), and that set genuinely differs by
+# domain. A fixed global allowlist here would reject any second
+# domain's own entity type names by construction, not by mistake —
+# found and fixed alongside the extractor.py/detector.py/canonicalizer.py
+# domain-generalization work, since it blocked exactly what that work
+# was for. The type is already guaranteed valid for its domain by the
+# time an Entity is constructed (extractor.py only ever passes a
+# type_name drawn directly from the active domain's own entity_types
+# keys), so re-validating against a separate, hardcoded list here was
+# both redundant for Business and actively wrong for anything else.
 
 
 VALID_LIFECYCLE_STATES = frozenset(["active", "dormant", "archived"])
@@ -79,8 +89,8 @@ class Entity:
     lifecycle_updated_at: str = field(default_factory=_now)
 
     def __post_init__(self):
-        if self.type not in VALID_ENTITY_TYPES:
-            raise ValueError(f"Invalid entity type '{self.type}'. Must be one of {VALID_ENTITY_TYPES}")
+        if not self.type or not self.type.strip():
+            raise ValueError("Entity.type must not be empty")
         if self.lifecycle_state not in VALID_LIFECYCLE_STATES:
             raise ValueError(
                 f"Invalid lifecycle_state '{self.lifecycle_state}'. "

@@ -4,6 +4,23 @@ strongest entity co-occurrence pairs.
 
 See opportunity_engine/explainer/__init__.py for this module's place in
 the overall split.
+
+Deliberately not domain-generalized, same principle as
+opportunity_engine/explainer/opportunity.py (see that module's
+docstring). _TREND_NAME_TEMPLATES and _WHO_CARES hardcode Business's
+entity type names into narrative sentence templates ("{a} + {b}
+tooling", "developers and technical builders" for a technology-typed
+entity, etc.) — a second domain's own entity types (e.g. a security
+domain's "threat") have no template here and never will via a generic
+substitution; new templates would need to be designed for whatever
+narrative a second domain's own entity-pair combinations should read as.
+
+Note: this module's own "confidence" (_trend_confidence and related) is
+an unrelated, locally-computed concept — entity co-occurrence strength
+(weight, supporting signal count) — not OpportunityScores.dimensions
+["confidence"]. It shares an English word with the scoring dimension,
+not any code path, so it isn't part of the scoring-generalization
+boundary at all.
 """
 
 from knowledge_graph.insights import explain_pair

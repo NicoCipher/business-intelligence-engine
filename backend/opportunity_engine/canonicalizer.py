@@ -29,6 +29,7 @@ import json
 import logging
 
 import database
+from domains.registry import DomainRegistry
 from knowledge_graph import decay
 from knowledge_graph.extractor import EntityExtractor
 from opportunity_engine import problem_history, lifecycle
@@ -55,11 +56,23 @@ def resolve_entity_ids(cluster_signals: list[Signal], domain: str) -> list[str]:
     matched (type, name, domain) triple's canonical entities.id, the
     same resolution technique extractor.py's persist_results() uses for
     relationship building.
+
+    Extraction vocabulary is resolved from `domain` via
+    DomainRegistry.get_or_default() — falls back to Business's if
+    `domain` isn't currently registered (e.g. a domain id used only for
+    isolation testing, not a real registered DomainConfig), matching
+    EntityExtractor's own zero-arg default rather than raising. The
+    DB-level lookup below stays scoped to the literal `domain` string
+    regardless of which vocabulary was used to extract — this function
+    has never claimed extraction itself is domain-scoped beyond that;
+    see test_canonicalizer.py's TestDomainScoping for the exact,
+    pre-existing behavior this preserves.
     """
     if not cluster_signals:
         return []
 
-    extractor = EntityExtractor()
+    domain_config = DomainRegistry.get_or_default(domain)
+    extractor = EntityExtractor(domain_config.graph if domain_config else None)
     found: set[tuple[str, str]] = set()
     for sig in cluster_signals:
         result = extractor.extract(sig)

@@ -189,6 +189,41 @@ class DomainRegistry:
         return cls._registry[domain_id]
 
     @classmethod
+    def get_or_default(cls, domain_id: str, default_id: str = "business") -> "DomainConfig | None":
+        """
+        Return a registered domain by id, falling back to `default_id`
+        if `domain_id` is not currently registered. Returns None,
+        rather than raising, if neither is registered — deliberately
+        non-raising, unlike get().
+
+        Exists for call sites that only have a domain *string* (not a
+        DomainConfig object already in hand) and may run without a full
+        DomainRegistry.discover_and_register() bootstrap — direct
+        construction paths, tests, and any code exercised outside a
+        real pipeline run. A raising fallback (calling cls.get()
+        internally) was tried first and doesn't actually work for this:
+        plain unit tests (test_canonicalizer.py, test_extractor.py,
+        test_detector_diagnose.py) register no domain at all, not even
+        "business", so a fallback that itself calls cls.get(default_id)
+        would still raise in exactly the callers this exists to help.
+
+        The intended pattern at call sites is:
+            domain_config = DomainRegistry.get_or_default(domain_id)
+            extractor = EntityExtractor(domain_config.graph if domain_config else None)
+        i.e. None flows through to the consumer's own zero-arg default
+        (EntityExtractor()/PatternDetector()'s direct import of
+        Business's config) rather than this method trying to own that
+        fallback itself.
+
+        Not a substitute for cls.get() inside the pipeline's own
+        domain loop, where the real DomainConfig is already available
+        directly and no string lookup or fallback is needed at all.
+        """
+        if domain_id in cls._registry:
+            return cls._registry[domain_id]
+        return cls._registry.get(default_id)
+
+    @classmethod
     def get_active(cls) -> list["DomainConfig"]:
         """
         Return all registered (= active) domains in registration order.

@@ -8,7 +8,7 @@ the overall split.
 
 from collections import defaultdict
 
-from config import DEMAND_KEYWORDS, COMPLAINT_KEYWORDS, WILLINGNESS_TO_PAY
+from domains.registry import DomainRegistry
 
 from opportunity_engine.explainer.historical import match_previous_opportunity
 from opportunity_engine.keyword_matching import any_keyword_hit
@@ -20,7 +20,7 @@ _REJECTION_LABELS = {
 }
 
 
-def _is_business_signal(rejected) -> bool:
+def _is_business_signal(rejected, domain_keywords=None) -> bool:
     """
     Filters out clusters that read as pure news/announcements rather than
     a potential business opportunity — e.g. a product-launch announcement
@@ -31,9 +31,21 @@ def _is_business_signal(rejected) -> bool:
     Below-threshold clusters were actually scored, so this uses the
     scorer's own demand/revenue-potential evidence directly — the same
     real signal the scoring engine already computed, not a new check.
+    This first path is unaffected by domain-generalization: it reads
+    the *evidence text* the scorer wrote (e.g. "0 demand-keyword"), and
+    that string format is unchanged (verified against
+    domains/business/scoring_functions.py's compute_demand/
+    compute_revenue_potential, which produce it) — so no domain
+    threading is needed here, only the fallback path below needed it.
+
     too_small/single_source clusters were never scored (too small to
     evaluate), so this falls back to the same keyword vocabulary the
-    scorer itself uses, applied directly to the cluster's text.
+    scorer itself uses (domain_keywords.include | .boost — verified, at
+    the time this was generalized, to be exactly the DEMAND_KEYWORDS/
+    COMPLAINT_KEYWORDS/WILLINGNESS_TO_PAY union this checked directly
+    before), applied to the cluster's text. Defaults to Business's
+    keywords if domain_keywords isn't supplied, matching every other
+    zero-context default in this codebase.
     """
     if rejected.scores and rejected.scores.explanations:
         demand_exp = rejected.scores.explanations.get("demand")
@@ -42,12 +54,12 @@ def _is_business_signal(rejected) -> bool:
         no_pay = revenue_exp is None or "0 willingness-to-pay" in revenue_exp.evidence
         return not (no_demand and no_pay)
 
+    if domain_keywords is None:
+        from domains.business.keywords import KEYWORDS as domain_keywords
+
     blob = " ".join(s.full_text for s in rejected.signals)
-    return (
-        any_keyword_hit(blob, DEMAND_KEYWORDS)
-        or any_keyword_hit(blob, WILLINGNESS_TO_PAY)
-        or any_keyword_hit(blob, COMPLAINT_KEYWORDS)
-    )
+    vocabulary = domain_keywords.include | domain_keywords.boost
+    return any_keyword_hit(blob, vocabulary)
 
 
 def _watch_list_recommendation(rejection_reason: str, composite_score, weeks_seen: int = 1) -> dict:
@@ -87,7 +99,10 @@ def _watch_list_recommendation(rejection_reason: str, composite_score, weeks_see
     )}
 
 
-def build_watch_list(rejected: list, limit: int = 5, previous_watch_list: list[dict] | None = None) -> list[dict]:
+def build_watch_list(
+    rejected: list, limit: int = 5, previous_watch_list: list[dict] | None = None,
+    domain: str = "business",
+) -> list[dict]:
     """
     Promising-but-below-threshold themes — always available regardless of
     whether real opportunities exist this period. This is what lets a
@@ -109,8 +124,14 @@ def build_watch_list(rejected: list, limit: int = 5, previous_watch_list: list[d
     Args: rejected = list of opportunity_engine.detector.RejectedCluster
     (from PatternDetector.diagnose()). previous_watch_list = last period's
     watch_list content, or None/empty if there's nothing to compare against.
+    domain = which domain's keyword vocabulary _is_business_signal's
+    fallback path uses. Resolved via DomainRegistry.get_or_default() —
+    falls back to Business's if `domain` isn't currently registered.
     """
-    business_candidates = [r for r in rejected if _is_business_signal(r)]
+    domain_config = DomainRegistry.get_or_default(domain)
+    domain_keywords = domain_config.keywords if domain_config else None
+
+    business_candidates = [r for r in rejected if _is_business_signal(r, domain_keywords)]
     if not business_candidates:
         return []
 

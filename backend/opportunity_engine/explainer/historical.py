@@ -5,6 +5,17 @@ Matches this period's opportunities against the previous period's by
 title-token overlap, and builds the signal-volume / dimension-average
 comparison narrative. See opportunity_engine/explainer/__init__.py for
 this module's place in the overall split.
+
+Deliberately not domain-generalized, same principle as
+opportunity_engine/explainer/opportunity.py (see that module's
+docstring): _avg_dimensions and build_historical_comparison hardcode
+exactly three of Business's seven dimensions (demand, competition,
+confidence) as the ones worth trend-narrating week-over-week, plus a
+fixed output schema (demand_trend/competition_trend/confidence_trend as
+named dict keys) and narrative sentence structure. Which dimensions
+matter enough to call out in a trend narrative is an editorial choice
+about Business specifically, not a lookup a domain's config holds a
+substitutable list for.
 """
 
 from opportunity_engine.similarity import title_tokens as _title_tokens, jaccard as _jaccard

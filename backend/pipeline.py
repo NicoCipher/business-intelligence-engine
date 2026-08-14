@@ -205,7 +205,7 @@ def _run_domain(
 
     # ── Stage 2: Extract entities ───────────────────────────────────────
     if domain_signals:
-        extractor = EntityExtractor()
+        extractor = EntityExtractor(domain.graph)
         extraction_results = extractor.extract_batch(domain_signals)
         if not dry_run:
             counts = extractor.persist_results(extraction_results, domain=domain.id)
@@ -238,7 +238,7 @@ def _run_domain(
 
     # ── Stage 3: Detect opportunities ───────────────────────────────────
     if len(domain_signals) >= 2:
-        detector = PatternDetector()
+        detector = PatternDetector(domain)
         if dry_run:
             opps = detector.detect(domain_signals, domain=domain.id)
             run_result.opportunities_detected = len(opps)

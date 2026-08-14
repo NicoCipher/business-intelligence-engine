@@ -52,13 +52,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import database
+from domains.base import DomainConfig
+from domains.business import DOMAIN_CONFIG as _DEFAULT_DOMAIN_CONFIG
 from models import Signal, Opportunity, OpportunityScores
 from opportunity_engine.scorer import OpportunityScorer
 from opportunity_engine import canonicalizer
-from config import (
-    MIN_CLUSTER_SIZE, MIN_COMPOSITE_TO_PERSIST,
-    DEMAND_KEYWORDS, COMPLAINT_KEYWORDS, WILLINGNESS_TO_PAY,
-)
+from config import MIN_CLUSTER_SIZE, MIN_COMPOSITE_TO_PERSIST
 
 logger = logging.getLogger(__name__)
 
@@ -117,12 +116,25 @@ class PatternDetector:
     Detects opportunity clusters in a set of signals.
 
     Usage:
-        detector = PatternDetector()
+        detector = PatternDetector()                # Business (default)
+        detector = PatternDetector(some_domain_config)  # any DomainConfig
         opportunities = detector.detect(signals)
+
+    Domain-scoping: defaults to Business's DOMAIN_CONFIG when constructed
+    with no argument — a narrow, documented exception to "no core file
+    imports a specific domain package" (domains/base.py), made necessary
+    by report/generator.py's PatternDetector() construction only having
+    a domain *string* in scope, not a DomainConfig object, at that call
+    site (see report/generator.py's own resolution via
+    DomainRegistry.get_or_default()), and by existing tests constructing
+    PatternDetector() directly. pipeline.py's own construction, inside
+    the real per-domain loop, always passes the real DomainConfig
+    explicitly and never touches this default.
     """
 
-    def __init__(self):
-        self._scorer = OpportunityScorer()
+    def __init__(self, domain_config: "DomainConfig | None" = None):
+        self.domain_config = domain_config or _DEFAULT_DOMAIN_CONFIG
+        self._scorer = OpportunityScorer(self.domain_config.scoring)
 
     def detect(self, signals: list[Signal], domain: str = "business") -> list[Opportunity]:
         """
@@ -387,8 +399,7 @@ class PatternDetector:
 
     # ── Cluster evaluation ─────────────────────────────────────────────────
 
-    @staticmethod
-    def _has_business_signal(cluster: list[Signal]) -> bool:
+    def _has_business_signal(self, cluster: list[Signal]) -> bool:
         """
         The core false-positive fix: does this cluster show ANY evidence of
         an actual business opportunity, or does it just read as news?
@@ -408,13 +419,19 @@ class PatternDetector:
         that fails this has literally zero of that language anywhere in
         it, which is a strong (if blunt) indicator it's discussion/news
         rather than a signal of unmet demand.
+
+        Vocabulary comes from self.domain_config.keywords (include | boost)
+        — verified, at the time this was generalized, to be exactly the
+        same set as the three config.py constants (DEMAND_KEYWORDS,
+        COMPLAINT_KEYWORDS, WILLINGNESS_TO_PAY) this checked directly
+        before. Domain-neutral in mechanism now; the specific keywords
+        themselves are still Business's, same as everywhere else in this
+        codebase until a second domain actually exists.
         """
         blob = " ".join(s.full_text for s in cluster)
-        return (
-            any(kw in blob for kw in DEMAND_KEYWORDS)
-            or any(kw in blob for kw in COMPLAINT_KEYWORDS)
-            or any(kw in blob for kw in WILLINGNESS_TO_PAY)
-        )
+        keywords = self.domain_config.keywords
+        vocabulary = keywords.include | keywords.boost
+        return any(kw in blob for kw in vocabulary)
 
     def _evaluate_cluster(self, cluster: list[Signal], domain: str) -> Opportunity | None:
         """

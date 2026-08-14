@@ -4,6 +4,40 @@ explanation (explain_opportunity and everything it alone depends on).
 
 See opportunity_engine/explainer/__init__.py for this module's place in
 the overall split.
+
+Deliberately not domain-generalized, unlike extractor.py/detector.py/
+canonicalizer.py (see the second-domain data-source generalization
+work): every function here embeds real judgment about what matters for
+a Business narrative specifically, not a vocabulary lookup this
+domain's config happens to hold a substitutable value for. Concretely:
+  - _DIMENSION_LABELS hardcodes Business's seven dimension display
+    strings. Checked whether these could source from
+    domains.business.scoring.SCORING's own ScoringDimension.label
+    fields instead — they can't: the values don't match (e.g. this
+    file's "Competition" vs. that module's "Market Gap" for the same
+    dimension id). scoring.py's labels were never kept in sync with
+    the real hardcoded ones, so swapping the source would have silently
+    changed existing report wording.
+  - ENTITY_TYPES/display_name (imported from knowledge_graph.schema,
+    the same pre-domain-architecture module extractor.py used to
+    import) are used below for _distinguishing_terms's specific,
+    priority-ordered choice of which entity types read as
+    "differentiators" for a founder (technology/problem/skill/
+    regulation, explicitly not market), and for _market_size_estimate's
+    Business-specific Small/Medium/Large market-breadth heuristic.
+    Both are judgment calls about Business narrative structure, not
+    data this domain's config could substitute a different value for.
+  - _market_gap, _time_to_first_revenue, _business_potential,
+    _risks_narrative, _confidence_narrative, and the verdict/action-plan/
+    founder-intelligence generation all read specific dimension ids by
+    name and write English sentences whose content is Business-specific
+    by design.
+
+A second domain needs its own narrative design for all of this, not a
+generic substitution of Business's — see the second-domain
+generalization work's own boundary notes in extractor.py, detector.py,
+and canonicalizer.py for the same principle applied to vocabulary
+instead of narrative.
 """
 
 from collections import defaultdict

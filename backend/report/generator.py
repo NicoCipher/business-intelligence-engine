@@ -59,6 +59,7 @@ from typing import Optional
 
 import database
 from database import decode_json, encode_json
+from domains.registry import DomainRegistry
 from knowledge_graph import graph as kg
 from knowledge_graph.insights import explain_pair
 from models import Signal, WeeklyReport
@@ -149,8 +150,11 @@ class ReportGenerator:
         # every period, not only on a zero-opportunity week. diagnose() is
         # read-only and doesn't persist anything, so running it unconditionally
         # doesn't change what's stored — only what the report can explain.
-        diagnostics = PatternDetector().diagnose(week_signals, domain=domain)
-        watch_list = explainer.build_watch_list(diagnostics.rejected, previous_watch_list=previous_watch_list)
+        domain_config = DomainRegistry.get_or_default(domain)
+        diagnostics = PatternDetector(domain_config).diagnose(week_signals, domain=domain)
+        watch_list = explainer.build_watch_list(
+            diagnostics.rejected, previous_watch_list=previous_watch_list, domain=domain,
+        )
 
         zero_explanation = None
         if not opportunities:

@@ -222,6 +222,60 @@ unit-tested against fixtures built from `pytrends`' own source, never
 against a live response, since `trends.google.com` wasn't reachable
 from that environment either.
 
+**Uncommitted, in progress right now — second-domain data-source
+generalization** (not yet a numbered item above; will become item 24
+once committed). Addresses exactly the gap the paragraph above used to
+describe as unaddressed:
+
+- `knowledge_graph/extractor.py` — `EntityExtractor` now takes a
+  `domain_graph` parameter (defaults to Business's), consuming
+  `domain.graph.entity_types`/`.get_display_name()` instead of the
+  hardcoded global `knowledge_graph/schema.py` module. Found and fixed
+  a real pre-existing gap first: `domains/business/graph.py` was
+  missing 6 `display_names` entries schema.py had (chatgpt, openai,
+  claude, gemini, anthropic, github) — a prerequisite fix before the
+  swap could be behavior-preserving.
+- `domains/registry.py` — new `DomainRegistry.get_or_default()`,
+  deliberately non-raising (returns `None`, not an exception, when
+  neither the requested nor default domain is registered) — a raising
+  version was tried first and doesn't work: plain unit tests register
+  no domain at all, not even "business".
+- `opportunity_engine/canonicalizer.py`, `detector.py`, `pipeline.py`,
+  `explainer/watch_list.py`, `report/generator.py` — all now resolve
+  and use the active domain's real config (graph/scoring/keywords)
+  instead of hardcoded globals or hidden Business defaults, wherever
+  the real domain object or a resolvable domain string was already in
+  scope.
+- `models.py` — a genuine third hardcoding site found by a new test
+  *failing*, not by inspection: `Entity.__post_init__` validated
+  `type` against a fixed, Business-shaped `VALID_ENTITY_TYPES` set.
+  Once extraction was correctly domain-scoped, this became actively
+  wrong (would reject any second domain's own entity type names), not
+  just redundant. Relaxed to a minimal non-empty-string check.
+- 20 new tests (`tests/test_domain_generalization.py`), verified by
+  actual mutation testing (not just read-through) to genuinely catch a
+  reverted fix rather than passing regardless — one test was caught
+  and strengthened mid-review for exactly this reason (an
+  `isinstance(ids, list)` assertion that would have passed even if the
+  underlying fix were reverted).
+- Deliberately NOT touched, and now explicitly documented in each
+  file's own docstring (previously this reasoning only existed in
+  chat, not in the code): `extractor.py`'s `_infer_relationship()`
+  (entity-type-pair semantics with explicit priority ordering, not a
+  vocabulary lookup); `explainer/opportunity.py`'s narrative logic
+  (verdict language, `_market_gap`, `_time_to_first_revenue`,
+  `_DIMENSION_LABELS` — checked whether labels could source from
+  `domains.business.scoring.SCORING`'s own fields, confirmed they
+  don't match the real hardcoded ones, e.g. `"Competition"` vs.
+  `"Market Gap"` for the same dimension id — swapping would have
+  silently changed existing report wording); `explainer/historical.py`
+  (hardcodes exactly 3 of 7 dimensions as worth trend-narrating, an
+  editorial choice); `explainer/trends.py`'s narrative templates
+  (`_TREND_NAME_TEMPLATES`/`_WHO_CARES`, keyed by Business's entity
+  type names).
+- 614/614 tests passing (613 + this file's 20, minus the strengthened
+  test replacing a weaker original — net +1 from the prior commit's 613).
+
 ## Part 2: Product Vision
 
 Unchanged from the prior handoff — see the original for the full
@@ -408,15 +462,19 @@ six-layer model this list still describes.
 16. ~~Domain-generalized opportunity scoring~~ — done, ADR-011
     (`665631a`). See Part 1 item 20. Deliberately scoped to the
     storage/composite-calculation layer only.
-17. **Second-domain data-source generalization** — the follow-on ADR-011
-    deliberately didn't do. `knowledge_graph/extractor.py` still reads
-    `knowledge_graph/schema.py`'s hardcoded Business entity vocabulary,
-    not `domain.graph`; `opportunity_engine/detector.py`'s
-    cluster-acceptance gate and `opportunity_engine/explainer/*`'s
-    narrative logic are still hardcoded to Business's specific
-    dimensions and keyword sets. Scoring being domain-generic now
-    doesn't mean a second domain would actually work end-to-end — these
-    three are what would still block it. No design started.
+17. ~~Second-domain data-source generalization~~ — mostly done,
+    uncommitted (see Part 1's uncommitted-work note). `extractor.py`,
+    `canonicalizer.py`, `detector.py`'s cluster-acceptance gate,
+    `pipeline.py`, and `watch_list.py`'s fallback gate are all
+    domain-generic now. What's still genuinely open, not a gap in this
+    pass: `extractor.py`'s `_infer_relationship()` and all of
+    `explainer/opportunity.py`/`historical.py`/`trends.py`'s narrative
+    logic — confirmed by inspection to be real editorial/semantic
+    judgment calls, not vocabulary lookups, so deliberately left
+    Business-hardcoded (now documented in each file, not just decided
+    in conversation). A real second `DomainConfig` would work for
+    extraction/detection/scoring today; its reports would still narrate
+    in Business's own terms.
 18. ~~Add GitHub and Google Trends collectors~~ — done (`b5afceb`,
     `cfa8624`). Not originally on this list — added by direct request
     mid-session, not from the RFC review's prioritization. Google
@@ -467,15 +525,24 @@ anything, confirm no stale token is still live at
 https://github.com/settings/tokens**, and treat any newly-provided token
 the same way — use once, then revoke.
 
-**Current state:** working tree clean, nothing uncommitted, `origin/main`
-and local `main` both at `c45e612`. Nothing pending push.
+**Current state:** `origin/main` and local `main` both at `c45e612`,
+committed and pushed. **Not clean** — the second-domain data-source
+generalization work described above in Part 1 is implemented, tested
+(614/614 passing), and reviewed, but sitting **uncommitted** locally.
+Nothing pending push beyond that.
 
 **Next steps — four independent open threads, pick based on priority:**
 
-- **Second-domain data-source generalization** (Part 4 item 17): the
-  most direct follow-on to ADR-011. `extractor.py`, `detector.py`, and
-  `explainer/*` are still Business-hardcoded — scoring alone being
-  generic doesn't make a second domain work.
+- **Commit the second-domain generalization work** sitting uncommitted
+  right now (Part 1's uncommitted-work note) — implemented, tested,
+  reviewed (including mutation-testing the new test file's real
+  coverage, not just reading it), just not yet committed.
+- **`explainer/*`'s narrative layer** (Part 4 item 17's remaining
+  half): now clearly, individually documented in each file exactly why
+  it's Business-specific (verdict language, trend-narration dimension
+  choice, entity-pair narrative templates) rather than left as an
+  unexplained gap. Real design work for a second domain's own
+  narrative would start here.
 - **RFC-001 implementation** (Part 4 item 13): still the largest
   standing open item, unchanged since the last revision. RFC-002's
   Findings contract still needs to move from Proposed to Accepted first.

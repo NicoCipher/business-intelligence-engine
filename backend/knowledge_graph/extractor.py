@@ -30,7 +30,8 @@ import logging
 from dataclasses import dataclass, field
 
 from models import Entity, Relationship, Signal
-from knowledge_graph.schema import ENTITY_TYPES, display_name
+from domains.base import DomainKnowledgeGraph
+from domains.business.graph import KNOWLEDGE_GRAPH as _DEFAULT_GRAPH
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +53,35 @@ class EntityExtractor:
     Extracts entities and relationships from signal text.
 
     Thread-safe. Create one instance and call extract() repeatedly.
+
+    Entity vocabulary (which keywords map to which entity type, and
+    display-name formatting) is domain-supplied via `domain_graph` —
+    defaults to Business's when not given, a narrow, documented
+    exception to "no core file imports a specific domain package"
+    (domains/base.py) made necessary by
+    opportunity_engine/canonicalizer.py's resolve_entity_ids() needing
+    a safe fallback when its `domain: str` argument doesn't resolve to
+    a currently-registered domain (see DomainRegistry.get_or_default()),
+    and by existing tests constructing EntityExtractor() directly.
+
+    Relationship *inference* (_infer_relationship below — which pair of
+    entity types implies "affects" vs. "enables" vs. "belongs_to", with
+    explicit priority ordering) is deliberately NOT generalized here.
+    Unlike vocabulary, that's semantic reasoning about what a specific
+    entity-type pairing means, not a lookup this domain's config
+    happens to hold a substitutable value for — the same kind of
+    judgment call ADR-011 drew a boundary around for explainer/*'s
+    narrative logic. A future domain would need its own relationship-
+    inference design, not a generic substitution of this one's
+    priority order.
     """
 
-    def __init__(self):
+    def __init__(self, domain_graph: "DomainKnowledgeGraph | None" = None):
+        self.domain_graph = domain_graph or _DEFAULT_GRAPH
+
         # Pre-compile regex patterns for short keywords
         self._short_patterns: dict[str, dict[str, re.Pattern]] = {}
-        for type_name, etype in ENTITY_TYPES.items():
+        for type_name, etype in self.domain_graph.entity_types.items():
             self._short_patterns[type_name] = {}
             for kw in etype.keywords:
                 if len(kw) <= _SHORT_KEYWORD_THRESHOLD:
@@ -80,10 +104,10 @@ class EntityExtractor:
         found_entities: list[Entity] = []
         seen_names: set[tuple[str, str]] = set()   # (type, name) deduplication
 
-        for type_name, etype in ENTITY_TYPES.items():
+        for type_name, etype in self.domain_graph.entity_types.items():
             for kw in etype.keywords:
                 if self._matches(kw, text, type_name):
-                    name = display_name(kw)
+                    name = self.domain_graph.get_display_name(kw)
                     key = (type_name, name.lower())
                     if key not in seen_names:
                         seen_names.add(key)
@@ -315,6 +339,10 @@ class EntityExtractor:
 
         Returns None only if the pair is identical (shouldn't happen after
         deduplication, but guarded anyway).
+
+        Hardcoded to Business's five entity type names, deliberately not
+        generalized — see the class docstring's "Relationship inference"
+        paragraph for why.
         """
         if a.id == b.id:
             return None
