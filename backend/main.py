@@ -42,7 +42,7 @@ import database
 import locking
 import persistence
 from config import API_HOST, API_PORT
-from api import opportunities, signals, reports
+from api import opportunities, signals, reports, problems
 from domains.registry import DomainRegistry
 
 # ── Logging ───────────────────────────────────────────────────────────────
@@ -150,6 +150,11 @@ app.include_router(
     reports.router,
     prefix="/api/v1/reports",
     tags=["reports"],
+)
+app.include_router(
+    problems.router,
+    prefix="/api/v1/problems",
+    tags=["problems"],
 )
 
 

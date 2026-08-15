@@ -79,7 +79,9 @@ def record_event(
     return event.id
 
 
-def list_for_problem(conn, problem_id: str, limit: int | None = None) -> list[ProblemHistoryEvent]:
+def list_for_problem(
+    conn, problem_id: str, limit: int | None = None, offset: int = 0,
+) -> list[ProblemHistoryEvent]:
     """
     Return a Problem's full timeline, oldest first (chronological reading
     order — a founder or future frontend screen reads a history top to
@@ -90,12 +92,18 @@ def list_for_problem(conn, problem_id: str, limit: int | None = None) -> list[Pr
     activity" should query occurred_at DESC themselves; this default
     matches the "read a timeline" use case, not a "recent activity feed"
     use case.
+
+    `offset` added for api/problems.py's history sub-resource endpoint —
+    default 0 keeps every existing call site's behavior unchanged.
     """
     query = "SELECT * FROM problem_history WHERE problem_id = ? ORDER BY occurred_at ASC"
     params: tuple = (problem_id,)
     if limit is not None:
-        query += " LIMIT ?"
-        params = (problem_id, limit)
+        query += " LIMIT ? OFFSET ?"
+        params = (problem_id, limit, offset)
+    elif offset:
+        query += " LIMIT -1 OFFSET ?"  # SQLite: OFFSET without LIMIT needs LIMIT -1 (unbounded)
+        params = (problem_id, offset)
 
     rows = conn.execute(query, params).fetchall()
     return [ProblemHistoryEvent.from_db_row(row) for row in rows]
