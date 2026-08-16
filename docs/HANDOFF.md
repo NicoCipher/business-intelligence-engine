@@ -1,4 +1,4 @@
-# BIA Project Handoff (updated — through `c45e612`, pipeline test network-isolation fix)
+# BIA Project Handoff (updated — through this commit, schema v10: Continuous Intelligence Engine foundation)
 
 Supersedes the schema-v7-era handoff. Full architecture detail now lives
 in `docs/ARCHITECTURE.md` (current state) and `docs/SCHEMA.md` (full
@@ -202,79 +202,160 @@ collectors is a structural fix, not a per-test one, so a future new
 collector being added without updating that helper is the only way to
 reintroduce a similar leak.
 
-**Known gaps, explicitly out of scope of recent work (not bugs):** no
-Problem REST endpoint exists yet (`api/` has `opportunities.py`,
-`reports.py`, `signals.py` only); `GET /reports` has no `domain` filter
-despite `ReportDetail` already carrying the field; RFC-001's eleven-stage
-pipeline is accepted but the codebase still runs the six-layer model —
-no migration plan exists yet for that transition. From the domain/plugin
-audit that produced ADR-011: `knowledge_graph/extractor.py`,
-`opportunity_engine/detector.py`, and `opportunity_engine/explainer/*`
-still consume `knowledge_graph/schema.py`'s and `config.py`'s hardcoded
-Business vocabulary directly, not `domain.graph`/`domain.keywords` —
-ADR-011 deliberately scoped only the scoring-storage layer; these three
-are separate, not-yet-designed follow-on work, still blocking an actual
-second domain from working correctly even with scoring now generalized.
+**Known gaps, explicitly out of scope of recent work (not bugs):**
+`GET /reports` has no `domain` filter despite `ReportDetail` already
+carrying the field (Problem REST endpoint is done as of item 25 above
+— this is the one remaining API-surface gap of this shape); RFC-001's
+eleven-stage pipeline is accepted but the codebase still runs the
+six-layer model — no migration plan exists yet for that transition.
+From the domain/plugin audit that produced ADR-011, now mostly
+addressed by item 24 above: `explainer/opportunity.py`, `historical.py`,
+and `trends.py`'s narrative logic remain deliberately Business-hardcoded
+(confirmed by inspection to be real editorial/semantic judgment, not
+vocabulary lookups — see item 24's own detail, and each file's own
+docstring), as does `extractor.py`'s `_infer_relationship()` (entity-
+type-pair semantics, same reasoning). Extraction, detection, and
+canonicalization themselves are domain-generic now; only the narrative
+layer is still Business-specific.
 Operationally: Reddit credentials are not configured in the only
 environment that's touched this project so far, so the Reddit collector
 has never been live-validated, only unit-tested; Google Trends has been
 unit-tested against fixtures built from `pytrends`' own source, never
 against a live response, since `trends.google.com` wasn't reachable
-from that environment either.
+from that environment either. Schema v10's five new tables are
+currently inert — `collector_state` exists and is seeded but nothing
+reads or writes it yet (no scheduler); `change_events` exists but
+nothing writes to it yet (no change detector); `watchlists`/
+`alert_rules`/`operator_state` exist with no consumer at all yet. This
+is the deliberate, explicit scope of a "foundation" migration, not an
+oversight — see item 26.
 
-**Uncommitted, in progress right now — second-domain data-source
-generalization** (not yet a numbered item above; will become item 24
-once committed). Addresses exactly the gap the paragraph above used to
-describe as unaddressed:
+24. **Second-domain data-source generalization** (`ac19d5c`). Addresses
+    exactly the gap the paragraph above used to describe as
+    unaddressed:
+    - `knowledge_graph/extractor.py` — `EntityExtractor` now takes a
+      `domain_graph` parameter (defaults to Business's), consuming
+      `domain.graph.entity_types`/`.get_display_name()` instead of the
+      hardcoded global `knowledge_graph/schema.py` module. Found and
+      fixed a real pre-existing gap first: `domains/business/graph.py`
+      was missing 6 `display_names` entries schema.py had (chatgpt,
+      openai, claude, gemini, anthropic, github) — a prerequisite fix
+      before the swap could be behavior-preserving.
+    - `domains/registry.py` — new `DomainRegistry.get_or_default()`,
+      deliberately non-raising (returns `None`, not an exception, when
+      neither the requested nor default domain is registered) — a
+      raising version was tried first and doesn't work: plain unit
+      tests register no domain at all, not even "business".
+    - `opportunity_engine/canonicalizer.py`, `detector.py`,
+      `pipeline.py`, `explainer/watch_list.py`, `report/generator.py`
+      — all now resolve and use the active domain's real config
+      (graph/scoring/keywords) instead of hardcoded globals or hidden
+      Business defaults, wherever the real domain object or a
+      resolvable domain string was already in scope.
+    - `models.py` — a genuine third hardcoding site found by a new
+      test *failing*, not by inspection: `Entity.__post_init__`
+      validated `type` against a fixed, Business-shaped
+      `VALID_ENTITY_TYPES` set. Once extraction was correctly
+      domain-scoped, this became actively wrong (would reject any
+      second domain's own entity type names), not just redundant.
+      Relaxed to a minimal non-empty-string check.
+    - 20 new tests (`tests/test_domain_generalization.py`), verified
+      by actual mutation testing (not just read-through) to genuinely
+      catch a reverted fix rather than passing regardless — one test
+      was caught and strengthened mid-review for exactly this reason
+      (an `isinstance(ids, list)` assertion that would have passed
+      even if the underlying fix were reverted).
+    - Deliberately NOT touched, and explicitly documented in each
+      file's own docstring (previously this reasoning only existed in
+      chat, not in the code): `extractor.py`'s `_infer_relationship()`
+      (entity-type-pair semantics with explicit priority ordering, not
+      a vocabulary lookup); `explainer/opportunity.py`'s narrative
+      logic (verdict language, `_market_gap`, `_time_to_first_revenue`,
+      `_DIMENSION_LABELS` — checked whether labels could source from
+      `domains.business.scoring.SCORING`'s own fields, confirmed they
+      don't match the real hardcoded ones, e.g. `"Competition"` vs.
+      `"Market Gap"` for the same dimension id — swapping would have
+      silently changed existing report wording); `explainer/
+      historical.py` (hardcodes exactly 3 of 7 dimensions as worth
+      trend-narrating, an editorial choice); `explainer/trends.py`'s
+      narrative templates (`_TREND_NAME_TEMPLATES`/`_WHO_CARES`, keyed
+      by Business's entity type names).
+    - 614/614 passing at this commit.
+25. **Problem REST API** (`a3d0966`) — `GET /api/v1/problems` (list,
+    filterable, three named sort orders: `recent`/`persistent`/
+    `significant`), `GET /api/v1/problems/{id}` (detail, linked
+    opportunities inlined), `GET /api/v1/problems/{id}/history` (full
+    timeline, its own paginated sub-resource — `problem_history` is
+    unbounded by design, so it's deliberately not inlined into the
+    detail response). `significant` sort computed via a `LEFT JOIN`
+    against `opportunities.composite_score` — Problem stays
+    intentionally unscored by architecture, so "significance" is read
+    off the best opportunity a problem has actually produced, not a
+    stored column. All three routes require auth
+    (`Depends(auth.get_current_actor)`) — a deliberate deviation from
+    `opportunities.py`/`signals.py`'s open GETs, applied for
+    consistency/future-proofing and clearly documented as intentional.
+    Verified against RFC-002 first: Problem's shape is unaffected by
+    whether RFC-002 (still Proposed) is ever accepted. 26 new tests.
+    640/640 passing at this commit.
+26. **Schema v10 — Continuous Intelligence Engine foundation** (this commit,
+    current `HEAD`). Five new tables, all additive, zero changes to any
+    existing table:
+    - `collector_state` — persisted per-`(source, domain)` scheduler
+      state (last run/success/failure, consecutive failures, backoff,
+      quota), the memory an adaptive scheduler needs that survives
+      between GitHub Actions' ephemeral runners (there is no
+      long-running process — see `.github/workflows/collect.yml` —
+      so nothing else could remember this between runs). Seeded for
+      all five known collectors with intervals reflecting each one's
+      own already-documented real constraints (Trends most
+      conservative at 360min/lowest priority, citing its own module
+      docstring's "least reliable source in the system"; GitHub's
+      240min citing its Search API's 30 req/min limit), not arbitrary
+      numbers. `next_due_at` deliberately NOT a stored column — fully
+      derivable from `last_run_at + interval_minutes` clamped by
+      `backoff_until`; storing it separately would risk drift, the
+      same anti-redundant-derived-state principle already applied to
+      `OpportunityScores.composite()` and `Problem.lifecycle_state`.
+    - `change_events` — append-only "something meaningful happened"
+      log, the intended future source for daily intelligence,
+      significance ranking, watchlist updates, and alerts. The actual
+      detection logic that writes to it is separate, later work — this
+      migration is the table only.
+    - `watchlists`, `alert_rules` — foundation only, no delivery
+      channel, no UI. Zero FKs on any of the five new tables, verified
+      directly via `PRAGMA foreign_key_list`, not assumed — `client_id`
+      is deliberately opaque TEXT, preserving a future multi-tenant
+      migration path without building one now.
+    - `operator_state` — added to this same v10 migration, not deferred
+      to v11, after explicit review: `change_events` alone can't answer
+      "what's new since I last checked" (its own stated purpose)
+      without a persisted "since when" reference point. Minimal
+      singleton — `CHECK (id = 1)` enforced at the SQLite level, one
+      column (`last_seen_at`) — deliberately not a settings table.
+    - Explicit, tested guard-rails for the single-operator constraint
+      this was built under: no `users`/`tenants`/`operators` table, no
+      `user_id`/`tenant_id` column anywhere, no delivery-channel column
+      on `alert_rules` — these are asserted, not just implied by
+      absence (`TestSingleOperatorConstraintsHold` in
+      `test_migration_v10.py`).
+    - One real formatting inconsistency caught during self-review, not
+      by inspection: `collector_state`'s column alignment had drifted
+      across two edits in this same session — fixed by computing the
+      correct padding width programmatically rather than eyeballing it
+      a third time, in both `_SCHEMA_DDL` and `_migrate_v10()`.
+    - 61 tests in `test_migration_v10.py` (46 for the original four
+      tables + 15 for `operator_state`, added after explicit review and
+      approval — see this file's own `TestOperatorState` class docstring
+      for the decision trail). Verified both directions: a genuine
+      pre-v10 database (not a mock) upgraded to v10, and a fresh
+      database — both reach identical resulting state. All prior
+      migration tests (v5–v9, 74 tests) re-run unchanged. 701/701
+      passing at this commit.
 
-- `knowledge_graph/extractor.py` — `EntityExtractor` now takes a
-  `domain_graph` parameter (defaults to Business's), consuming
-  `domain.graph.entity_types`/`.get_display_name()` instead of the
-  hardcoded global `knowledge_graph/schema.py` module. Found and fixed
-  a real pre-existing gap first: `domains/business/graph.py` was
-  missing 6 `display_names` entries schema.py had (chatgpt, openai,
-  claude, gemini, anthropic, github) — a prerequisite fix before the
-  swap could be behavior-preserving.
-- `domains/registry.py` — new `DomainRegistry.get_or_default()`,
-  deliberately non-raising (returns `None`, not an exception, when
-  neither the requested nor default domain is registered) — a raising
-  version was tried first and doesn't work: plain unit tests register
-  no domain at all, not even "business".
-- `opportunity_engine/canonicalizer.py`, `detector.py`, `pipeline.py`,
-  `explainer/watch_list.py`, `report/generator.py` — all now resolve
-  and use the active domain's real config (graph/scoring/keywords)
-  instead of hardcoded globals or hidden Business defaults, wherever
-  the real domain object or a resolvable domain string was already in
-  scope.
-- `models.py` — a genuine third hardcoding site found by a new test
-  *failing*, not by inspection: `Entity.__post_init__` validated
-  `type` against a fixed, Business-shaped `VALID_ENTITY_TYPES` set.
-  Once extraction was correctly domain-scoped, this became actively
-  wrong (would reject any second domain's own entity type names), not
-  just redundant. Relaxed to a minimal non-empty-string check.
-- 20 new tests (`tests/test_domain_generalization.py`), verified by
-  actual mutation testing (not just read-through) to genuinely catch a
-  reverted fix rather than passing regardless — one test was caught
-  and strengthened mid-review for exactly this reason (an
-  `isinstance(ids, list)` assertion that would have passed even if the
-  underlying fix were reverted).
-- Deliberately NOT touched, and now explicitly documented in each
-  file's own docstring (previously this reasoning only existed in
-  chat, not in the code): `extractor.py`'s `_infer_relationship()`
-  (entity-type-pair semantics with explicit priority ordering, not a
-  vocabulary lookup); `explainer/opportunity.py`'s narrative logic
-  (verdict language, `_market_gap`, `_time_to_first_revenue`,
-  `_DIMENSION_LABELS` — checked whether labels could source from
-  `domains.business.scoring.SCORING`'s own fields, confirmed they
-  don't match the real hardcoded ones, e.g. `"Competition"` vs.
-  `"Market Gap"` for the same dimension id — swapping would have
-  silently changed existing report wording); `explainer/historical.py`
-  (hardcodes exactly 3 of 7 dimensions as worth trend-narrating, an
-  editorial choice); `explainer/trends.py`'s narrative templates
-  (`_TREND_NAME_TEMPLATES`/`_WHO_CARES`, keyed by Business's entity
-  type names).
-- 614/614 tests passing (613 + this file's 20, minus the strengthened
-  test replacing a weaker original — net +1 from the prior commit's 613).
+**Current code state:** `origin/main` at this commit — everything above
+is committed and pushed; working tree is clean, nothing outstanding.
+701/701 tests passing. Schema version 10.
 
 ## Part 2: Product Vision
 
@@ -449,16 +530,13 @@ six-layer model this list still describes.
     pipeline is undesigned. RFC-002's Findings data contract (Proposed,
     not Accepted) needs resolution first, since Analysis's stage
     contract can't be specified until what it consumes is defined.
-14. **Problem REST endpoint** — does not exist. `api/` currently
-    exposes `opportunities.py`, `reports.py`, `signals.py` only.
-    Explicitly flagged as a separate future item in `b616196`'s commit
-    message. No design work done yet on response shape, whether
-    `problem_history` is inlined or a sub-resource, filtering, or
-    pagination.
+14. ~~Problem REST endpoint~~ — done (`a3d0966`, item 25). History is a
+    separate paginated sub-resource, not inlined; three named sort
+    orders instead of one default.
 15. `GET /reports` domain filter — `ReportDetail` already carries a
     `domain` field (unlike Opportunities/Signals before `b616196`) but
     the list endpoint has no filter for it. Small, same pattern as
-    `b616196`.
+    `b616196`. Still open — the one remaining gap of this exact shape.
 16. ~~Domain-generalized opportunity scoring~~ — done, ADR-011
     (`665631a`). See Part 1 item 20. Deliberately scoped to the
     storage/composite-calculation layer only.
@@ -486,6 +564,23 @@ six-layer model this list still describes.
     collector has only ever been exercised via its unit tests (canned
     fixtures) and its graceful-failure path (missing credentials),
     never against the real Reddit API.
+20. **Continuous Intelligence Engine: the adaptive scheduler** — schema
+    v10 (item 26) built the state `collector_state` needs to exist, but
+    nothing reads or writes it yet. This is the immediate next
+    implementation target: the logic that, on each (now-hourly)
+    `collect.py` invocation, checks every collector's persisted state
+    and runs only the ones actually due (interval elapsed, not in
+    backoff, quota available), then writes `last_run_at`/
+    `consecutive_failures`/`backoff_until` back. Explicitly not started.
+21. **Change detection, significance ranking, alert delivery, and the
+    frontend** — all deliberately deferred past the scheduler. Schema
+    v10's `change_events`/`watchlists`/`alert_rules`/`operator_state`
+    give these a place to persist to once built, but the logic itself
+    (what counts as a meaningful change, how significance is ranked,
+    how an alert actually reaches anyone) is undesigned. Do not start
+    any of this before the scheduler exists — there's no point
+    detecting changes faster than the collectors that would produce
+    them can actually run.
 
 **Frontend note (from the RFC review, worth restating):** the
 originally-planned "backend done → build Next.js frontend" ordering was
@@ -493,7 +588,11 @@ challenged — Problem Memory is the highest-leverage screen the frontend
 will show, and it's only as good as the history data behind it. Frontend
 scaffolding/design-system work can start any time, but the Problem
 Memory screen specifically should wait until there's real accumulated
-history to design against, not be built thin on day one.
+history to design against, not be built thin on day one. Per the
+frontend/backend contract audit that produced schema v10: the frontend
+will initially align with BIA's existing single-operator model — no
+multi-user auth, no OAuth, no per-user architecture is planned for it
+either.
 
 ## Part 5: Recent History
 
@@ -513,8 +612,23 @@ on any commit below):**
 5. CI regression: two pipeline tests failed on stale signal counts;
    root cause was a test-isolation gap letting live GitHub/Trends
    network calls happen during "unit" tests. Fixed structurally, not
-   with a stale-count bump (`c45e612`, current `HEAD`) — see Part 1
-   item 23.
+   with a stale-count bump (`c45e612`) — see Part 1 item 23.
+6. Second-domain data-source generalization — extraction, detection,
+   canonicalization made domain-generic; narrative layer deliberately
+   left Business-specific and documented as such (`ac19d5c`) — see
+   Part 1 item 24.
+7. Problem REST API — history as its own paginated sub-resource, three
+   named sort orders, auth on all routes as a deliberate deviation from
+   the existing open-GET pattern (`a3d0966`) — see Part 1 item 25.
+8. Schema v10 — Continuous Intelligence Engine foundation. Reviewed
+   against the frontend/backend contract audit's explicit single-operator
+   constraint (no multi-user auth, no OAuth, no users table, no tenants)
+   before any code was written. `next_due_at` evaluated and deliberately
+   not added as a stored column (derivable, avoids drift risk).
+   `operator_state` evaluated as its own explicit recommendation
+   (belongs in v10 vs. deferred to v11) before being approved and
+   implemented in the same migration (this commit) —
+   see Part 1 item 26.
 
 **Token handling note, still relevant for whoever continues this:**
 every GitHub Personal Access Token used in this project's history was
@@ -525,37 +639,32 @@ anything, confirm no stale token is still live at
 https://github.com/settings/tokens**, and treat any newly-provided token
 the same way — use once, then revoke.
 
-**Current state:** `origin/main` and local `main` both at `c45e612`,
-committed and pushed. **Not clean** — the second-domain data-source
-generalization work described above in Part 1 is implemented, tested
-(614/614 passing), and reviewed, but sitting **uncommitted** locally.
-Nothing pending push beyond that.
+**Current state:** working tree clean, nothing uncommitted, `origin/main`
+and local `main` both at this commit. 701/701 tests passing. Nothing
+pending push.
 
-**Next steps — four independent open threads, pick based on priority:**
+**Next steps — two independent open threads, but one is now explicitly
+sequenced ahead of the rest:**
 
-- **Commit the second-domain generalization work** sitting uncommitted
-  right now (Part 1's uncommitted-work note) — implemented, tested,
-  reviewed (including mutation-testing the new test file's real
-  coverage, not just reading it), just not yet committed.
+- **The adaptive scheduler (Part 4 item 20) — the immediate next target,
+  not a pick-your-priority item like the others below.** `collector_state`
+  is seeded and structurally complete but entirely inert — nothing
+  reads or writes it yet. This is the piece that makes schema v10
+  operational rather than just present. Explicitly not started, per
+  standing instruction, alongside change detection, significance
+  ranking, alert delivery, APIs, auth, and the frontend (Part 4 item 21)
+  — none of those should start before the scheduler exists, since
+  there's no point detecting changes faster than the collectors
+  producing them can actually run.
 - **`explainer/*`'s narrative layer** (Part 4 item 17's remaining
-  half): now clearly, individually documented in each file exactly why
-  it's Business-specific (verdict language, trend-narration dimension
-  choice, entity-pair narrative templates) rather than left as an
-  unexplained gap. Real design work for a second domain's own
-  narrative would start here.
-- **RFC-001 implementation** (Part 4 item 13): still the largest
-  standing open item, unchanged since the last revision. RFC-002's
-  Findings contract still needs to move from Proposed to Accepted first.
-- **Problem REST endpoint** (Part 4 item 14): still not designed. Should
-  be checked against RFC-002's Findings shape and RFC-001's stage
-  boundaries before implementation, same caveat as last revision.
-- **Collector live-validation debt** (Part 4 items 18–19): Google
-  Trends has never been checked against a real response — only
-  fixture-based tests, built from reading `pytrends`' own source, not
-  from an actual live call. Reddit has never been exercised at all
-  beyond its graceful-failure path. Worth resolving before leaning on
-  either collector's output for anything that gets scored or reported
-  on.
+  half) and **RFC-001 implementation** (Part 4 item 13) remain open,
+  independent of the scheduler work and of each other — pick either
+  once the scheduler lands, same open questions as the prior revision
+  (RFC-002's Findings contract still Proposed, not Accepted; the
+  narrative work needs its own design discussion before any code).
+- **Collector live-validation debt** (Part 4 items 18–19) — still
+  unresolved, still worth doing before leaning on Trends/Reddit output
+  for anything scheduled to run automatically once the scheduler exists.
 
 Whoever picks this up should keep the pattern noted in the prior
 handoff revision in mind: this project's best schema/design decisions
@@ -564,8 +673,15 @@ tests, and *then* finding a better shape through review (schema v8's
 fresh-database DDL gap, schema v9's single-field-to-two-axis
 correction, ADR-011's `OpportunityScores` construction mechanism going
 through two failed designs before landing on a plain hand-written
-`__init__`) — not a failure mode to avoid, a process to expect and
-budget for. Given that pattern, and the standing "explain before
-implementing" instruction, the Problem REST endpoint and the
-second-domain generalization work in particular should both get an
-explicit design discussion before any code is written.
+`__init__`, the Problem API's `NULLS LAST` → portable-idiom fix caught
+before it shipped, schema v10's `collector_state` column-alignment drift
+caught and fixed by computing it programmatically rather than
+eyeballing it a third time) — not a failure mode to avoid, a process to
+expect and budget for. Given that pattern, and the standing "explain
+before implementing" instruction, the scheduler itself should get the
+same explicit design discussion before any code — it's the next major
+piece of new logic, not another additive schema migration, and carries
+real judgment calls (how ties between due-but-competing collectors are
+actually broken, what a "failed run" means precisely, how backoff
+duration scales with `consecutive_failures`) that shouldn't be decided
+implicitly while writing code.

@@ -35,7 +35,7 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # Full DDL. CREATE IF NOT EXISTS makes this idempotent — safe to call on
 # every startup without worrying about duplicate table errors.
@@ -277,6 +277,121 @@ CREATE TABLE IF NOT EXISTS schema_info (
     version    INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL
 );
+
+
+-- ── Continuous Intelligence Engine: Collector State ─────────────────────────
+-- Persisted per-(source, domain) scheduler state. Schema v10.
+--
+-- Why this table exists at all: BIA runs on GitHub Actions cron, not a
+-- long-running server (see .github/workflows/collect.yml) -- there is no
+-- process that could stay alive between collector runs to "remember" when
+-- each source last ran or whether it's currently backed off. This table is
+-- that memory, persisted where an ephemeral runner can't lose it. The
+-- scheduler itself (which collectors are actually due on a given
+-- invocation) is separate, later work -- this table is only the state it
+-- will read and write.
+--
+-- (source, domain) composite key, not source alone: collectors are already
+-- domain-scoped (pipeline.py calls RedditCollector/GitHubCollector/
+-- TrendsCollector once per active domain, each with that domain's own
+-- sources.reddit_sources/github_queries/trends_keywords). Only "business"
+-- is a real active domain today, but a second domain scheduling
+-- independently of Business's cadence is a real, foreseeable need this
+-- key shape doesn't have to be revisited for later.
+CREATE TABLE IF NOT EXISTS collector_state (
+    source               TEXT NOT NULL,   -- matches BaseCollector.SOURCE_NAME (hn/reddit/rss/github/trends)
+    domain               TEXT NOT NULL DEFAULT 'business',
+    interval_minutes     INTEGER NOT NULL,
+    priority             INTEGER NOT NULL DEFAULT 5,  -- 1 (highest) .. 10 (lowest) -- tie-breaking only, not a hard gate
+    quota_per_period     INTEGER NOT NULL DEFAULT 0,   -- 0 = unlimited
+    quota_period_minutes INTEGER NOT NULL DEFAULT 1440,
+    quota_used           INTEGER NOT NULL DEFAULT 0,
+    quota_reset_at       TEXT DEFAULT '',
+    last_run_at          TEXT DEFAULT '',
+    last_success_at      TEXT DEFAULT '',
+    last_failure_at      TEXT DEFAULT '',
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    backoff_until        TEXT DEFAULT '',
+    enabled              INTEGER NOT NULL DEFAULT 1,
+    updated_at           TEXT NOT NULL,
+    PRIMARY KEY (source, domain)
+);
+
+
+-- ── Continuous Intelligence Engine: Change Events ───────────────────────────
+-- "Something meaningful happened" log -- the actual new detection logic
+-- this table's producer (separate, later work) writes to. Foundation for
+-- daily intelligence (query by date), real-time alerts (alert_rules below
+-- reads this), and the weekly digest (reuses this alongside the existing
+-- report pipeline). Append-only, same "never overwritten" principle as
+-- problem_history -- a Problem's lifecycle_state/trend columns are current-
+-- state, but every transition on either axis is also an immutable event
+-- here (or in problem_history; this table is domain-agnostic across BOTH
+-- Problems and Opportunities, problem_history is Problem-only).
+CREATE TABLE IF NOT EXISTS change_events (
+    id               TEXT PRIMARY KEY,
+    domain           TEXT NOT NULL DEFAULT 'business',
+    event_type       TEXT NOT NULL,   -- e.g. problem_trend_changed, problem_lifecycle_changed, opportunity_tier_crossed, new_opportunity
+    entity_ref_type  TEXT NOT NULL,   -- 'problem' | 'opportunity'
+    entity_ref_id    TEXT NOT NULL,
+    previous_value   TEXT DEFAULT '',
+    new_value        TEXT DEFAULT '',
+    significance     TEXT NOT NULL DEFAULT 'normal',  -- 'normal' | 'high' -- coarse triage, not a new score
+    detected_at      TEXT NOT NULL,
+    metadata         TEXT DEFAULT '{}',
+    created_at       TEXT NOT NULL
+);
+
+
+-- ── Continuous Intelligence Engine: Watchlists ──────────────────────────────
+-- Foundation only -- data model + the join a future alert/digest reader
+-- needs, no UI, no client/user table (none exists yet; client_id is an
+-- opaque external identifier, matching auth.py's existing minimal,
+-- single-operator-token model rather than inventing a users table this
+-- migration has no mandate to design).
+CREATE TABLE IF NOT EXISTS watchlists (
+    id           TEXT PRIMARY KEY,
+    client_id    TEXT NOT NULL,
+    domain       TEXT NOT NULL DEFAULT 'business',
+    target_type  TEXT NOT NULL,   -- 'problem' | 'entity' | 'keyword'
+    target_id    TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+
+
+-- ── Continuous Intelligence Engine: Alert Rules ─────────────────────────────
+-- Foundation only -- subscription structure a future change-event reader
+-- can query against. No delivery channel column (email/webhook/SMS) --
+-- that's explicitly out of scope for this migration.
+CREATE TABLE IF NOT EXISTS alert_rules (
+    id                TEXT PRIMARY KEY,
+    client_id         TEXT NOT NULL,
+    domain            TEXT NOT NULL DEFAULT 'business',
+    watchlist_id      TEXT DEFAULT '',   -- '' = domain-wide, not scoped to one watchlist item
+    event_type        TEXT DEFAULT '',   -- '' = any change_events.event_type
+    min_significance  TEXT NOT NULL DEFAULT 'normal',
+    enabled           INTEGER NOT NULL DEFAULT 1,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL
+);
+
+
+-- ── Continuous Intelligence Engine: Operator State ──────────────────────────
+-- Exactly one logical row (CHECK (id = 1) enforces this at the SQLite
+-- level, not just by convention). Exists specifically because
+-- change_events alone cannot answer "what's new since I last checked" --
+-- a change log has no reference point for "since when" without
+-- something to hold that timestamp. BIA is deliberately single-operator
+-- (no users table, no OAuth, no per-user architecture) -- this is the
+-- minimal state that fact requires, not a generic settings table. Do
+-- not add preferences, identity, or session concepts here; if BIA ever
+-- becomes multi-operator, this table's replacement is a new migration's
+-- decision, not an extension of this one.
+CREATE TABLE IF NOT EXISTS operator_state (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    last_seen_at TEXT DEFAULT '',
+    updated_at   TEXT NOT NULL
+);
 """
 
 
@@ -347,6 +462,9 @@ def initialize() -> None:
 
         if current_version < 9:
             _migrate_v9(conn)
+
+        if current_version < 10:
+            _migrate_v10(conn)
 
         if current_version < SCHEMA_VERSION:
             conn.execute(
@@ -941,6 +1059,206 @@ def _migrate_v9(conn) -> None:
     conn.commit()
 
 
+def _migrate_v10(conn) -> None:
+    """
+    Migration v9 → v10: Continuous Intelligence Engine foundation --
+    collector_state, change_events, watchlists, alert_rules,
+    operator_state.
+
+    All five are entirely new tables, not ALTER TABLE on existing ones --
+    unlike v9, there is nothing to backfill from prior data, because none
+    of these concepts existed before this migration. The CREATE TABLE
+    statements below are redundant with _SCHEMA_DDL for a genuinely fresh
+    database (idempotent via IF NOT EXISTS), but necessary here for a
+    pre-v10 database being upgraded -- the same reasoning _migrate_v7()
+    used for problem_history: redundant CREATEs make this migration safe
+    to reason about and run standalone, not just as a side effect of
+    _SCHEMA_DDL happening to run first in initialize().
+
+    operator_state was added to v10 rather than deferred to its own
+    migration: change_events alone cannot answer "what's new since I
+    last checked" (its own stated purpose -- see that table's DDL
+    comment) without a persisted reference point for "since when".
+    BIA is deliberately single-operator (no users table, no OAuth, no
+    per-user architecture) -- operator_state is the minimal state that
+    fact requires: a single row, enforced by CHECK (id = 1), holding
+    only last_seen_at. Not a settings table; do not add preferences,
+    identity, or session concepts to it.
+
+    collector_state seeding: every known collector (BaseCollector.
+    SOURCE_NAME across hn/reddit/rss/github/trends) gets exactly one row
+    for the 'business' domain, with interval_minutes reflecting each
+    source's real, already-documented constraints -- not arbitrary
+    defaults:
+      hn      60 min, priority 3  -- shared/official API, cheap, matches
+                                      the new hourly outer cron cadence
+      reddit  120 min, priority 4 -- official API (PRAW), moderate cost
+      rss     180 min, priority 5 -- feeds change slowly, no rate-limit
+                                      pressure either way
+      github  240 min, priority 4 -- official API but the Search
+                                      endpoints' 30 req/min limit is the
+                                      real constraint (see
+                                      collectors/github_collector.py) --
+                                      less frequent, not less careful
+      trends  360 min, priority 7 -- unofficial, reverse-engineered, no
+                                      documented rate limit at all (see
+                                      collectors/trends_collector.py's
+                                      own module docstring calling this
+                                      "the least reliable source in the
+                                      system") -- most conservative
+                                      interval, lowest priority
+    quota_per_period is 0 (unlimited) for all five: none of these sources
+    has a real, documented daily cap distinct from its own per-request
+    rate limit (already enforced inside each collector), so seeding a
+    fabricated quota number here would be inventing a constraint that
+    doesn't exist. The column exists, ready for a human to set a real
+    cap later if one becomes necessary; this migration doesn't guess one.
+
+    operator_state seeding: exactly one row, id=1, last_seen_at=''
+    (never seen), inserted only if the table is currently empty -- same
+    idempotency discipline as collector_state's seeding, checked
+    separately since the two are independent conditions.
+
+    Idempotent: collector_state seeding only runs if that table is
+    completely empty, and operator_state seeding only runs if its own
+    single row doesn't exist yet -- both checked independently, so
+    re-running this migration (or calling initialize() again) never
+    overwrites state a real scheduler run, or a real operator visit,
+    has since written.
+
+    Index-creation placement is deliberately UNCONDITIONAL and OUTSIDE
+    the seeding step below -- same fix already applied for idx_opp_problem
+    (_migrate_v6), idx_entities_lifecycle/idx_rel_lifecycle (_migrate_v8),
+    and idx_problems_lifecycle/idx_problems_trend (_migrate_v9): nesting
+    index creation inside a conditional would mean a fresh database
+    (where _SCHEMA_DDL's own CREATE TABLE already ran) never gets the
+    index at all.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS collector_state (
+            source               TEXT NOT NULL,
+            domain               TEXT NOT NULL DEFAULT 'business',
+            interval_minutes     INTEGER NOT NULL,
+            priority             INTEGER NOT NULL DEFAULT 5,
+            quota_per_period     INTEGER NOT NULL DEFAULT 0,
+            quota_period_minutes INTEGER NOT NULL DEFAULT 1440,
+            quota_used           INTEGER NOT NULL DEFAULT 0,
+            quota_reset_at       TEXT DEFAULT '',
+            last_run_at          TEXT DEFAULT '',
+            last_success_at      TEXT DEFAULT '',
+            last_failure_at      TEXT DEFAULT '',
+            consecutive_failures INTEGER NOT NULL DEFAULT 0,
+            backoff_until        TEXT DEFAULT '',
+            enabled              INTEGER NOT NULL DEFAULT 1,
+            updated_at           TEXT NOT NULL,
+            PRIMARY KEY (source, domain)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS change_events (
+            id               TEXT PRIMARY KEY,
+            domain           TEXT NOT NULL DEFAULT 'business',
+            event_type       TEXT NOT NULL,
+            entity_ref_type  TEXT NOT NULL,
+            entity_ref_id    TEXT NOT NULL,
+            previous_value   TEXT DEFAULT '',
+            new_value        TEXT DEFAULT '',
+            significance     TEXT NOT NULL DEFAULT 'normal',
+            detected_at      TEXT NOT NULL,
+            metadata         TEXT DEFAULT '{}',
+            created_at       TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS watchlists (
+            id           TEXT PRIMARY KEY,
+            client_id    TEXT NOT NULL,
+            domain       TEXT NOT NULL DEFAULT 'business',
+            target_type  TEXT NOT NULL,
+            target_id    TEXT NOT NULL,
+            created_at   TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS alert_rules (
+            id                TEXT PRIMARY KEY,
+            client_id         TEXT NOT NULL,
+            domain            TEXT NOT NULL DEFAULT 'business',
+            watchlist_id      TEXT DEFAULT '',
+            event_type        TEXT DEFAULT '',
+            min_significance  TEXT NOT NULL DEFAULT 'normal',
+            enabled           INTEGER NOT NULL DEFAULT 1,
+            created_at        TEXT NOT NULL,
+            updated_at        TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS operator_state (
+            id           INTEGER PRIMARY KEY CHECK (id = 1),
+            last_seen_at TEXT DEFAULT '',
+            updated_at   TEXT NOT NULL
+        )
+        """
+    )
+
+    existing = conn.execute("SELECT COUNT(*) FROM collector_state").fetchone()[0]
+    if existing == 0:
+        now = _now()
+        defaults = [
+            # (source, interval_minutes, priority)
+            ("hn",     60,  3),
+            ("reddit", 120, 4),
+            ("rss",    180, 5),
+            ("github", 240, 4),
+            ("trends", 360, 7),
+        ]
+        for source, interval_minutes, priority in defaults:
+            conn.execute(
+                """
+                INSERT INTO collector_state
+                    (source, domain, interval_minutes, priority, updated_at)
+                VALUES (?, 'business', ?, ?, ?)
+                """,
+                (source, interval_minutes, priority, now),
+            )
+        logger.info(f"Migration v10: seeded collector_state for {len(defaults)} known collectors")
+
+    # operator_state: exactly one row, seeded only if the table is
+    # currently empty -- an INSERT OR IGNORE against the id=1 singleton
+    # would be equally idempotent, but a fetch-then-conditional-insert
+    # makes the "do not overwrite an existing last_seen_at" guarantee
+    # explicit in the code rather than relying on OR IGNORE's silent
+    # no-op to be understood as intentional by a future reader.
+    has_operator_row = conn.execute("SELECT 1 FROM operator_state WHERE id = 1").fetchone()
+    if has_operator_row is None:
+        conn.execute(
+            "INSERT INTO operator_state (id, last_seen_at, updated_at) VALUES (1, '', ?)",
+            (_now(),),
+        )
+        logger.info("Migration v10: seeded operator_state singleton row")
+
+    # Unconditional and outside both seeding guards above — see docstring.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_collector_state_domain ON collector_state(domain)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_collector_state_enabled ON collector_state(enabled)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_change_events_domain ON change_events(domain)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_change_events_entity ON change_events(entity_ref_type, entity_ref_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_change_events_detected_at ON change_events(detected_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_watchlists_client ON watchlists(client_id, domain)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_watchlists_target ON watchlists(target_type, target_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_rules_client ON alert_rules(client_id, domain)")
+
+    conn.commit()
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 def _now() -> str:
@@ -973,6 +1291,12 @@ def get_stats() -> dict:
             "problems":        conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0],
             "problem_history": conn.execute("SELECT COUNT(*) FROM problem_history").fetchone()[0],
             "reports":         conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0],
+            "change_events":   conn.execute("SELECT COUNT(*) FROM change_events").fetchone()[0],
+            "watchlists":      conn.execute("SELECT COUNT(*) FROM watchlists").fetchone()[0],
+            "alert_rules":     conn.execute("SELECT COUNT(*) FROM alert_rules").fetchone()[0],
+            "operator_last_seen_at": (
+                conn.execute("SELECT last_seen_at FROM operator_state WHERE id = 1").fetchone() or [""]
+            )[0] or None,
             "latest_signal": (
                 conn.execute(
                     "SELECT collected_at FROM signals ORDER BY collected_at DESC LIMIT 1"
