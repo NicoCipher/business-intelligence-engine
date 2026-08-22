@@ -5,6 +5,69 @@ in `docs/ARCHITECTURE.md` (current state) and `docs/SCHEMA.md` (full
 version history) — this file is the orientation summary, not the whole
 picture.
 
+## Part 0: Phase 1 Operations Console (2026-08-22, uncommitted)
+
+Phase 1 adds a Next.js 16 App Router / TypeScript internal console at the
+repository root. Its intentionally narrow route set is:
+
+- `/overview`, `/signals`, `/problems`, `/problems/[problemId]`,
+  `/opportunities`, `/opportunities/[opportunityId]`, `/reports`,
+  `/reports/[weekKey]`, and `/system`.
+- No Collectors, Pipeline, Change Events, Watchlists, or Alert Rules UI has
+  been created. Their operational contracts do not exist yet. System health
+  names those limitations but does not expose their stored counts as a
+  substitute interface.
+
+The console calls only existing API contracts. The server-only client in
+`src/features/api/client.ts` uses `BIA_API_BASE_URL` and `BIA_API_KEY`; no
+browser code receives either value, calls the backend directly, or uses
+browser credential storage. Production startup fails closed when either is
+missing. Every data-backed page waits for `connection()` so production builds
+never call the backend; individual reads retain their explicit fetch policy:
+health no-store, stats 30s, lists 60s, details/history 120s, reports 300s,
+and the protected opportunity-status mutation no-store.
+
+External Signal and report text is rendered as React text, never HTML.
+Evidence links permit only `http:`/`https:` and use `noopener noreferrer`.
+`proxy.ts` issues a per-request CSP nonce for framework scripts; the static
+headers also set no-sniff, frame denial, no referrer, COOP, and a restrictive
+Permissions Policy. The two `use client` files are the required Next error
+boundaries; all operational views are Server Components. The only Server
+Action validates the opportunity identifier/status and invokes the backend
+server-side.
+
+**Deployment gate:** BIA remains a single-operator, private-network service.
+There is currently no console session/RBAC layer, and the status Server Action
+therefore relies on authenticated private ingress restricting who can reach the
+console. Do not publish this console to a public or broadly shared origin until
+that ingress/operator-auth boundary is enforced. HSTS/TLS must likewise be set
+at the HTTPS reverse proxy, which is outside this repository.
+
+**Validation at this handoff:** `npm run lint`, `npm run typecheck`, and
+`npm test` pass (15 Vitest tests); production `npm run build` passes with
+server-only validation credentials; `npm run check:performance` reports
+126.2 KiB gzip against a 150 KiB root-client budget. Production response
+inspection confirmed a fresh CSP nonce appears in both the header and
+framework markup, and static client assets contain neither the validation key
+nor the BIA environment-variable names.
+
+**E2E / visual-verification limitation:** the two existing unchanged
+Playwright tests start the mock API and Next server but cannot launch because
+`/Users/mac/Library/Caches/ms-playwright/chromium_headless_shell-1208/`
+does not contain `chrome-headless-shell`. The final workspace-local install
+attempt (`PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install
+chromium-headless-shell`) timed out after reaching 30% of its 95.3 MiB download
+(`ETIMEDOUT`), then retried with DNS failures (`ENOTFOUND
+cdn.playwright.dev`). The installed `/Applications/Google Chrome.app` also
+aborts when Playwright launches it headlessly. Browser visual verification is
+therefore not available here. Leave the tests intact and rerun `npm run
+test:e2e` in an environment with the matching Playwright browser installed.
+
+`AGENTS.md` and `CLAUDE.md` are intentional Next-generated guidance: the
+former points agents to the installed version's documentation and the latter
+aliases it. They do not override repository architecture documentation and are
+kept so `next dev` does not recreate an untracked diff.
+
 ## Part 0a: Adaptive Scheduler milestone (2026-08-22, uncommitted)
 
 Schema v10's `collector_state` is now operational. `backend/scheduler.py`

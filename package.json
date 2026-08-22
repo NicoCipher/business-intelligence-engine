@@ -1,0 +1,40 @@
+{
+  "name": "bia-operations-console",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "check:performance": "node scripts/check-performance-budget.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "next": "16.3.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "server-only": "0.0.1"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.3.3",
+    "@playwright/test": "1.58.2",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.1.1",
+    "eslint": "9.39.1",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "27.1.0",
+    "typescript": "5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

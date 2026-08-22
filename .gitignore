@@ -49,3 +49,11 @@ logs/
 
 # ── Jupyter (if ever used for analysis) ───────────────────────────────────
 .ipynb_checkpoints/
+
+# ── Next.js ───────────────────────────────────────────────────────────────
+.next/
+out/
+node_modules/
+playwright-report/
+test-results/
+*.tsbuildinfo
