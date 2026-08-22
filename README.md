@@ -1,208 +1,85 @@
-# BIA-OS — Business Intelligence Autonomous Operating System
+# BIA
 
-> Originally scoped as "Version 1 · Opportunity Discovery." The system
-> has since grown well past that scope (knowledge graph, canonical
-> Problem identity, persistent Problem memory) without this README being
-> kept in sync. **For the current architecture, read `docs/ARCHITECTURE.md`
-> and `docs/SCHEMA.md` instead of the sections below** — they describe
-> what actually exists today. This file is left mostly as originally
-> written rather than silently rewritten; see `docs/HANDOFF.md` for
-> session-to-session continuity.
+BIA is an early-stage, evidence-driven intelligence platform for discovering, tracking, and evaluating emerging problems and opportunities from public signals.
 
----
+It helps operators move from scattered public observations to a traceable body of evidence they can review over time. BIA supports human judgment; it does not make business decisions or guarantee outcomes.
 
-## What this is
+## What BIA does
 
-BIA-OS observes the public internet, detects patterns across multiple unrelated sources, scores them as business opportunities, and explains its reasoning. It does not hallucinate trends. It does not invent statistics. Every claim traces to a specific observed signal.
+- Collects observations from supported public sources.
+- Retains raw signals alongside their source references.
+- Tracks recurring evidence as persistent Problems.
+- Records dated Opportunity assessments with supporting evidence.
+- Produces weekly intelligence reports for review.
 
-Version 1 had one responsibility: **discover opportunities**. That responsibility still holds — everything built since (the knowledge graph, canonical Problem identity, persistent Problem memory) exists in service of doing that discovery more reliably across time, not replacing it.
+## What exists today
 
----
+The current product includes public-signal collection, evidence browsing, persistent Problem tracking, Opportunity assessment and review status, and weekly reports.
 
-## Architecture
+The repository also contains the BIA Operations Console: a Next.js interface for reviewing Overview, Signals, Problems, Opportunities, Reports, and System health.
 
-The diagram below is the original Version 1 shape and is now incomplete
-— it predates the knowledge graph, Problem identity, and Problem memory
-entirely. **See `docs/ARCHITECTURE.md` for the current data flow.** Kept
-here only for historical context:
+## High-level flow
 
-```
-Public Internet (HN · Reddit · RSS)
-         │
-   ┌─────▼──────┐
-   │ Collectors │   one file per source · common interface · no cross-dependencies
-   └─────┬──────┘
-         │  Signal objects (append-only)
-   ┌─────▼──────┐
-   │  SQLite DB │   WAL mode · explicit SQL · no ORM magic
-   └─────┬──────┘
-         │  Unprocessed signals
-   ┌─────▼──────────────┐
-   │  Pattern Detector  │   keyword fingerprinting · Jaccard clustering
-   └─────┬──────────────┘
-         │  Signal clusters
-   ┌─────▼────────────────┐
-   │  Opportunity Scorer  │   7 transparent dimensions · documented formulas
-   └─────┬────────────────┘
-         │  Scored opportunities
-   ┌─────▼──────┐
-   │  FastAPI   │   thin routes · no business logic
-   └─────┬──────┘
-         │  JSON
-   ┌─────▼──────────┐
-   │  React Frontend│   extends Version 1 guide · live data layer
-   └────────────────┘
+```text
+Public signals → evidence records → tracked Problems and Opportunity assessments → reports → Operations Console
 ```
 
-Every layer has one job. Replacing the clustering algorithm means editing `detector.py` only. Replacing SQLite with PostgreSQL means editing `database.py` only.
+## Supported sources
 
----
+BIA currently supports collection from:
 
-## Scoring model
+- Hacker News
+- Reddit
+- RSS feeds
+- GitHub
+- Google Trends
 
-Every opportunity is scored on 7 dimensions, all 0–10. Higher is always better.
+Source availability depends on local configuration and the source itself.
 
-| Dimension | What it measures | Default |
-|---|---|---|
-| **Demand** | Evidence of active unmet need (frequency + keywords + engagement) | — |
-| **Competition** | Inverse of market saturation (10 = nothing exists) | 5.5 |
-| **Revenue potential** | Signals of willingness to pay, B2B context | 2.0 |
-| **Execution difficulty** | Inverted: 10 = start today with free tools | 6.0 |
-| **Time to revenue** | Inverted: 10 = can earn this week | 5.5 |
-| **Risk** | Inverted: 10 = low regulatory/incumbent risk | 7.0 |
-| **Confidence** | Evidence quality: source diversity × count × engagement | — |
+## Operations Console
 
-**Composite** = weighted average using `config.SCORE_WEIGHTS`.  
-Weights are documented, adjustable, and must sum to 1.0.
+The platform pairs a Python/FastAPI service with a Next.js Operations Console. The console is the current interface for inspecting BIA's evidence and intelligence records. It provides views for current context, raw signals, tracked Problems, Opportunity assessments, reports, and system health. Operators can also update an Opportunity's review status.
 
-Tier classification:
-- **Gold** (≥ 8.0) — act this week
-- **Silver** (≥ 6.5) — validate first, then act
-- **Bronze** (< 6.5) — watch list
+## Local development
 
----
+Prerequisites: Python 3.11+ and Node.js 20.9+.
 
-## Data sources
+Review [`.env.example`](.env.example) and configure your local environment before running services. Do not commit configuration values.
 
-| Source | API | Auth | Rate limit |
-|---|---|---|---|
-| Hacker News | Official Firebase API | None | None (we self-impose 150ms between requests) |
-| Reddit | Official API via PRAW | Free app credentials | 60 req/min |
-
-More sources (RSS, Google Trends) are planned. Each source gets its own file in `collectors/` implementing the `BaseCollector` interface.
-
----
-
-## Setup
-
-### Backend (Python 3.11+)
+Start the backend from the repository root:
 
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+python3.11 -m venv backend/.venv
+source backend/.venv/bin/activate
+pip install -r backend/requirements.txt
+uvicorn main:app --app-dir backend --reload
 ```
 
-**Reddit credentials** (one-time, free):
-
-1. Go to https://www.reddit.com/prefs/apps
-2. Create app → type: **script**
-3. Note your `client_id` and `client_secret`
-4. Create `backend/.env`:
-
-```
-REDDIT_CLIENT_ID=your_client_id
-REDDIT_CLIENT_SECRET=your_client_secret
-```
-
-**Start the API server:**
+In a second terminal, install and start the Operations Console:
 
 ```bash
-uvicorn main:app --reload --host 127.0.0.1 --port 8000
+npm ci
+npm run dev
 ```
 
-API docs available at http://127.0.0.1:8000/api/docs
+## Testing
 
-**Trigger a pipeline run:**
+Run backend tests:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/pipeline/run
+backend/.venv/bin/python -m pytest backend/tests
 ```
 
-Then watch the terminal for collection progress.
+Run console checks:
 
-### Frontend
-
-Open the React artifact in Claude.ai or run locally with your preferred React setup. The frontend auto-detects backend availability and falls back to static content when the API is not running.
-
----
-
-## Project structure
-
-```
-bia-os/
-├── backend/
-│   ├── config.py                   all configuration in one place
-│   ├── database.py                 SQLite schema and connection management
-│   ├── models.py                   domain models (pure Python dataclasses)
-│   ├── main.py                     FastAPI application
-│   ├── requirements.txt
-│   ├── collectors/
-│   │   ├── base.py                 abstract interface all collectors implement
-│   │   ├── hn_collector.py         Hacker News (official Firebase API)
-│   │   └── reddit_collector.py     Reddit (official API via PRAW)
-│   ├── opportunity_engine/
-│   │   ├── scorer.py               7-dimension transparent scoring
-│   │   └── detector.py             cross-source clustering + opportunity synthesis
-│   └── api/
-│       ├── opportunities.py        GET/PATCH opportunity endpoints
-│       └── signals.py              GET signal feed + stats
-├── docs/
-│   ├── ARCHITECTURE.md             current-state architecture (start here, not the section above)
-│   ├── SCHEMA.md                   full schema version history (v1-v7)
-│   ├── HANDOFF.md                  session-to-session continuity doc
-│   └── PROBLEM_MEMORY_VALIDATION.md  schema v7 validation report
-└── README.md
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run test:e2e
 ```
 
----
+## Status and limitations
 
-## Development rules
-
-These rules are enforced by convention, not by tooling (yet):
-
-- **No hardcoded statistics.** If a number appears in the codebase, it must be derivable from collected data or documented as a configuration default.
-- **No LLM unless labelled.** Anything described as "AI-powered" must actually call an AI model. Rule-based systems are not AI.
-- **No paid APIs.** Every data source must be accessible with zero cost.
-- **No giant files.** A file that does two things should be two files.
-- **Business logic in engine modules, not in routes.** Routes are translation layers.
-
----
-
-## Future modules (not yet built)
-
-Updated from the original Version 1 list — Knowledge Graph is no longer
-future work, it's been built and is at schema v5 (domain-scoped). See
-`docs/ARCHITECTURE.md`'s "What's explicitly not built yet" section for
-the accurate, current version of this list — it also covers what schema
-v7 (Persistent Problem Memory) does and doesn't include, which the list
-below predates entirely.
-
-Still genuinely not built, as of the original Version 1 scoping:
-- **Business Generator** — from opportunity to business model outline
-- **Execution Agents** — draft outreach messages, content, proposals
-- **Revenue Tracker** — connect outcomes to opportunities
-- **Learning Loop** — improve scoring weights from validated/dismissed feedback
-
----
-
-## What success looks like
-
-Version 1 succeeds when it can truthfully say every week:
-
-> "I analysed signals from Hacker News and Reddit.  
-> These are the highest-confidence opportunities based on cross-source signal matching.  
-> Here is the evidence. Here is the score breakdown. Here is what to do next."
-
-Nothing else matters until this works reliably.
+BIA is early-stage software for evidence-led research and operational review. Public-source coverage can be incomplete or change over time, and BIA's records and assessments should be verified by a human before they inform a decision. It is not a source of guaranteed opportunities, factual certainty, or business advice.
