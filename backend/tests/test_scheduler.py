@@ -294,6 +294,7 @@ class TestPartialRunDurability:
         import persistence
 
         monkeypatch.setattr(persistence, "BACKUP_DIR", backup_dir)
+        monkeypatch.setattr(persistence.config, "DB_PATH", fresh_db)
         monkeypatch.setattr(collect, "parse_args", lambda: argparse.Namespace(report=False, hn_only=True, dry_run=False))
         monkeypatch.setattr(DomainRegistry, "discover_and_register", lambda: None)
         monkeypatch.setattr(DomainRegistry, "get_active", lambda: [business])
