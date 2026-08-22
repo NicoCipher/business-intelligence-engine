@@ -10,7 +10,7 @@ pydantic==2.8.2           # Data validation (used at the API boundary only)
 # ── HTTP client ────────────────────────────────────────────────────────────
 # requests is synchronous — fine for collectors which run in background tasks.
 # Do not use requests inside async route handlers.
-requests==2.32.3
+requests==2.33.0
 
 # ── Data sources ───────────────────────────────────────────────────────────
 praw==7.7.1               # Official Reddit API wrapper (read-only, free)
@@ -24,8 +24,8 @@ pytrends==4.9.2            # Unofficial Google Trends client — see
 pandas==2.3.3              # pytrends response parsing and Trends collector tests.
 
 # ── Testing ────────────────────────────────────────────────────────────────
-pytest==8.3.2
-pytest-asyncio==0.23.8    # Async test support for FastAPI route tests
+pytest==9.0.3
+pytest-asyncio==1.3.0     # Async test support for FastAPI route tests
 httpx==0.27.2             # Async HTTP client used in FastAPI test client
 
 # ── Development utilities ──────────────────────────────────────────────────
