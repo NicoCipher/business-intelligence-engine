@@ -2,7 +2,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 
 import { getOpportunities } from "@/src/features/api/client";
-import { EmptyState, PageControls, PageHeading, Panel, StateTag } from "@/src/features/shared/components";
+import { EmptyState, PageControls, PageHeading, Panel, StateTag, TableScroll } from "@/src/features/shared/components";
 import { formatDate, formatNumber, formatScore } from "@/src/features/shared/format";
 import { boundedInteger, singleValue, type SearchParams } from "@/src/features/shared/search-params";
 
@@ -39,7 +39,7 @@ export default async function OpportunitiesPage({ searchParams }: Props) {
           <button type="submit">Apply filters</button>
         </form>
         {result.opportunities.length === 0 ? <EmptyState title="No Opportunities match this view.">The backend currently has no persisted opportunities in the local operational database. Use Reports to inspect diagnostic near-misses.</EmptyState> : (
-          <div style={{ overflowX: "auto" }}>
+          <TableScroll label="Opportunity register table">
             <table className="data-table">
               <thead><tr><th scope="col">Assessment</th><th scope="col">Score</th><th scope="col">Evidence</th><th scope="col">Review</th><th scope="col">Created</th></tr></thead>
               <tbody>{result.opportunities.map((opportunity) => (
@@ -52,7 +52,7 @@ export default async function OpportunitiesPage({ searchParams }: Props) {
                 </tr>
               ))}</tbody>
             </table>
-          </div>
+          </TableScroll>
         )}
         <div className="action-row"><span className="quiet">Scores are emitted by the backend and retain domain-specific tier thresholds.</span><PageControls path="/opportunities" offset={offset} limit={limit} total={result.total} query={{ status, week, domain, min_score: rawScore }} /></div>
       </Panel>

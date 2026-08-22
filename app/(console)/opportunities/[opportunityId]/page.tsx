@@ -5,7 +5,7 @@ import { connection } from "next/server";
 
 import { BackendApiError, getOpportunity } from "@/src/features/api/client";
 import { reviewOpportunityStatus } from "@/src/features/opportunities/actions";
-import { ExternalEvidenceLink, PageHeading, Panel, StateTag } from "@/src/features/shared/components";
+import { ExternalEvidenceLink, PageHeading, Panel, StateTag, TableScroll } from "@/src/features/shared/components";
 import { formatDate, formatScore } from "@/src/features/shared/format";
 
 type Props = { params: Promise<{ opportunityId: string }>; searchParams: Promise<{ status?: string }> };
@@ -34,7 +34,7 @@ export default async function OpportunityDetailPage({ params, searchParams }: Pr
       <div className="detail-grid">
         <div className="stack">
           <Panel title={`Evidence · ${opportunity.evidence.length} signals`}>
-            {opportunity.evidence.length === 0 ? <div className="panel-body"><p className="muted">No evidence signals are currently returned for this assessment.</p></div> : <div style={{ overflowX: "auto" }}><table className="data-table"><thead><tr><th scope="col">Signal</th><th scope="col">Source</th><th scope="col">Engagement</th><th scope="col">Observed</th></tr></thead><tbody>{opportunity.evidence.map((signal) => <tr key={signal.id}><td className="title-cell"><ExternalEvidenceLink href={signal.url}>{signal.title}</ExternalEvidenceLink><span className="tag-row">{signal.tags.map((tag) => <StateTag key={tag}>{tag}</StateTag>)}</span></td><td><StateTag tone="info">{signal.source}</StateTag></td><td className="mono">{signal.engagement}</td><td className="muted">{formatDate(signal.collected_at)}</td></tr>)}</tbody></table></div>}
+            {opportunity.evidence.length === 0 ? <div className="panel-body"><p className="muted">No evidence signals are currently returned for this assessment.</p></div> : <TableScroll label="Opportunity evidence table"><table className="data-table"><thead><tr><th scope="col">Signal</th><th scope="col">Source</th><th scope="col">Engagement</th><th scope="col">Observed</th></tr></thead><tbody>{opportunity.evidence.map((signal) => <tr key={signal.id}><td className="title-cell"><ExternalEvidenceLink href={signal.url}>{signal.title}</ExternalEvidenceLink><span className="tag-row">{signal.tags.map((tag) => <StateTag key={tag}>{tag}</StateTag>)}</span></td><td><StateTag tone="info">{signal.source}</StateTag></td><td className="mono">{signal.engagement}</td><td className="muted">{formatDate(signal.collected_at)}</td></tr>)}</tbody></table></TableScroll>}
           </Panel>
           <Panel title="Score components">
             <div className="panel-body"><dl className="key-value"><dt>Composite</dt><dd><StateTag tone="good">{formatScore(opportunity.composite_score)} · {opportunity.tier}</StateTag></dd>{scores.length > 0 ? scores.map(([name, value]) => <Fragment key={name}><dt>{name.replaceAll("_", " ")}</dt><dd>{formatScore(value as number)}</dd></Fragment>) : <><dt>Breakdown</dt><dd className="muted">No numeric dimensions are present in the response.</dd></>}</dl></div>

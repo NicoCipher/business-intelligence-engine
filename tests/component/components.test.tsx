@@ -1,9 +1,16 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { EmptyState, ExternalEvidenceLink, StateTag } from "@/src/features/shared/components";
+import { NavLink } from "@/src/features/navigation/nav-link";
+import { EmptyState, ExternalEvidenceLink, StateTag, TableScroll } from "@/src/features/shared/components";
 import { ReportNarrative } from "@/src/features/reports/report-content";
 import RootError from "@/app/error";
+
+const { pathname } = vi.hoisted(() => ({ pathname: { current: "/overview" } }));
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => pathname.current
+}));
 
 describe("external evidence links", () => {
   it("adds safe new-tab protections", () => {
@@ -42,5 +49,19 @@ describe("operational states", () => {
     render(<RootError error={new Error("BIA_API_UNAUTHORIZED")} reset={() => undefined} />);
     expect(screen.getByText("Backend access was rejected.")).toBeTruthy();
     expect(screen.queryByText(/server-secret/i)).toBeNull();
+  });
+});
+
+describe("navigation and responsive evidence regions", () => {
+  it("marks the active navigation destination for assistive technology", () => {
+    pathname.current = "/signals";
+    render(<NavLink href="/signals" label="Signals" />);
+    expect(screen.getByRole("link", { name: "Signals" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("labels a keyboard-focusable evidence table region", () => {
+    render(<TableScroll label="Observed signal evidence table"><table><tbody><tr><td>Evidence</td></tr></tbody></table></TableScroll>);
+    const region = screen.getByRole("region", { name: "Observed signal evidence table" });
+    expect(region.getAttribute("tabindex")).toBe("0");
   });
 });

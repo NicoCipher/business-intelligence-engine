@@ -2,7 +2,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 
 import { getProblems } from "@/src/features/api/client";
-import { EmptyState, PageControls, PageHeading, Panel, StateTag } from "@/src/features/shared/components";
+import { EmptyState, PageControls, PageHeading, Panel, StateTag, TableScroll } from "@/src/features/shared/components";
 import { formatDate, formatNumber } from "@/src/features/shared/format";
 import { boundedInteger, singleValue, type SearchParams } from "@/src/features/shared/search-params";
 
@@ -40,7 +40,7 @@ export default async function ProblemsPage({ searchParams }: Props) {
           <button type="submit">Apply filters</button>
         </form>
         {result.problems.length === 0 ? <EmptyState title="No canonical Problems match this view.">A Problem is created only after the backend’s detection and canonicalization conditions are met.</EmptyState> : (
-          <div style={{ overflowX: "auto" }}>
+          <TableScroll label="Problem register table">
             <table className="data-table">
               <thead><tr><th scope="col">Problem</th><th scope="col">Lifecycle</th><th scope="col">Trend</th><th scope="col">Evidence cadence</th><th scope="col">Last seen</th></tr></thead>
               <tbody>{result.problems.map((problem) => (
@@ -53,7 +53,7 @@ export default async function ProblemsPage({ searchParams }: Props) {
                 </tr>
               ))}</tbody>
             </table>
-          </div>
+          </TableScroll>
         )}
         <div className="action-row"><span className="quiet">Significance is derived from the best linked Opportunity; Problems are intentionally not scored directly.</span><PageControls path="/problems" offset={offset} limit={limit} total={result.total} query={{ domain, lifecycle_state: lifecycleState, trend, sort }} /></div>
       </Panel>

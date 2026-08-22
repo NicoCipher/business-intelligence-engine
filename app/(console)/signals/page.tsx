@@ -1,6 +1,6 @@
 import { getSignals } from "@/src/features/api/client";
 import { connection } from "next/server";
-import { EmptyState, ExternalEvidenceLink, PageControls, PageHeading, Panel, StateTag } from "@/src/features/shared/components";
+import { EmptyState, ExternalEvidenceLink, PageControls, PageHeading, Panel, StateTag, TableScroll } from "@/src/features/shared/components";
 import { formatDate, formatNumber } from "@/src/features/shared/format";
 import { boundedInteger, singleValue, type SearchParams } from "@/src/features/shared/search-params";
 
@@ -27,7 +27,7 @@ export default async function SignalsPage({ searchParams }: Props) {
           <button type="submit">Apply filters</button>
         </form>
         {result.signals.length === 0 ? <EmptyState title="No signals match these filters.">Unknown filter values return no results under the existing backend contract.</EmptyState> : (
-          <div style={{ overflowX: "auto" }}>
+          <TableScroll label="Observed signal evidence table">
             <table className="data-table">
               <thead><tr><th scope="col">Evidence</th><th scope="col">Source</th><th scope="col">Engagement</th><th scope="col">Observed</th><th scope="col">State</th></tr></thead>
               <tbody>{result.signals.map((signal) => (
@@ -40,7 +40,7 @@ export default async function SignalsPage({ searchParams }: Props) {
                 </tr>
               ))}</tbody>
             </table>
-          </div>
+          </TableScroll>
         )}
         <div className="action-row"><span className="quiet">Showing server-paginated evidence. Raw content is not exposed by the current API.</span><PageControls path="/signals" offset={offset} limit={limit} total={result.total} query={{ source, tag, domain }} /></div>
       </Panel>

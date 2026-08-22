@@ -58,6 +58,15 @@ export function EmptyState({ title, children }: Readonly<{ title: string; childr
   return <div className="empty"><strong>{title}</strong><span>{children}</span></div>;
 }
 
+export function TableScroll({ label, children }: Readonly<{ label: string; children: React.ReactNode }>) {
+  return (
+    <div className="table-scroll" role="region" aria-label={label} tabIndex={0}>
+      <p className="table-scroll-hint" aria-hidden="true">Scroll horizontally to view all columns.</p>
+      {children}
+    </div>
+  );
+}
+
 export function PageControls({
   path,
   offset,

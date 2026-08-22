@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { BackendApiError, getHealth, getLatestReport, getSignalStats, getSignals } from "@/src/features/api/client";
-import { EmptyState, ExternalEvidenceLink, Panel, StateTag } from "@/src/features/shared/components";
+import { EmptyState, ExternalEvidenceLink, Panel, StateTag, TableScroll } from "@/src/features/shared/components";
 import { formatDate, formatNumber, isStale } from "@/src/features/shared/format";
 
 function latestReportText(content: unknown) {
@@ -16,14 +16,14 @@ function latestReportText(content: unknown) {
 export async function OperatingState() {
   const health = await getHealth();
   const stale = isStale(health.db.latest_signal);
-  const operational = health.status === "ok" && !stale;
+  const evidenceFresh = health.status === "ok" && !stale;
 
   return (
-    <Panel title="Operating state" action={<StateTag tone={operational ? "good" : "warning"}>{operational ? "Operating normally" : "Attention required"}</StateTag>}>
+    <Panel title="Verified health" action={<StateTag tone={evidenceFresh ? "good" : "warning"}>{evidenceFresh ? "API + evidence fresh" : "Freshness needs review"}</StateTag>}>
       <div className="panel-body">
         <div className="status-line">
-          <span className={`status-dot ${operational ? "ok" : "warn"}`} aria-hidden="true" />
-          <span>{operational ? "API reachable; recent collection evidence is present." : "API is reachable, but collection evidence is stale or unavailable."}</span>
+          <span className={`status-dot ${evidenceFresh ? "ok" : "warn"}`} aria-hidden="true" />
+          <span>{evidenceFresh ? "API reachable; the latest signal is within the freshness threshold." : "API is reachable, but the latest signal is stale or unavailable."}</span>
         </div>
         <div className="divider" />
         <dl className="key-value">
@@ -31,6 +31,7 @@ export async function OperatingState() {
           <dt>Latest observed signal</dt><dd>{formatDate(health.db.latest_signal)}</dd>
           <dt>Last operator checkpoint</dt><dd>{formatDate(health.db.operator_last_seen_at)}</dd>
         </dl>
+        <p className="contract-scope">Collector, scheduler, pipeline, backup, restore, and disk health are unknown under the current API.</p>
       </div>
     </Panel>
   );
@@ -44,10 +45,20 @@ export async function AttentionQueue() {
   return (
     <Panel title="Requires attention">
       <div className="panel-body stack">
-        {stale ? <div className="notice danger">No signal collection has been recorded in the last 36 hours. The current API cannot expose collector failures or run history.</div> : null}
-        {hasNoOpportunities ? <div className="notice">No opportunities are persisted. This is not a system failure; inspect the latest report’s diagnostic watch list before acting.</div> : null}
+        {stale ? <div className="notice danger"><strong>Evidence freshness needs review.</strong><span>No signal collection has been recorded in the last 36 hours. Collector failures and run history are not exposed.</span><Link className="notice-action" href="/system">Review verified system health</Link></div> : null}
+        {hasNoOpportunities ? <div className="notice"><strong>No opportunities are persisted.</strong><span>This is not a system failure. The latest report may explain evidence that did not meet persistence thresholds.</span><Link className="notice-action" href="/reports">Review latest report</Link></div> : null}
         {!stale && !hasNoOpportunities ? <div className="notice info">No attention items are derivable from the currently exposed backend contract.</div> : null}
-        <p className="muted" style={{ margin: 0 }}>“What changed since last looked” is not available until the backend exposes change events and an operator-state update contract.</p>
+      </div>
+    </Panel>
+  );
+}
+
+export function ChangeVisibility() {
+  return (
+    <Panel title="What changed since last looked" action={<StateTag tone="info">Unavailable</StateTag>}>
+      <div className="panel-body change-status">
+        <p>Current contracts provide snapshots, not change events or an operator checkpoint comparison.</p>
+        <p className="muted">The counts, report, and evidence below describe current state only; this console cannot determine what is new, updated, or resolved since a prior visit.</p>
       </div>
     </Panel>
   );
@@ -106,7 +117,7 @@ export async function RecentSignalsPanel() {
   return (
     <Panel title="Recently observed signals" action={<Link className="button-link" href="/signals">View all</Link>}>
       {response.signals.length === 0 ? <EmptyState title="No signals retained.">Collection has not produced any inspectable evidence.</EmptyState> : (
-        <div style={{ overflowX: "auto" }}>
+        <TableScroll label="Recently observed signals table">
           <table className="data-table">
             <thead><tr><th scope="col">Signal</th><th scope="col">Source</th><th scope="col">Observed</th></tr></thead>
             <tbody>{response.signals.map((signal) => (
@@ -117,7 +128,7 @@ export async function RecentSignalsPanel() {
               </tr>
             ))}</tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
     </Panel>
   );

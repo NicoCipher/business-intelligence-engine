@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { NavLink } from "@/src/features/navigation/nav-link";
+
 const navigation = [
   { href: "/overview", label: "Overview" },
   { href: "/signals", label: "Signals" },
@@ -24,7 +26,7 @@ export default function ConsoleLayout({ children }: Readonly<{ children: React.R
         <nav>
           <ul className="nav-list">
             {navigation.map((item) => (
-              <li key={item.href}><Link className="nav-link" href={item.href}>{item.label}</Link></li>
+              <li key={item.href}><NavLink {...item} /></li>
             ))}
           </ul>
         </nav>
