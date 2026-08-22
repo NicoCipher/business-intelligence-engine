@@ -10,10 +10,10 @@ export default function RootError({ error, reset }: Readonly<{ error: Error; res
       <h1>{unauthorized ? "Backend access was rejected." : "The console could not load this operational view."}</h1>
       <p className="lede">
         {configuration
-          ? "The server is missing its required BIA backend configuration. No credentials are available in the browser."
+          ? "The console is not configured to access the required service."
           : unauthorized
-            ? "The server-to-server BIA credential was not accepted. Verify the private deployment configuration."
-            : "The backend may be unavailable or returned an unexpected response. Try again, then inspect system diagnostics."}
+            ? "The console could not access the requested service."
+            : "The requested service is unavailable or returned an unexpected response. Try again."}
       </p>
       <p><button type="button" onClick={reset}>Try again</button></p>
     </main>
