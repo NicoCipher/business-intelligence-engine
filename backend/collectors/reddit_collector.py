@@ -40,7 +40,7 @@ try:
 except ImportError:
     PRAW_AVAILABLE = False
 
-from .base import BaseCollector, CollectorError, RateLimitError
+from .base import BaseCollector, CollectorError, ConfigurationError, RateLimitError
 from config import REDDIT_SUBREDDITS, REDDIT_POST_LIMIT, REDDIT_REQUEST_DELAY
 from models import Signal
 
@@ -96,7 +96,7 @@ class RedditCollector(BaseCollector):
             return self._reddit
 
         if not PRAW_AVAILABLE:
-            raise CollectorError(
+            raise ConfigurationError(
                 "PRAW is not installed. Run: pip install praw"
             )
 
@@ -104,7 +104,7 @@ class RedditCollector(BaseCollector):
         client_secret = os.getenv("REDDIT_CLIENT_SECRET", "")
 
         if not client_id or not client_secret:
-            raise CollectorError(
+            raise ConfigurationError(
                 "Reddit credentials not set. "
                 "Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET environment variables. "
                 "See: https://www.reddit.com/prefs/apps"

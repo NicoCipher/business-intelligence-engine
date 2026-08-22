@@ -5,6 +5,42 @@ in `docs/ARCHITECTURE.md` (current state) and `docs/SCHEMA.md` (full
 version history) — this file is the orientation summary, not the whole
 picture.
 
+## Part 0a: Adaptive Scheduler milestone (2026-08-22, uncommitted)
+
+Schema v10's `collector_state` is now operational. `backend/scheduler.py`
+provides injected-clock, typed state/decision/plan objects; provisions each
+known source for newly active domains; gates on enabled state, configuration,
+interval, backoff, and quota; resets quotas lazily; and persists each attempt
+in its own transaction. A zero-signal collection is success. Attempt outcomes
+are success, transient failure, rate limited, or configuration failure;
+disabled, unconfigured, not-due, backoff, and quota-gated sources are planner
+skips and do not consume quota.
+
+`BaseCollector.collect_with_outcome()` is the non-breaking structured boundary
+for scheduled runs; legacy `collect() -> list[Signal]` remains intact. The
+canonical pipeline accepts a scheduler source plan. HN is fetched once when it
+is due for any active domain, fanned only to HN-due domains, and has its one
+physical result persisted independently for every participating `(hn, domain)`
+state row. If nothing is due, pipeline stages and report generation do not run.
+Manual `/api/v1/pipeline/run` remains a full-run override because it calls the
+pipeline without a source plan.
+
+`collect.py` plans and executes scheduled runs through that canonical path and
+always snapshots initialized scheduler state in `finally`, including after a
+later critical stage failure. `.github/workflows/collect.yml` is now an hourly
+heartbeat and supplies its built-in `github.token` as `GITHUB_TOKEN` for the
+GitHub collector; it does not globally force HN-only mode when Reddit is
+unconfigured. The first real hourly run must confirm that `github.token`
+authenticates the collector's GitHub Search requests. No schema-v10 table shape
+changed; change detection, watchlists, alerts, delivery, and Admin Console work
+remain outside this milestone.
+
+Coverage: `backend/tests/test_scheduler.py` adds deterministic due, isolation,
+HN fan-out, outcome, backoff, quota, partial-durability, manual-override, and
+workflow tests. `pandas==2.3.3` was added to `backend/requirements.txt` because
+the existing Google Trends collector/tests require it; the complete backend
+suite now reports **714 passed, 2 skipped**.
+
 ## Part 1: Current System State
 
 **Architecture:** see `docs/ARCHITECTURE.md` for the full diagram and
@@ -222,13 +258,10 @@ environment that's touched this project so far, so the Reddit collector
 has never been live-validated, only unit-tested; Google Trends has been
 unit-tested against fixtures built from `pytrends`' own source, never
 against a live response, since `trends.google.com` wasn't reachable
-from that environment either. Schema v10's five new tables are
-currently inert — `collector_state` exists and is seeded but nothing
-reads or writes it yet (no scheduler); `change_events` exists but
-nothing writes to it yet (no change detector); `watchlists`/
-`alert_rules`/`operator_state` exist with no consumer at all yet. This
-is the deliberate, explicit scope of a "foundation" migration, not an
-oversight — see item 26.
+from that environment either. Schema v10's `collector_state` is now
+consumed by the adaptive scheduler (see Part 0a); `change_events` still
+has no producer, and `watchlists`/`alert_rules`/`operator_state` still
+have no consumer. Those remain deliberately deferred beyond scheduling.
 
 24. **Second-domain data-source generalization** (`ac19d5c`). Addresses
     exactly the gap the paragraph above used to describe as
@@ -564,14 +597,10 @@ six-layer model this list still describes.
     collector has only ever been exercised via its unit tests (canned
     fixtures) and its graceful-failure path (missing credentials),
     never against the real Reddit API.
-20. **Continuous Intelligence Engine: the adaptive scheduler** — schema
-    v10 (item 26) built the state `collector_state` needs to exist, but
-    nothing reads or writes it yet. This is the immediate next
-    implementation target: the logic that, on each (now-hourly)
-    `collect.py` invocation, checks every collector's persisted state
-    and runs only the ones actually due (interval elapsed, not in
-    backoff, quota available), then writes `last_run_at`/
-    `consecutive_failures`/`backoff_until` back. Explicitly not started.
+20. ~~Continuous Intelligence Engine: the adaptive scheduler~~ — implemented
+    locally and uncommitted (see Part 0a). `collector_state` now gates the
+    hourly outer heartbeat and records per-source/domain outcomes; no later
+    continuous-intelligence feature has been started.
 21. **Change detection, significance ranking, alert delivery, and the
     frontend** — all deliberately deferred past the scheduler. Schema
     v10's `change_events`/`watchlists`/`alert_rules`/`operator_state`
@@ -639,23 +668,18 @@ anything, confirm no stale token is still live at
 https://github.com/settings/tokens**, and treat any newly-provided token
 the same way — use once, then revoke.
 
-**Current state:** working tree clean, nothing uncommitted, `origin/main`
-and local `main` both at this commit. 701/701 tests passing. Nothing
-pending push.
+**Current state:** tracked `HEAD` remains schema-v10 commit `1b84de6`, while
+the working tree contains uncommitted Admin Console Phase 1 work and the
+uncommitted adaptive-scheduler milestone described in Part 0a. Backend suite:
+714 passed, 2 skipped. Nothing is pending push.
 
 **Next steps — two independent open threads, but one is now explicitly
 sequenced ahead of the rest:**
 
-- **The adaptive scheduler (Part 4 item 20) — the immediate next target,
-  not a pick-your-priority item like the others below.** `collector_state`
-  is seeded and structurally complete but entirely inert — nothing
-  reads or writes it yet. This is the piece that makes schema v10
-  operational rather than just present. Explicitly not started, per
-  standing instruction, alongside change detection, significance
-  ranking, alert delivery, APIs, auth, and the frontend (Part 4 item 21)
-  — none of those should start before the scheduler exists, since
-  there's no point detecting changes faster than the collectors
-  producing them can actually run.
+- **Adaptive scheduler implementation is awaiting review.** It is the only
+  new backend milestone in the current working tree. Change detection,
+  significance ranking, alert delivery, APIs, auth, and further frontend work
+  remain deferred until it is reviewed and committed.
 - **`explainer/*`'s narrative layer** (Part 4 item 17's remaining
   half) and **RFC-001 implementation** (Part 4 item 13) remain open,
   independent of the scheduler work and of each other — pick either
@@ -666,22 +690,6 @@ sequenced ahead of the rest:**
   unresolved, still worth doing before leaning on Trends/Reddit output
   for anything scheduled to run automatically once the scheduler exists.
 
-Whoever picks this up should keep the pattern noted in the prior
-handoff revision in mind: this project's best schema/design decisions
-have repeatedly come from proposing a shape, implementing it fully with
-tests, and *then* finding a better shape through review (schema v8's
-fresh-database DDL gap, schema v9's single-field-to-two-axis
-correction, ADR-011's `OpportunityScores` construction mechanism going
-through two failed designs before landing on a plain hand-written
-`__init__`, the Problem API's `NULLS LAST` → portable-idiom fix caught
-before it shipped, schema v10's `collector_state` column-alignment drift
-caught and fixed by computing it programmatically rather than
-eyeballing it a third time) — not a failure mode to avoid, a process to
-expect and budget for. Given that pattern, and the standing "explain
-before implementing" instruction, the scheduler itself should get the
-same explicit design discussion before any code — it's the next major
-piece of new logic, not another additive schema migration, and carries
-real judgment calls (how ties between due-but-competing collectors are
-actually broken, what a "failed run" means precisely, how backoff
-duration scales with `consecutive_failures`) that shouldn't be decided
-implicitly while writing code.
+The scheduler has now completed that explicit design-and-review cycle. Future
+changes to its due ordering, outcome taxonomy, quota semantics, or backoff
+policy should receive the same documented review before implementation.

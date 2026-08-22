@@ -44,7 +44,7 @@ from typing import Generator
 
 import requests
 
-from .base import BaseCollector, CollectorError, RateLimitError
+from .base import BaseCollector, CollectorError, ConfigurationError, RateLimitError
 from config import GITHUB_SEARCH_LIMIT, GITHUB_REQUEST_DELAY
 from models import Signal
 
@@ -105,7 +105,7 @@ class GitHubCollector(BaseCollector):
 
         token = os.getenv("GITHUB_TOKEN", "")
         if not token:
-            raise CollectorError(
+            raise ConfigurationError(
                 "GitHub token not set. Set the GITHUB_TOKEN environment "
                 "variable. See: https://github.com/settings/tokens"
             )

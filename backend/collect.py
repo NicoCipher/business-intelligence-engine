@@ -22,6 +22,7 @@ import argparse
 import logging
 import sys
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import database
 from domains.registry import DomainRegistry
 from pipeline import run_full_pipeline
+from scheduler import AdaptiveScheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -69,6 +71,8 @@ def main() -> int:
     if args.dry_run:
         logger.info("DRY RUN mode — nothing will be written to the database")
 
+    database_ready = False
+    persistence = None
     try:
         # Stage 0: Ensure database schema exists and domains are registered.
         # DomainRegistry is the single source of truth for which domains run
@@ -80,9 +84,11 @@ def main() -> int:
         # for the CI database durability gap: GitHub Actions cache alone is
         # not a durable storage guarantee (subject to eviction with no
         # restore path). See persistence.py and collect.yml.
-        import persistence
+        import persistence as persistence_module
+        persistence = persistence_module
         persistence.pull()
         database.initialize()
+        database_ready = True
         DomainRegistry.discover_and_register()
         stats = database.get_stats()
         logger.info(
@@ -91,21 +97,37 @@ def main() -> int:
             f"{stats['entities']} entities"
         )
 
-        result = run_full_pipeline(
-            dry_run=args.dry_run,
-            hn_only=args.hn_only,
-            # A report is generated on every run, not just weekly -- the
-            # previous Sunday-only default (kept behind --report as an
-            # explicit override, now redundant but harmless) meant most
-            # runs produced no report at all, even when there was
-            # something worth reporting (including "nothing new this
-            # period," which generate()/persist() already handle
-            # correctly on their own -- see report/generator.py).
-            generate_report=True,
-        )
-
-        if not args.dry_run:
-            persistence.push()
+        if args.dry_run:
+            # Dry runs preserve their established zero-write contract: they
+            # deliberately bypass both scheduler provisioning and state
+            # updates, while still exercising the canonical full pipeline.
+            result = run_full_pipeline(
+                dry_run=True,
+                hn_only=args.hn_only,
+                generate_report=True,
+            )
+        else:
+            scheduler = AdaptiveScheduler()
+            plan = scheduler.plan(DomainRegistry.get_active(), hn_only=args.hn_only)
+            logger.info(
+                "Scheduler: %d due, %d skipped",
+                len(plan.due), len(plan.skipped),
+            )
+            result = run_full_pipeline(
+                source_plan=plan,
+                outcome_recorder=scheduler.record_outcome,
+                generate_report=True,
+            )
+            outcomes = Counter(item.outcome.kind.value for item in result.collector_outcomes)
+            logger.info(
+                "Scheduler outcomes: success=%d transient_failure=%d rate_limited=%d "
+                "configuration_failure=%d skipped=%d",
+                outcomes["success"],
+                outcomes["transient_failure"],
+                outcomes["rate_limited"],
+                outcomes["configuration_failure"],
+                len(plan.skipped),
+            )
 
         for d in result.domains:
             logger.info(
@@ -131,6 +153,16 @@ def main() -> int:
     except Exception:
         logger.exception("Pipeline failed with unhandled exception")
         return 1
+    finally:
+        # State transitions commit per collector attempt. Snapshot them even
+        # if a later extraction/detection/report stage fails, otherwise an
+        # ephemeral runner would forget completed work and immediately repeat
+        # it on the next hourly heartbeat.
+        if database_ready and not args.dry_run and persistence is not None:
+            try:
+                persistence.push()
+            except Exception:
+                logger.exception("Failed to snapshot scheduler state after pipeline invocation")
 
 
 if __name__ == "__main__":

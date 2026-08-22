@@ -1,17 +1,12 @@
-name: Daily intelligence collection
+name: Hourly adaptive intelligence collection
 
-# Runs automatically every day at 06:00 UTC.
-# On Sundays, also generates the weekly intelligence report.
-# Can be triggered manually from the GitHub Actions UI at any time.
+# The hourly trigger is only a heartbeat. backend/scheduler.py decides which
+# persisted per-(source, domain) collectors are actually due on each run.
 on:
   schedule:
-    - cron: '0 6 * * *'   # 06:00 UTC daily
+    - cron: '0 * * * *'   # hourly, UTC
   workflow_dispatch:
     inputs:
-      generate_report:
-        description: 'Generate weekly report after collection'
-        type: boolean
-        default: false
       hn_only:
         description: 'Use HN only (no Reddit credentials required)'
         type: boolean
@@ -27,7 +22,7 @@ permissions:
 
 jobs:
   collect:
-    name: Collect · Extract · Detect · (Report on Sundays)
+    name: Schedule · Collect · Extract · Detect · Report
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -93,22 +88,11 @@ jobs:
             FLAGS="$FLAGS --hn-only"
           fi
 
-          # No Reddit credentials in secrets? Fall back to HN + RSS only.
-          if [ -z "$REDDIT_CLIENT_ID" ] || [ -z "$REDDIT_CLIENT_SECRET" ]; then
-            echo "Reddit credentials not configured — using HN + RSS only"
-            FLAGS="$FLAGS --hn-only"
-          fi
-
-          # Generate report on Sundays or when manually requested
-          DAY_OF_WEEK=$(date +%u)
-          if [ "$DAY_OF_WEEK" = "7" ] || [ "${{ github.event.inputs.generate_report }}" = "true" ]; then
-            FLAGS="$FLAGS --report"
-          fi
-
           python backend/collect.py $FLAGS
         env:
           REDDIT_CLIENT_ID:     ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          GITHUB_TOKEN:         ${{ github.token }}
           BIA_DATA_DIR:         backend/data
 
       # ── Durable backup ───────────────────────────────────────────────────
@@ -133,7 +117,7 @@ jobs:
       - name: Write job summary
         if: always()
         run: |
-          echo "## BIA-OS Pipeline Run" >> $GITHUB_STEP_SUMMARY
+          echo "## BIA-OS Adaptive Scheduler Run" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Run:** \`${{ github.run_id }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by:** \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY

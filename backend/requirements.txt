@@ -21,6 +21,7 @@ pytrends==4.9.2            # Unofficial Google Trends client — see
                             # docstring for the reliability caveat this
                             # implies (no official API, no documented
                             # rate limit).
+pandas==2.3.3              # pytrends response parsing and Trends collector tests.
 
 # ── Testing ────────────────────────────────────────────────────────────────
 pytest==8.3.2

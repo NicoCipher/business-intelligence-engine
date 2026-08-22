@@ -66,7 +66,7 @@ try:
 except ImportError:
     PYTRENDS_AVAILABLE = False
 
-from .base import BaseCollector, CollectorError, RateLimitError
+from .base import BaseCollector, CollectorError, ConfigurationError, RateLimitError
 from config import GOOGLE_TRENDS_KEYWORD_LIMIT, GOOGLE_TRENDS_REQUEST_DELAY
 from models import Signal
 
@@ -114,7 +114,7 @@ class TrendsCollector(BaseCollector):
             return self._client
 
         if not PYTRENDS_AVAILABLE:
-            raise CollectorError(
+            raise ConfigurationError(
                 "pytrends is not installed. Run: pip install pytrends"
             )
 

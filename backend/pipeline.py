@@ -43,9 +43,10 @@ from __future__ import annotations
 import dataclasses
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from collectors.base import persist_signals
+from collectors.base import CollectorOutcome, persist_signals
 from collectors.hn_collector import HNCollector
 from collectors.reddit_collector import RedditCollector
 from collectors.rss_collector import RSSCollector
@@ -60,6 +61,7 @@ from models import Signal
 from opportunity_engine import lifecycle
 from opportunity_engine.detector import PatternDetector
 from report.generator import ReportGenerator
+from scheduler import ScheduleDecision, SchedulePlan
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +87,7 @@ class DomainRunResult:
 class PipelineResult:
     """Summary of a full pipeline run across every active domain."""
     domains: list[DomainRunResult] = field(default_factory=list)
+    collector_outcomes: list["ScheduledCollectorOutcome"] = field(default_factory=list)
 
     @property
     def total_signals(self) -> int:
@@ -95,12 +98,23 @@ class PipelineResult:
         return sum(d.opportunities_detected for d in self.domains)
 
 
+@dataclass(frozen=True)
+class ScheduledCollectorOutcome:
+    """One scheduler-visible collector attempt, including its logical domain."""
+
+    source: str
+    domain: str
+    outcome: CollectorOutcome
+
+
 # ── Entry point ──────────────────────────────────────────────────────────
 
 def run_full_pipeline(
     dry_run: bool = False,
     hn_only: bool = False,
     generate_report: bool = False,
+    source_plan: SchedulePlan | None = None,
+    outcome_recorder: Callable[[ScheduleDecision, CollectorOutcome], object] | None = None,
 ) -> PipelineResult:
     """
     Run collect → extract → detect → (report) for every active domain.
@@ -130,8 +144,17 @@ def run_full_pipeline(
         len(active_domains), ", ".join(d.id for d in active_domains),
     )
 
-    # Shared collector: fetch HN once for the whole run, then fan the raw
-    # signals out per domain below. See module docstring for the rationale.
+    if source_plan is not None:
+        return _run_scheduled_pipeline(
+            active_domains,
+            source_plan,
+            dry_run=dry_run,
+            generate_report=generate_report,
+            outcome_recorder=outcome_recorder,
+        )
+
+    # Manual and API invocations deliberately remain a full-run override:
+    # they do not read collector_state or apply due-source gating.
     shared_hn_signals = HNCollector().collect()
     logger.info("[hn] collected %d shared signals this run", len(shared_hn_signals))
 
@@ -149,6 +172,74 @@ def run_full_pipeline(
     return result
 
 
+def _run_scheduled_pipeline(
+    active_domains: list[DomainConfig],
+    source_plan: SchedulePlan,
+    *,
+    dry_run: bool,
+    generate_report: bool,
+    outcome_recorder: Callable[[ScheduleDecision, CollectorOutcome], object] | None,
+) -> PipelineResult:
+    """Execute only the due entries in a persisted scheduler plan."""
+    result = PipelineResult()
+    due = source_plan.due
+    if not due:
+        logger.info("No collectors are due; skipping pipeline stages and report generation")
+        return result
+
+    domain_by_id = {domain.id: domain for domain in active_domains}
+    signals_by_domain: dict[str, dict[str, list[Signal]]] = {
+        domain.id: {} for domain in active_domains
+    }
+
+    def record(decision: ScheduleDecision, outcome: CollectorOutcome) -> None:
+        if outcome_recorder is not None:
+            outcome_recorder(decision, outcome)
+        result.collector_outcomes.append(
+            ScheduledCollectorOutcome(
+                source=decision.source,
+                domain=decision.domain,
+                outcome=outcome,
+            )
+        )
+
+    # HN is physically fetched once. Its one outcome is persisted for every
+    # logical domain that was due, and only those domains receive its signals.
+    hn_due = tuple(decision for decision in due if decision.source == "hn")
+    if hn_due:
+        hn_outcome = HNCollector().collect_with_outcome()
+        logger.info("[hn] collected %d shared signals this scheduled run", len(hn_outcome.signals))
+        for decision in hn_due:
+            record(decision, hn_outcome)
+            signals_by_domain[decision.domain]["hn"] = hn_outcome.signals
+
+    for decision in due:
+        if decision.source == "hn":
+            continue
+        domain = domain_by_id[decision.domain]
+        collector = _collector_for_source(decision.source, domain)
+        outcome = collector.collect_with_outcome()
+        record(decision, outcome)
+        signals_by_domain[decision.domain][decision.source] = outcome.signals
+
+    due_domains = {decision.domain for decision in due}
+    for domain in active_domains:
+        if domain.id not in due_domains:
+            continue
+        source_signals = signals_by_domain[domain.id]
+        run_result = _run_domain(
+            domain,
+            source_signals.pop("hn", []),
+            dry_run=dry_run,
+            hn_only=False,
+            generate_report=generate_report,
+            collected_source_signals=source_signals,
+        )
+        result.domains.append(run_result)
+
+    return result
+
+
 # ── Per-domain pipeline ──────────────────────────────────────────────────
 
 def _run_domain(
@@ -158,6 +249,7 @@ def _run_domain(
     dry_run: bool,
     hn_only: bool,
     generate_report: bool,
+    collected_source_signals: dict[str, list[Signal]] | None = None,
 ) -> DomainRunResult:
     """Run all pipeline stages for a single domain."""
     run_result = DomainRunResult(domain_id=domain.id)
@@ -165,7 +257,10 @@ def _run_domain(
     # ── Stage 1: Collect ────────────────────────────────────────────────
     domain_signals: list[Signal] = _retag_for_domain(shared_hn_signals, domain.id)
 
-    if not hn_only:
+    if collected_source_signals is not None:
+        for signals in collected_source_signals.values():
+            domain_signals.extend(signals)
+    elif not hn_only:
         reddit = RedditCollector(
             subreddits=domain.sources.reddit_sources,
             domain=domain.id,
@@ -281,6 +376,22 @@ def _run_domain(
         )
 
     return run_result
+
+
+def _collector_for_source(source: str, domain: DomainConfig):
+    """Instantiate a configured domain-scoped collector for a plan entry."""
+    if source == "reddit":
+        return RedditCollector(subreddits=domain.sources.reddit_sources, domain=domain.id)
+    if source == "rss":
+        return RSSCollector(
+            feeds=[(feed.url, feed.description) for feed in domain.sources.rss_feeds],
+            domain=domain.id,
+        )
+    if source == "github":
+        return GitHubCollector(queries=domain.sources.github_queries, domain=domain.id)
+    if source == "trends":
+        return TrendsCollector(keywords=domain.sources.trends_keywords, domain=domain.id)
+    raise ValueError(f"Unsupported scheduled collector source: {source}")
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────

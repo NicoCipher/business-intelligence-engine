@@ -19,6 +19,8 @@ import logging
 import sqlite3
 import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from enum import Enum
 from typing import Generator
 
 from models import Signal
@@ -30,10 +32,31 @@ class CollectorError(Exception):
 
 
 class RateLimitError(CollectorError):
-    """
-    The source has rate-limited us. The caller should back off before retrying.
-    Include the retry-after seconds in the message if known.
-    """
+    """The source rate-limited this attempt; the scheduler must back off."""
+
+
+class ConfigurationError(CollectorError):
+    """A local configuration problem that will not resolve by retrying."""
+
+
+class CollectorOutcomeKind(str, Enum):
+    """The scheduler-visible result of one collector invocation."""
+
+    SUCCESS = "success"
+    TRANSIENT_FAILURE = "transient_failure"
+    RATE_LIMITED = "rate_limited"
+    CONFIGURATION_FAILURE = "configuration_failure"
+    SKIPPED = "skipped"
+
+
+@dataclass(frozen=True)
+class CollectorOutcome:
+    """Structured result for scheduler callers; legacy collect() stays list-based."""
+
+    source: str
+    kind: CollectorOutcomeKind
+    signals: list[Signal]
+    detail: str = ""
 
 
 class BaseCollector(ABC):
@@ -78,6 +101,15 @@ class BaseCollector(ABC):
         An empty list is a valid return value — it means nothing new was found
         or the source was temporarily unavailable.
         """
+        return self.collect_with_outcome(limit).signals
+
+    def collect_with_outcome(self, limit: int | None = None) -> CollectorOutcome:
+        """Collect with a scheduler-visible outcome, without raising.
+
+        Existing callers should continue using collect(), which preserves its
+        original list-returning contract. The scheduler uses this method to
+        distinguish a valid empty source response from failure conditions.
+        """
         limit = limit or self.DEFAULT_LIMIT
         signals: list[Signal] = []
         start = time.monotonic()
@@ -89,16 +121,33 @@ class BaseCollector(ABC):
                 signals.append(signal)
 
         except RateLimitError as e:
-            self.logger.warning(f"Rate limited: {e}. Backing off 30 seconds.")
-            time.sleep(30)
+            self.logger.warning(f"Rate limited: {e}")
+            outcome = CollectorOutcomeKind.RATE_LIMITED
+            detail = str(e)
+        except ConfigurationError as e:
+            self.logger.error(f"Collection configuration failed: {e}")
+            outcome = CollectorOutcomeKind.CONFIGURATION_FAILURE
+            detail = str(e)
         except CollectorError as e:
             self.logger.error(f"Collection failed: {e}")
+            outcome = CollectorOutcomeKind.TRANSIENT_FAILURE
+            detail = str(e)
         except Exception:
             self.logger.exception("Unexpected error during collection")
+            outcome = CollectorOutcomeKind.TRANSIENT_FAILURE
+            detail = "unexpected collector exception"
+        else:
+            outcome = CollectorOutcomeKind.SUCCESS
+            detail = ""
 
         elapsed = time.monotonic() - start
         self.logger.info(f"Collected {len(signals)} new signals in {elapsed:.2f}s")
-        return signals
+        return CollectorOutcome(
+            source=self.SOURCE_NAME,
+            kind=outcome,
+            signals=signals,
+            detail=detail,
+        )
 
     def persist(self, signals: list[Signal]) -> int:
         """
@@ -119,7 +168,8 @@ class BaseCollector(ABC):
     def run(self, limit: int | None = None) -> int:
         """
         Convenience method: collect() then persist(). Returns inserted count.
-        This is what the scheduler calls.
+        The scheduler uses collect_with_outcome() through pipeline.py so it
+        can persist state even when a source fails.
         """
         signals = self.collect(limit)
         return self.persist(signals)
