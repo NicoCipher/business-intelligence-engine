@@ -1,0 +1,91 @@
+name: Frontend CI
+
+# Deliberately independent from the backend pytest workflow. These paths cover
+# the Operations Console, its test harness, and its build tooling only.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'next-env.d.ts'
+      - 'next.config.ts'
+      - 'eslint.config.mjs'
+      - 'playwright.config.ts'
+      - 'proxy.ts'
+      - 'instrumentation.ts'
+      - 'tsconfig.json'
+      - 'vitest.config.ts'
+      - 'docs/E2E_VERIFICATION_HANDOFF.md'
+      - 'docs/PERFORMANCE_BUDGET.md'
+      - '.github/workflows/frontend-ci.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'next-env.d.ts'
+      - 'next.config.ts'
+      - 'eslint.config.mjs'
+      - 'playwright.config.ts'
+      - 'proxy.ts'
+      - 'instrumentation.ts'
+      - 'tsconfig.json'
+      - 'vitest.config.ts'
+      - 'docs/E2E_VERIFICATION_HANDOFF.md'
+      - 'docs/PERFORMANCE_BUDGET.md'
+      - '.github/workflows/frontend-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Next.js and Playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run unit and component tests
+        run: npm test
+
+      - name: Production build
+        env:
+          BIA_API_BASE_URL: http://127.0.0.1:8100
+          BIA_API_KEY: frontend-ci-test-key
+        run: npm run build
+
+      - name: Check performance budget
+        run: npm run check:performance
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run end-to-end tests
+        run: CI=1 npm run test:e2e
