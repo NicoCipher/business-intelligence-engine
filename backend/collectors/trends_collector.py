@@ -129,8 +129,11 @@ class TrendsCollector(BaseCollector):
         client = self._get_client()
         per_keyword = max(1, limit // len(self._keywords))
         today = date.today().isoformat()
+        attempted = 0
+        failed    = 0
 
         for keyword in self._keywords:
+            attempted += 1
             self.logger.debug(f"Fetching Trends for '{keyword}' (limit={per_keyword})")
             try:
                 yield from self._fetch_keyword(client, keyword, per_keyword, today)
@@ -139,7 +142,18 @@ class TrendsCollector(BaseCollector):
                 raise   # propagate up to collect() for backoff
             except Exception as e:
                 # One keyword failing must not stop the others
+                failed += 1
                 self.logger.warning(f"Failed to fetch Trends for '{keyword}': {e}")
+
+        # A single bad keyword must never fail the whole collector — but if
+        # every keyword we attempted this run failed, that is a real outage,
+        # not a quiet day, and the scheduler needs to see it (backoff,
+        # consecutive_failures) rather than record a false SUCCESS.
+        if attempted and failed == attempted:
+            raise CollectorError(
+                f"All {attempted} Trends keyword(s) failed this run — "
+                f"see prior per-keyword warnings for detail"
+            )
 
     def _fetch_keyword(
         self, client: "TrendReq", keyword: str, limit: int, today: str,

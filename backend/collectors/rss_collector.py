@@ -122,13 +122,16 @@ class RSSCollector(BaseCollector):
         self._feeds = feeds or DEFAULT_RSS_FEEDS
 
     def _fetch(self, limit: int) -> Generator[Signal, None, None]:
-        per_feed = max(1, limit // len(self._feeds))
-        count    = 0
+        per_feed  = max(1, limit // len(self._feeds))
+        count     = 0
+        attempted = 0
+        failed    = 0
 
         for url, description in self._feeds:
             if count >= limit:
                 break
 
+            attempted += 1
             self.logger.debug(f"Fetching feed: {url}")
             try:
                 items  = self._fetch_feed(url)
@@ -142,11 +145,25 @@ class RSSCollector(BaseCollector):
             except RateLimitError:
                 raise
             except CollectorError as e:
+                failed += 1
                 self.logger.warning(f"Skipping feed {url}: {e}")
             except Exception as e:
+                failed += 1
                 self.logger.warning(f"Unexpected error for feed {url}: {e}")
 
             time.sleep(_DELAY)
+
+        # A single bad feed must never fail the whole collector (see module
+        # docstring) — but if every feed we actually attempted this run
+        # failed, that is a real outage, not a quiet day, and the scheduler
+        # needs to see it (backoff, consecutive_failures) rather than record
+        # a false SUCCESS. If nothing was attempted (e.g. the limit was
+        # already hit by earlier feeds), this is not a failure at all.
+        if attempted and failed == attempted:
+            raise CollectorError(
+                f"All {attempted} RSS feed(s) failed this run — "
+                f"see prior per-feed warnings for detail"
+            )
 
     def _fetch_feed(self, url: str) -> list[dict]:
         """

@@ -219,3 +219,79 @@ class TestExceptionMapping:
         client.build_payload.side_effect = ResponseError("bad response", response=Mock(status_code=500))
         with pytest.raises(CollectorError):
             list(collector._fetch_keyword(client, "invoicing software", 10, "2026-08-12"))
+
+
+# ── Aggregate failure outcome ──────────────────────────────────────────────
+
+class TestAggregateFailureOutcome:
+    """
+    Trends deliberately tolerates individual keyword failures so one bad
+    keyword doesn't kill the whole collector run. But that tolerance must
+    not also hide the case where *every* keyword we attempted this run
+    failed — that's a real outage and the scheduler needs to see it (via
+    _fetch() raising) rather than record a false SUCCESS with zero signals.
+    """
+
+    def _collector(self, keywords, monkeypatch, get_client_result=None):
+        c = TrendsCollector(keywords=keywords, domain="business")
+        monkeypatch.setattr(c, "_get_client", lambda: get_client_result or Mock())
+        return c
+
+    def test_all_keywords_failing_raises_collector_error(self, monkeypatch):
+        collector = self._collector(
+            ["invoicing software", "payroll app", "expense tracker"], monkeypatch,
+        )
+
+        def always_fail(self, client, keyword, limit, today):
+            raise CollectorError(f"Google Trends request failed for '{keyword}'")
+            yield  # pragma: no cover - makes this a generator
+
+        monkeypatch.setattr(TrendsCollector, "_fetch_keyword", always_fail)
+
+        with pytest.raises(CollectorError) as exc_info:
+            list(collector._fetch(limit=10))
+        assert "3" in str(exc_info.value)  # all 3 attempted keywords failed
+
+    def test_partial_failure_does_not_raise(self, monkeypatch):
+        collector = self._collector(["invoicing software", "payroll app"], monkeypatch)
+
+        def fake_fetch_keyword(self, client, keyword, limit, today):
+            if keyword == "payroll app":
+                raise CollectorError(f"Google Trends request failed for '{keyword}'")
+            return
+            yield  # pragma: no cover - makes this a generator
+
+        monkeypatch.setattr(TrendsCollector, "_fetch_keyword", fake_fetch_keyword)
+
+        assert list(collector._fetch(limit=10)) == []
+
+    def test_all_keywords_succeeding_with_zero_signals_is_not_a_failure(self, monkeypatch):
+        collector = self._collector(["invoicing software", "payroll app"], monkeypatch)
+
+        def empty_success(self, client, keyword, limit, today):
+            return
+            yield  # pragma: no cover - makes this a generator
+
+        monkeypatch.setattr(TrendsCollector, "_fetch_keyword", empty_success)
+
+        assert list(collector._fetch(limit=10)) == []
+
+    def test_no_keywords_configured_does_not_manufacture_failure(self):
+        """Existing behavior (test_no_keywords_skips_cleanly) confirmed at
+        the aggregate-failure guard: nothing attempted must never raise."""
+        collector = TrendsCollector(keywords=[], domain="business")
+        assert list(collector._fetch(limit=10)) == []
+
+    def test_rate_limit_error_still_propagates_through_fetch(self, monkeypatch):
+        """RateLimitError handling must remain untouched by the aggregate
+        failure tracking — it still stops _fetch() immediately."""
+        collector = self._collector(["invoicing software", "payroll app"], monkeypatch)
+
+        def fake_fetch_keyword(self, client, keyword, limit, today):
+            raise RateLimitError(f"Google Trends rate limit for '{keyword}'")
+            yield  # pragma: no cover - makes this a generator
+
+        monkeypatch.setattr(TrendsCollector, "_fetch_keyword", fake_fetch_keyword)
+
+        with pytest.raises(RateLimitError):
+            list(collector._fetch(limit=10))

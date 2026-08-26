@@ -191,3 +191,100 @@ class TestForbiddenResponseHandling:
         with pytest.raises(CollectorError) as exc_info:
             collector._fetch_feed("https://example.com/feed")
         assert "500" in str(exc_info.value)
+
+
+class TestAggregateFailureOutcome:
+    """
+    RSS deliberately tolerates individual feed failures so one bad feed
+    doesn't kill the whole collector run. But that tolerance must not
+    also hide the case where *every* feed we attempted this run failed —
+    that's a real outage and the scheduler needs to see it (via _fetch()
+    raising) rather than record a false SUCCESS with zero signals.
+    """
+
+    def test_all_feeds_failing_raises_collector_error(self, monkeypatch):
+        collector = RSSCollector(feeds=[
+            ("https://a.example.com/feed", "feed a"),
+            ("https://b.example.com/feed", "feed b"),
+            ("https://c.example.com/feed", "feed c"),
+        ])
+
+        def always_fail(self, url):
+            raise CollectorError(f"{url} returned 500")
+
+        monkeypatch.setattr(RSSCollector, "_fetch_feed", always_fail)
+
+        with pytest.raises(CollectorError) as exc_info:
+            list(collector._fetch(limit=10))
+        assert "3" in str(exc_info.value)  # all 3 attempted feeds failed
+
+    def test_partial_failure_does_not_raise(self, monkeypatch):
+        """Regression: one bad feed among several good ones must remain a
+        SUCCESS at the _fetch() level — same case as
+        test_403_does_not_crash_fetch_or_stop_other_feeds, asserted here
+        directly against the aggregate-failure guard."""
+        collector = RSSCollector(feeds=[
+            ("https://bad.example.com/feed", "bad feed"),
+            ("https://good.example.com/feed", "good feed"),
+        ])
+
+        def fake_fetch_feed(self, url):
+            if "bad" in url:
+                raise CollectorError(f"{url} returned 500")
+            return []
+
+        monkeypatch.setattr(RSSCollector, "_fetch_feed", fake_fetch_feed)
+        # Should not raise — only one of two attempted feeds failed.
+        assert list(collector._fetch(limit=10)) == []
+
+    def test_all_feeds_succeeding_with_zero_items_is_not_a_failure(self, monkeypatch):
+        """All feeds reachable, none have new items — a quiet day, not an
+        outage. Must not raise."""
+        collector = RSSCollector(feeds=[
+            ("https://a.example.com/feed", "feed a"),
+            ("https://b.example.com/feed", "feed b"),
+        ])
+        monkeypatch.setattr(RSSCollector, "_fetch_feed", lambda self, url: [])
+
+        assert list(collector._fetch(limit=10)) == []
+
+    def test_no_feeds_attempted_does_not_manufacture_failure(self, monkeypatch):
+        """If the limit is already satisfied before every feed is tried,
+        the unattempted feeds must not count against us."""
+        collector = RSSCollector(feeds=[
+            ("https://a.example.com/feed", "feed a"),
+            ("https://b.example.com/feed", "feed b"),
+        ])
+
+        call_count = {"n": 0}
+
+        def fake_fetch_feed(self, url):
+            call_count["n"] += 1
+            return [{
+                "title": "Something happened",
+                "link": f"{url}/1",
+                "guid": f"{url}/1",
+            }]
+
+        monkeypatch.setattr(RSSCollector, "_fetch_feed", fake_fetch_feed)
+        monkeypatch.setattr(RSSCollector, "_is_duplicate", lambda self, *a, **kw: False)
+        signals = list(collector._fetch(limit=1))
+
+        assert len(signals) == 1
+        assert call_count["n"] == 1  # second feed never attempted, no raise
+
+    def test_rate_limit_error_still_propagates_through_fetch(self, monkeypatch):
+        """RateLimitError handling must remain untouched by the aggregate
+        failure tracking — it still stops _fetch() immediately."""
+        collector = RSSCollector(feeds=[
+            ("https://a.example.com/feed", "feed a"),
+            ("https://b.example.com/feed", "feed b"),
+        ])
+
+        def fake_fetch_feed(self, url):
+            raise RateLimitError(f"{url} rate limited")
+
+        monkeypatch.setattr(RSSCollector, "_fetch_feed", fake_fetch_feed)
+
+        with pytest.raises(RateLimitError):
+            list(collector._fetch(limit=10))
