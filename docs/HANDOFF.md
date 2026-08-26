@@ -1,11 +1,11 @@
-# BIA Project Handoff (updated — through this commit, schema v10: Continuous Intelligence Engine foundation)
+# BIA Project Handoff (updated through `cb38922`: RSS/Trends aggregate-failure correction, on top of the schema v10 Continuous Intelligence Engine foundation)
 
 Supersedes the schema-v7-era handoff. Full architecture detail now lives
 in `docs/ARCHITECTURE.md` (current state) and `docs/SCHEMA.md` (full
 version history) — this file is the orientation summary, not the whole
 picture.
 
-## Part 0: Phase 1 Operations Console (2026-08-22, uncommitted)
+## Part 0: Phase 1 Operations Console (`079dced`, committed 2026-08-22)
 
 Phase 1 adds a Next.js 16 App Router / TypeScript internal console at the
 repository root. Its intentionally narrow route set is:
@@ -68,7 +68,21 @@ former points agents to the installed version's documentation and the latter
 aliases it. They do not override repository architecture documentation and are
 kept so `next dev` does not recreate an untracked diff.
 
-## Part 0a: Adaptive Scheduler milestone (2026-08-22, uncommitted)
+**Console committed and hardened since this handoff was last accurate.**
+The console landed as `079dced`, with a CI workflow to validate it
+(`83bdad1`, `frontend-ci.yml`: lint, typecheck, Vitest, build, performance
+budget) added the same day. Two follow-up fixes: `ac6fc6c` allows the local
+Playwright dev origin (`127.0.0.1`) in `next.config.ts`; `42a1312` hardens
+console responsiveness and operator-context handling across the overview,
+opportunities, problems, reports, and signals views plus shared nav/layout
+components, with matching component and E2E test updates. The E2E /
+visual-verification limitation described above was specific to the
+original development machine (`/Users/mac/...`); it has not been
+re-verified since, and no later commit resolves it — Playwright browser
+install/launch on whatever machine continues this work still needs its own
+check before relying on `npm run test:e2e` output.
+
+## Part 0a: Adaptive Scheduler milestone (`c32d206`, committed 2026-08-22)
 
 Schema v10's `collector_state` is now operational. `backend/scheduler.py`
 provides injected-clock, typed state/decision/plan objects; provisions each
@@ -101,8 +115,69 @@ remain outside this milestone.
 Coverage: `backend/tests/test_scheduler.py` adds deterministic due, isolation,
 HN fan-out, outcome, backoff, quota, partial-durability, manual-override, and
 workflow tests. `pandas==2.3.3` was added to `backend/requirements.txt` because
-the existing Google Trends collector/tests require it; the complete backend
-suite now reports **714 passed, 2 skipped**.
+the existing Google Trends collector/tests require it.
+
+**Follow-up fix, same day (`4c3bac8`):** the partial-run durability test was
+patching `persistence.BACKUP_DIR` for isolation but not `persistence.config.DB_PATH`,
+so `collect.py`'s snapshot-on-exit path could still touch the real/shared
+database path during that test rather than the fixture's `fresh_db`. One-line
+fix, consistent with the project's standing CI-discipline principle that
+pipeline tests must not leak outside their fixtures.
+
+## Part 0b: Dependency/security maintenance, public-repo hygiene, and RSS/Trends aggregate-failure correction (2026-08-27)
+
+Three small, independent pieces of work landed after the scheduler and
+console milestones above:
+
+**Dependency/security update (`4dfd685`):** `backend/requirements.txt`
+bumped `requests` 2.32.3 → 2.33.0, `pytest` 8.3.2 → 9.0.3, and
+`pytest-asyncio` 0.23.8 → 1.3.0. No source changes required; full backend
+suite passed unchanged after the bump.
+
+**Public README modernization and repository hygiene (`c7ffcfc`,
+`2e03e90`):** `README.md` was substantially shortened and modernized for a
+public audience (219 → ~96 net lines). `2e03e90` separately reduced the
+operational detail exposed in `.env.example` and a console error boundary
+(`app/error.tsx`), and added a `.gitignore` entry. Neither commit changes
+behavior; both are presentation/disclosure cleanup for a public repository.
+
+**RSS/Trends aggregate-failure correction (`cb38922`):** closes a
+scheduler-observability gap that predates the adaptive scheduler itself but
+only became consequential once the scheduler started acting on collector
+outcomes automatically. RSS and Trends deliberately tolerate individual
+feed/keyword failures — one bad source must not kill the whole collector
+run — but `_fetch()` previously returned normally with zero signals even
+when *every* attempted source failed in a given run, so
+`collect_with_outcome()` recorded `SUCCESS`. That's indistinguishable from a
+quiet day with no new signals, and would have silently reset
+`scheduler.record_outcome()`'s `consecutive_failures`/backoff state on what
+was actually a full outage.
+
+Fix: both collectors now track `attempted`/`failed` counts across their
+per-source loop; if every attempted source failed, `_fetch()` raises
+`CollectorError`, which flows through the existing (unmodified)
+`TRANSIENT_FAILURE` path in `collect_with_outcome()` and
+`scheduler.record_outcome()`. No new fields, no schema change — this was a
+gap in the existing outcome-classification path, not a new mechanism.
+Partial success (any source succeeding, even with 0 items), nothing-attempted
+(no sources configured, or limit already satisfied by earlier sources), and
+`RateLimitError`'s existing immediate-propagation behavior are all
+unaffected and covered by new regression tests.
+
+Ten focused tests added across `tests/test_rss_collector.py` and
+`tests/test_trends_collector.py` (all-fail, partial-fail, all-succeed-with-
+zero-items, nothing-attempted, and rate-limit-still-propagates, for each
+collector). Full backend suite: 726 passed in an environment with `pytrends`
+installed (716 pre-existing + 10 new); 2 of the pre-existing tests are
+`skipif`-gated on `pytrends` being installed and will show as skipped
+instead in an environment without it — same pre-existing condition as
+before this fix, not a regression.
+
+Files touched: `backend/collectors/rss_collector.py`,
+`backend/collectors/trends_collector.py`,
+`backend/tests/test_rss_collector.py`, `backend/tests/test_trends_collector.py`.
+Nothing else — no schema, scheduler, frontend, or documentation changes in
+this commit.
 
 ## Part 1: Current System State
 
@@ -636,10 +711,9 @@ six-layer model this list still describes.
 16. ~~Domain-generalized opportunity scoring~~ — done, ADR-011
     (`665631a`). See Part 1 item 20. Deliberately scoped to the
     storage/composite-calculation layer only.
-17. ~~Second-domain data-source generalization~~ — mostly done,
-    uncommitted (see Part 1's uncommitted-work note). `extractor.py`,
-    `canonicalizer.py`, `detector.py`'s cluster-acceptance gate,
-    `pipeline.py`, and `watch_list.py`'s fallback gate are all
+17. ~~Second-domain data-source generalization~~ — done (`ac19d5c`).
+    `extractor.py`, `canonicalizer.py`, `detector.py`'s cluster-acceptance
+    gate, `pipeline.py`, and `watch_list.py`'s fallback gate are all
     domain-generic now. What's still genuinely open, not a gap in this
     pass: `extractor.py`'s `_infer_relationship()` and all of
     `explainer/opportunity.py`/`historical.py`/`trends.py`'s narrative
@@ -660,19 +734,33 @@ six-layer model this list still describes.
     collector has only ever been exercised via its unit tests (canned
     fixtures) and its graceful-failure path (missing credentials),
     never against the real Reddit API.
-20. ~~Continuous Intelligence Engine: the adaptive scheduler~~ — implemented
-    locally and uncommitted (see Part 0a). `collector_state` now gates the
-    hourly outer heartbeat and records per-source/domain outcomes; no later
-    continuous-intelligence feature has been started.
-21. **Change detection, significance ranking, alert delivery, and the
-    frontend** — all deliberately deferred past the scheduler. Schema
-    v10's `change_events`/`watchlists`/`alert_rules`/`operator_state`
-    give these a place to persist to once built, but the logic itself
-    (what counts as a meaningful change, how significance is ranked,
-    how an alert actually reaches anyone) is undesigned. Do not start
-    any of this before the scheduler exists — there's no point
-    detecting changes faster than the collectors that would produce
-    them can actually run.
+20. ~~Continuous Intelligence Engine: the adaptive scheduler~~ — done
+    (`c32d206`, hardened by `4c3bac8`; see Part 0a). `collector_state`
+    gates the hourly outer heartbeat and records per-source/domain
+    outcomes.
+20a. ~~RSS/Trends aggregate-failure outcome correctness~~ — done
+    (`cb38922`; see Part 0b). Closes the gap where a fully-failed
+    RSS/Trends run was indistinguishable from a quiet no-op run at the
+    scheduler-outcome level. Worth noting explicitly: this was a
+    correctness prerequisite for item 21 below, not just general
+    hardening — change detection has no way to reason correctly about
+    "nothing changed" if the collector layer can silently report success
+    on a run where nothing was actually collected.
+21. ~~The frontend~~ — done for its originally-scoped surface (`079dced`,
+    hardened `42a1312`; see Part 0). No Collectors, Pipeline, Change
+    Events, Watchlists, or Alert Rules UI exists yet, by design — their
+    operational contracts don't exist yet either (see item 22).
+22. **Change detection, significance ranking, and alert delivery** —
+    still undesigned and unimplemented. Schema v10's
+    `change_events`/`watchlists`/`alert_rules`/`operator_state` tables
+    exist and are indexed, but no code populates or reads them yet
+    (confirmed by inspection — `database.py` defines the tables; nothing
+    else in `backend/` references `change_events` outside schema
+    creation and reporting stats). This was deliberately deferred past
+    the scheduler ("no point detecting changes faster than the
+    collectors that would produce them can actually run") and past
+    correctness of collector outcomes (item 20a) — both preconditions are
+    now satisfied. See Part 5 for the recommended next-milestone framing.
 
 **Frontend note (from the RFC review, worth restating):** the
 originally-planned "backend done → build Next.js frontend" ordering was
@@ -721,6 +809,22 @@ on any commit below):**
    (belongs in v10 vs. deferred to v11) before being approved and
    implemented in the same migration (this commit) —
    see Part 1 item 26.
+9. Adaptive scheduler implemented and committed (`c32d206`) — see
+   Part 0a.
+10. BIA Operations Console Phase 1 added (`079dced`), with a frontend CI
+    workflow (`83bdad1`), a local-dev Playwright origin fix (`ac6fc6c`),
+    and a responsiveness/operator-context hardening pass (`42a1312`) —
+    see Part 0.
+11. Scheduler durability test isolation fix — the partial-run durability
+    test wasn't isolating `persistence.config.DB_PATH`, only
+    `persistence.BACKUP_DIR` (`4c3bac8`) — see Part 0a.
+12. Backend dependency/security maintenance: `requests`, `pytest`,
+    `pytest-asyncio` bumped (`4dfd685`) — see Part 0b.
+13. Public README modernization (`c7ffcfc`) and operational-detail
+    minimization in `.env.example`/console error boundary (`2e03e90`) —
+    see Part 0b.
+14. RSS/Trends aggregate-failure outcome correction (`cb38922`) — see
+    Part 0b and Part 4 item 20a.
 
 **Token handling note, still relevant for whoever continues this:**
 every GitHub Personal Access Token used in this project's history was
@@ -731,28 +835,70 @@ anything, confirm no stale token is still live at
 https://github.com/settings/tokens**, and treat any newly-provided token
 the same way — use once, then revoke.
 
-**Current state:** tracked `HEAD` remains schema-v10 commit `1b84de6`, while
-the working tree contains uncommitted Admin Console Phase 1 work and the
-uncommitted adaptive-scheduler milestone described in Part 0a. Backend suite:
-714 passed, 2 skipped. Nothing is pending push.
+**Current state:** tracked `HEAD` is `cb38922` (RSS/Trends aggregate-failure
+correction). Working tree is clean; local `main` and `origin/main` are in
+sync; nothing is pending push. Backend suite: 726 passed in an environment
+with `pytrends` installed (2 of these are `skipif`-gated on `pytrends` and
+will show as skipped instead without it — a pre-existing, environment-
+dependent condition, not a regression). Frontend validation (`npm run lint`,
+`typecheck`, `test`, `build`, `check:performance`) last confirmed passing at
+the Part 0 handoff; not re-run as part of this backend-focused work — worth
+a fresh pass before relying on it, since three commits (`ac6fc6c`, `42a1312`,
+plus the CI workflow itself in `83bdad1`) have touched the console since
+that check.
 
-**Next steps — two independent open threads, but one is now explicitly
-sequenced ahead of the rest:**
+**Next backend milestone: Change detection (Part 4 item 22).**
 
-- **Adaptive scheduler implementation is awaiting review.** It is the only
-  new backend milestone in the current working tree. Change detection,
-  significance ranking, alert delivery, APIs, auth, and further frontend work
-  remain deferred until it is reviewed and committed.
-- **`explainer/*`'s narrative layer** (Part 4 item 17's remaining
-  half) and **RFC-001 implementation** (Part 4 item 13) remain open,
-  independent of the scheduler work and of each other — pick either
-  once the scheduler lands, same open questions as the prior revision
-  (RFC-002's Findings contract still Proposed, not Accepted; the
-  narrative work needs its own design discussion before any code).
-- **Collector live-validation debt** (Part 4 items 18–19) — still
-  unresolved, still worth doing before leaning on Trends/Reddit output
-  for anything scheduled to run automatically once the scheduler exists.
+The scheduler (Part 0a) and the RSS/Trends outcome-correctness fix
+(Part 0b, item 20a) were both explicit preconditions the prior revision of
+this handoff named before change detection could start:
 
-The scheduler has now completed that explicit design-and-review cycle. Future
-changes to its due ordering, outcome taxonomy, quota semantics, or backoff
-policy should receive the same documented review before implementation.
+- *"Do not start any of this before the scheduler exists — there's no point
+  detecting changes faster than the collectors that would produce them can
+  actually run."* — satisfied, scheduler is committed and hardened.
+- Collector outcomes must be trustworthy before anything reacts to them
+  automatically — satisfied by `cb38922`. Change detection specifically
+  needs to distinguish "the collector ran and found nothing new" from "the
+  collector didn't actually run correctly," and until this fix the RSS/Trends
+  aggregate-failure case collapsed those two into the same `SUCCESS` outcome.
+
+Both preconditions are now met, and schema v10 already provisioned
+`change_events`, `watchlists`, `alert_rules`, and `operator_state` for
+exactly this purpose — confirmed by inspection that these tables exist and
+are indexed but nothing outside `database.py`'s schema creation and the
+reporting-stats endpoint currently reads or writes them. This is a genuine
+gap between what the data model already supports and what the pipeline
+currently produces, not a speculative feature.
+
+Per the project's standing engineering-governance workflow (audit → design →
+approval → implement → test → review → commit), change detection needs its
+own design proposal before any code — at minimum:
+
+- What constitutes a meaningful change (Problem lifecycle-state transition?
+  Opportunity score movement past some threshold? new/decayed
+  Entity/Relationship?) — `change_events.event_type` already has a default
+  of `''` meaning "any," which implies the type vocabulary itself is still
+  open.
+- How significance is ranked, if at all, before something becomes a
+  `watchlists`/`alert_rules` match — deliberately undesigned so far, per
+  the prior handoff.
+- How an alert actually reaches an operator — no delivery mechanism exists
+  yet, and none should be assumed without a proposal.
+
+**Other open items, unaffected by this milestone, lower priority:**
+
+- **Collector live-validation debt** (Part 4 items 18–19) — Trends and
+  Reddit have still never been exercised against their real APIs, only unit
+  fixtures and the graceful-failure (missing-credentials) path. Worth doing
+  before change detection starts treating their output as a reliable signal
+  of real-world change, since a systematically-wrong parse would now
+  register as "change" rather than just a bad report.
+- **`explainer/*`'s narrative layer** (Part 4 item 17's remaining half) and
+  **RFC-001 implementation** (Part 4 item 13) — both independent of change
+  detection and of each other, unchanged since the prior revision (RFC-002's
+  Findings contract still Proposed, not Accepted).
+- **`GET /reports` domain filter** (Part 4 item 15) — small, still open,
+  same shape as the fix already applied to Opportunities/Signals.
+
+Do not start change-detection implementation from this handoff alone — it
+still needs the design/approval step above before any code is written.
