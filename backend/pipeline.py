@@ -58,7 +58,7 @@ from domains.registry import DomainRegistry
 from knowledge_graph import decay
 from knowledge_graph.extractor import EntityExtractor
 from models import Signal
-from opportunity_engine import lifecycle
+from opportunity_engine import change_detection, lifecycle
 from opportunity_engine.detector import PatternDetector
 from report.generator import ReportGenerator
 from scheduler import ScheduleDecision, SchedulePlan
@@ -80,6 +80,7 @@ class DomainRunResult:
     relationships_decayed:   int  = 0   # relationships newly moved to dormant or archived this run
     opportunities_detected:  int  = 0
     problems_archived:       int  = 0   # problems newly moved to archived lifecycle_state this run
+    change_events_recorded:  int  = 0   # change_events written this run (Stage 3.6) — see opportunity_engine/change_detection.py
     report_generated:        bool = False
 
 
@@ -254,6 +255,13 @@ def _run_domain(
     """Run all pipeline stages for a single domain."""
     run_result = DomainRunResult(domain_id=domain.id)
 
+    # Captured before any stage below writes problem_history/opportunities
+    # -- Stage 3.6's query bound, not an idempotency mechanism (see
+    # opportunity_engine/change_detection.py's module docstring). Safe to
+    # be conservative/early; must not be late enough to miss a real
+    # transition written later in this same run.
+    run_started_at = database._now()
+
     # ── Stage 1: Collect ────────────────────────────────────────────────
     domain_signals: list[Signal] = _retag_for_domain(shared_hn_signals, domain.id)
 
@@ -362,6 +370,41 @@ def _run_domain(
             logger.info(
                 "[%s] lifecycle: %d problem(s) archived this run",
                 domain.id, lifecycle_counts["archived"],
+            )
+
+    # ── Stage 3.6: Change detection ─────────────────────────────────────
+    # Projects this run's Problem lifecycle/trend transitions (already
+    # written to problem_history by Stage 3/3.5 above) and any Opportunity
+    # tier movements into change_events -- a projection layer, not a
+    # second intelligence engine; see opportunity_engine/change_detection.py's
+    # module docstring for the full reasoning. Skipped in dry_run, matching
+    # every other stage that writes to the database.
+    #
+    # Wrapped in its own try/except, unlike decay/lifecycle above: a
+    # change-detection bug must never take down this run's already-
+    # committed intelligence (Stage 3/3.5's writes) or block Stage 4's
+    # report (Architectural Invariant 16, Failure Isolation). This is a
+    # stronger isolation guarantee than decay/lifecycle get, deliberately
+    # -- unlike those two, change_events is explicitly reconstructible
+    # (see that module's docstring), so swallowing a failure here and
+    # logging it costs nothing but this run's convenience, whereas a
+    # silent decay/lifecycle failure would mean a real, non-reconstructible
+    # state transition went unrecorded.
+    if not dry_run:
+        try:
+            with database.get_connection() as conn:
+                cd_counts = change_detection.run_change_detection(
+                    conn, domain=domain.id, since=run_started_at,
+                )
+            run_result.change_events_recorded = cd_counts["written"]
+            if cd_counts["written"]:
+                logger.info(
+                    "[%s] change detection: %d event(s) recorded (%d high-significance)",
+                    domain.id, cd_counts["written"], cd_counts["high_significance"],
+                )
+        except Exception:
+            logger.exception(
+                "[%s] change detection failed; continuing pipeline", domain.id,
             )
 
     # ── Stage 4: Report ─────────────────────────────────────────────────
