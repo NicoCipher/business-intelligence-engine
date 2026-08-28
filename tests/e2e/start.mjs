@@ -54,7 +54,18 @@ const api = createServer(async (request, response) => {
   if (path === "/api/v1/reports/latest" || path === "/api/v1/reports/2026-W34") return json(response, { id: "r1", week_key: "2026-W34", domain: "business", period_start: "2026-08-17", period_end: "2026-08-23", opp_count: 0, signal_count: 1, created_at: now, content: { executive_summary: "One signal was retained.", zero_opportunities_explanation: { summary: "Evidence did not meet persistence thresholds." }, watch_list: [{ title: "Track sparse demand" }] } });
   if (path === "/api/v1/reports") return json(response, { reports: [{ week_key: "2026-W34", period_start: "2026-08-17", period_end: "2026-08-23", opp_count: 0, signal_count: 1, created_at: now }], total: 1 });
   if (path === "/api/v1/changes/unseen") {
-    const snapshotAt = "2026-08-21T12:30:00+00:00";
+    // Computed per-request, not hoisted to a frozen literal -- must
+    // always be >= changeEvent.created_at (itself derived from `now`,
+    // captured at server start) for an acknowledgement against this
+    // value to ever actually clear the unseen count. A stale, earlier
+    // literal here was the second half of the same class of bug fixed
+    // in `now` above: it silently broke the acknowledge-clears-unseen
+    // flow specifically, while leaving the initial unseen count correct
+    // (since that only compares lastSeenAt, not snapshot_at, against
+    // changeEvent.created_at) -- which is exactly why it only surfaced
+    // once the freshness fix let test 1 get far enough to click
+    // "Mark reviewed" in test 2.
+    const snapshotAt = new Date().toISOString();
     const unseen = lastSeenAt === null || lastSeenAt < changeEvent.created_at;
     return json(response, {
       changes: unseen ? [changeEvent] : [],
