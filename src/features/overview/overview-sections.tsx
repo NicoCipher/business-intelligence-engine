@@ -1,6 +1,7 @@
 import Link from "next/link";
 
-import { BackendApiError, getHealth, getLatestReport, getSignalStats, getSignals } from "@/src/features/api/client";
+import { BackendApiError, getHealth, getLatestReport, getSignalStats, getSignals, getUnseenChanges } from "@/src/features/api/client";
+import { acknowledgeCurrentChanges } from "@/src/features/changes/actions";
 import { EmptyState, ExternalEvidenceLink, Panel, StateTag, TableScroll } from "@/src/features/shared/components";
 import { formatDate, formatNumber, isStale } from "@/src/features/shared/format";
 
@@ -53,12 +54,42 @@ export async function AttentionQueue() {
   );
 }
 
-export function ChangeVisibility() {
+export async function ChangeVisibility() {
+  const unseen = await getUnseenChanges(5);
+  const hasUnseen = unseen.total_unseen > 0;
+  const moreBeyondPreview = unseen.total_unseen - unseen.changes.length;
+
   return (
-    <Panel title="What changed since last looked" action={<StateTag tone="info">Unavailable</StateTag>}>
+    <Panel title="What changed since last looked" action={<StateTag tone={hasUnseen ? "warning" : "good"}>{hasUnseen ? `${formatNumber(unseen.total_unseen)} unseen` : "Up to date"}</StateTag>}>
       <div className="panel-body change-status">
-        <p>Current contracts provide snapshots, not change events or an operator checkpoint comparison.</p>
-        <p className="muted">The counts, report, and evidence below describe current state only; this console cannot determine what is new, updated, or resolved since a prior visit.</p>
+        <p className="muted">{unseen.since ? `Last reviewed ${formatDate(unseen.since)}.` : "This checkpoint has never been acknowledged — every change below is unseen."}</p>
+        {!hasUnseen ? (
+          <p>No Problem or Opportunity changes have been recorded since your last review.</p>
+        ) : (
+          <TableScroll label="Unseen change events table">
+            <table className="data-table">
+              <thead><tr><th scope="col">Change</th><th scope="col">Significance</th><th scope="col">Detected</th></tr></thead>
+              <tbody>{unseen.changes.map((change) => (
+                <tr key={change.id}>
+                  <td className="title-cell">
+                    <Link href={`/${change.entity_ref_type === "problem" ? "problems" : "opportunities"}/${encodeURIComponent(change.entity_ref_id)}`}>{change.entity_title ?? change.entity_ref_id}</Link>
+                    <span className="muted">{change.event_type.replaceAll("_", " ")}{change.new_value ? ` → ${change.new_value}` : ""}</span>
+                  </td>
+                  <td><StateTag tone={change.significance === "high" ? "warning" : "default"}>{change.significance}</StateTag></td>
+                  <td className="muted">{formatDate(change.detected_at)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </TableScroll>
+        )}
+        {hasUnseen && moreBeyondPreview > 0 ? <p className="muted">And {formatNumber(moreBeyondPreview)} more.</p> : null}
+        {hasUnseen ? (
+          <form action={acknowledgeCurrentChanges}>
+            <input type="hidden" name="snapshotAt" value={unseen.snapshot_at} />
+            <button type="submit">Mark reviewed through {formatDate(unseen.snapshot_at)}</button>
+            <span className="quiet"> Marks every change through this snapshot as reviewed, not only the {unseen.changes.length} shown above.</span>
+          </form>
+        ) : null}
       </div>
     </Panel>
   );

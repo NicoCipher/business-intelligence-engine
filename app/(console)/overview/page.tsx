@@ -16,7 +16,7 @@ export default async function OverviewPage() {
       <div className="section-grid">
         <div className="span-6"><Suspense fallback={<PanelSkeleton />}><OperatingState /></Suspense></div>
         <div className="span-6"><Suspense fallback={<PanelSkeleton />}><AttentionQueue /></Suspense></div>
-        <div className="span-12"><ChangeVisibility /></div>
+        <div className="span-12"><Suspense fallback={<PanelSkeleton />}><ChangeVisibility /></Suspense></div>
         <div className="span-5"><Suspense fallback={<PanelSkeleton />}><IntelligenceSnapshot /></Suspense></div>
         <div className="span-7"><Suspense fallback={<PanelSkeleton />}><LatestReportPanel /></Suspense></div>
         <div className="span-12"><Suspense fallback={<PanelSkeleton />}><RecentSignalsPanel /></Suspense></div>

@@ -109,6 +109,34 @@ export type ProblemHistory = {
   offset: number;
 };
 
+export type ChangeEvent = {
+  id: string;
+  domain: string;
+  event_type: string;
+  entity_ref_type: "problem" | "opportunity";
+  entity_ref_id: string;
+  entity_title: string | null;
+  previous_value: string;
+  new_value: string;
+  significance: "normal" | "high";
+  detected_at: string;
+  created_at: string;
+  metadata: Record<string, unknown>;
+};
+
+export type UnseenChanges = {
+  changes: ChangeEvent[];
+  total_unseen: number;
+  since: string | null;
+  snapshot_at: string;
+  limit: number;
+  offset: number;
+};
+
+export type AckResponse = {
+  last_seen_at: string;
+};
+
 export type ReportSummary = {
   week_key: string;
   period_start: string;

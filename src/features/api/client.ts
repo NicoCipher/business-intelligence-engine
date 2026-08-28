@@ -1,6 +1,7 @@
 import "server-only";
 
 import type {
+  AckResponse,
   ApiHealth,
   Opportunity,
   OpportunityDetail,
@@ -11,7 +12,8 @@ import type {
   ReportDetail,
   ReportSummary,
   Signal,
-  SignalStats
+  SignalStats,
+  UnseenChanges
 } from "@/src/features/api/types";
 
 type CachePolicy = { cache: "no-store" } | { next: { revalidate: number } };
@@ -145,4 +147,17 @@ export const getLatestReport = () =>
 export const getReport = (weekKey: string) =>
   request<ReportDetail>(`/reports/${encodeURIComponent(weekKey)}`, {
     next: { revalidate: 300 }
+  });
+
+export const getUnseenChanges = (limit = 5) =>
+  request<UnseenChanges>(`/changes/unseen${query({ limit })}`, {
+    cache: "no-store"
+  });
+
+export const acknowledgeChanges = (asOf: string) =>
+  request<AckResponse>("/operator-state/ack", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ as_of: asOf })
   });

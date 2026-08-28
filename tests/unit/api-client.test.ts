@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getHealth, getSignals } from "@/src/features/api/client";
+import { acknowledgeChanges, getHealth, getSignals, getUnseenChanges } from "@/src/features/api/client";
 import { assertProductionBackendConfiguration } from "@/src/features/api/config";
 
 const originalFetch = global.fetch;
@@ -62,5 +62,38 @@ describe("server-only BIA API client", () => {
 
   it("does not permit missing backend server configuration", async () => {
     await expect(getHealth()).rejects.toThrow("BIA_API_CONFIGURATION_MISSING");
+  });
+
+  it("fetches unseen changes with an intentional no-store policy", async () => {
+    process.env.BIA_API_BASE_URL = "http://bia.internal:8000";
+    process.env.BIA_API_KEY = "server-secret";
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      changes: [], total_unseen: 0, since: null, snapshot_at: "2026-08-21T12:30:00+00:00", limit: 5, offset: 0
+    }), { status: 200 }));
+
+    await getUnseenChanges(5);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/changes/unseen?limit=5"),
+      expect.objectContaining({ cache: "no-store", headers: expect.objectContaining({ Authorization: "Bearer server-secret" }) })
+    );
+  });
+
+  it("acknowledges changes with a POST carrying the given snapshot as_of", async () => {
+    process.env.BIA_API_BASE_URL = "http://bia.internal:8000";
+    process.env.BIA_API_KEY = "server-secret";
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ last_seen_at: "2026-08-21T12:30:00+00:00" }), { status: 200 }));
+
+    await acknowledgeChanges("2026-08-21T12:30:00+00:00");
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "http://bia.internal:8000/api/v1/operator-state/ack",
+      expect.objectContaining({
+        method: "POST",
+        cache: "no-store",
+        body: JSON.stringify({ as_of: "2026-08-21T12:30:00+00:00" }),
+        headers: expect.objectContaining({ "Content-Type": "application/json", Authorization: "Bearer server-secret" })
+      })
+    );
   });
 });

@@ -10,6 +10,21 @@ test("overview prioritizes operating state and explicit attention", async ({ pag
   await expect(page.getByRole("link", { name: "Open report" })).toBeVisible();
 });
 
+test("unseen changes are shown, linked to their referenced problem, and acknowledgement clears them", async ({ page }) => {
+  await page.goto("/overview");
+
+  await expect(page.getByText("1 unseen")).toBeVisible();
+  const changeLink = page.getByRole("link", { name: "Solo therapists lack scheduling tools" });
+  await expect(changeLink).toBeVisible();
+  await expect(changeLink).toHaveAttribute("href", "/problems/p1");
+  await expect(page.getByText("problem created")).toBeVisible();
+
+  await page.getByRole("button", { name: /Mark reviewed through/ }).click();
+
+  await expect(page.getByText("Up to date")).toBeVisible();
+  await expect(page.getByText("No Problem or Opportunity changes have been recorded since your last review.")).toBeVisible();
+});
+
 test("supported evidence and empty operational states are reachable", async ({ page }) => {
   await page.goto("/signals");
   await expect(page.getByRole("heading", { name: "Signals" })).toBeVisible();
