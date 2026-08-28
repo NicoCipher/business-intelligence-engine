@@ -12,7 +12,16 @@ const readBody = (request) => new Promise((resolve) => {
   request.on("end", () => resolve(raw ? JSON.parse(raw) : {}));
 });
 
-const now = "2026-08-21T12:00:00+00:00";
+// Computed at server-start time, not a hardcoded calendar literal.
+// src/features/shared/format.ts's isStale() compares this against real
+// Date.now() with a 36-hour window (for the "API + evidence fresh" /
+// "stale" tag in OperatingState()) -- a frozen literal date here would
+// silently pass staleness today and silently fail it once enough real
+// wall-clock time passed, regardless of any application or test logic.
+// This is the actual, deterministic root cause of a prior CI failure on
+// this exact assertion (a Playwright expect() timeout bump did not fix
+// it, because the underlying condition was never going to become true).
+const now = new Date().toISOString();
 const db = {
   signals: 1, opportunities: 0, entities: 4, problems: 1, problem_history: 1,
   reports: 1, change_events: 1, watchlists: 0, alert_rules: 0,
