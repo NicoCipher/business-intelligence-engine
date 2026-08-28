@@ -1,4 +1,4 @@
-# BIA Project Handoff (updated through `cb38922`: RSS/Trends aggregate-failure correction, on top of the schema v10 Continuous Intelligence Engine foundation)
+# BIA Project Handoff (updated through `b13782c`: Change Detection Read-Side V1 and its hosted-CI E2E stabilization, on top of Change Detection V1 and the schema v10 Continuous Intelligence Engine foundation)
 
 Supersedes the schema-v7-era handoff. Full architecture detail now lives
 in `docs/ARCHITECTURE.md` (current state) and `docs/SCHEMA.md` (full
@@ -178,6 +178,121 @@ Files touched: `backend/collectors/rss_collector.py`,
 `backend/tests/test_rss_collector.py`, `backend/tests/test_trends_collector.py`.
 Nothing else — no schema, scheduler, frontend, or documentation changes in
 this commit.
+
+## Part 0c: Change Detection V1, Read-Side V1, and E2E stabilization (2026-08-27 – 2026-08-28)
+
+Two reviewed, approved milestones — each preceded by its own audit/design
+step per the project's standing engineering-governance workflow — turned
+schema v10's `change_events`/`operator_state` from schema-only foundations
+into an actually-produced, actually-queryable, actually-acknowledgeable
+contract. A short E2E-stabilization tail followed once hosted CI exercised
+the read-side for real.
+
+**Change Detection V1 (`9fa09d0`).** New `backend/opportunity_engine/
+change_detection.py`, wired as Stage 3.6 in `pipeline.py` (after lifecycle,
+before report generation). Deliberately a *projection* layer, not a second
+intelligence engine — it relabels decisions `lifecycle.py`/`canonicalizer.py`
+already made and already wrote to `problem_history`, plus one genuinely new
+comparison (Opportunity tier movement, since Opportunities have no history
+table — ADR-002 immutability). V1 vocabulary: `problem_created`,
+`problem_lifecycle_changed`, `problem_trend_changed`, `new_opportunity`
+(first-ever Opportunity for a Problem), `opportunity_tier_crossed` (tier
+differs from the immediately preceding Opportunity, either direction — a
+downward crossing is kept, not suppressed, since deteriorating evidence is
+intelligence too). `problem_history.evidence_added` is suppressed entirely
+— it fires on nearly every recurrence match, every run, and would dominate
+the log. Significance is a static `normal`/`high` lookup table (no LLM, no
+learned model): `problem_created` and `archived→reactivated` and
+`→growing` and crossing into gold are `high`; everything else is `normal`.
+Idempotency is deterministic, not query-window-dependent:
+`change_events.id` is derived via `uuid5` from the source `problem_history`
+row id (or the Opportunity id + event type), so `INSERT OR IGNORE` makes
+retry/replay/backfill naturally safe — this was a deliberate choice to
+avoid changing `canonicalizer.py`/`lifecycle.py`'s already-tested return
+contracts for this feature alone. 28 new tests. Full backend suite: 754
+passed at this commit.
+
+**Change Detection Read-Side V1 (`9126d8f`).** New `GET /api/v1/changes`
+(filterable browse, `detected_at DESC`, `entity_title` resolved via a
+single query with two conditional `LEFT JOIN`s — no N+1), `GET /api/v1/
+changes/unseen` (the canonical acknowledgeable snapshot — deliberately
+global and unfiltered, no domain/significance/event_type params at all,
+since `operator_state` has exactly one checkpoint and exposing filters
+here would misleadingly imply a filtered slice could be acknowledged
+independently), and `POST /api/v1/operator-state/ack` (the only route
+that may ever write `operator_state.last_seen_at`). All three require
+`auth.get_current_actor`, matching `problems.py`'s stricter, more recent
+convention of protecting GETs too.
+
+Unseen semantics: `snapshot_at` is captured (`database._now()`) *before*
+querying `change_events`, and is the only value the console should ever
+send back as an acknowledgement watermark — never click time, never the
+browser's clock. The boundary is `created_at > last_seen_at AND
+created_at <= snapshot_at` — deliberately `created_at` (row-insertion
+time), not `detected_at` (the underlying fact's timestamp), so a future
+backfilled row with an old `detected_at` but a brand-new `created_at`
+is still correctly treated as unseen. An empty `last_seen_at` (never
+acknowledged) omits the lower bound entirely — "never checked" means
+everything is unseen, not nothing.
+
+Acknowledgement: `last_seen_at = MAX(current, MIN(as_of, now))` in one
+atomic `UPDATE` — monotonic (never regresses), idempotent (a duplicate
+or older `as_of` is a no-op), clamped to server time (defends against a
+skewed or malicious client's future timestamp), and global by design —
+no domain parameter exists on the route at all. GET routes never mutate
+`operator_state` under any circumstance, tested explicitly. The race
+this was built to survive: an event arriving between when the operator's
+view was fetched and when they click acknowledge must not be silently
+swallowed — proven by a test that inserts a new event strictly after a
+captured `snapshot_at`, then acknowledges with that stale `snapshot_at`,
+and asserts the new event is still unseen afterward.
+
+Console: Overview's "What changed since last looked — Unavailable"
+placeholder is replaced with a real panel — unseen count, up to 5
+recent/high-significance changes each linked to their Problem or
+Opportunity, and an explicit `acknowledgeCurrentChanges` Server Action
+(mirroring the existing `reviewOpportunityStatus` action's shape) that
+only ever fires on a real form submit, carrying the `snapshot_at` a
+prior `GET /changes/unseen` returned. No dedicated `/changes` browsing
+page was built — deliberately deferred until this contract had a proven
+consumer; see Part 4 for current status. 40 new backend tests, 2 new
+frontend unit tests, 1 new E2E test. Full backend suite: 794 passed;
+frontend: lint/typecheck clean, vitest 19/19, build succeeds,
+performance budget 126.2 KiB gzip (150 KiB budget) — all at this commit.
+
+**E2E stabilization (`d57f135` reverted, `8d45601`, `b13782c`).** Hosted
+Frontend CI failed on `9126d8f`'s Playwright run — diagnosed from actual
+CI logs, not inferred from a screenshot, across three iterations:
+
+1. First hypothesis (cold Next.js dev-compile timing) was wrong —
+   `d57f135` bumped Playwright's default `expect()` timeout to 10s: on
+   the next hosted run, the *same* assertion still failed at exactly
+   the new 10s limit, proving it was never a timing issue. Reverted in
+   `8d45601`.
+2. Real cause #1: `tests/e2e/start.mjs` hardcoded its `now` timestamp as
+   a frozen calendar literal (`"2026-08-21T12:00:00+00:00"`).
+   `isStale()` compares mock freshness timestamps against real
+   `Date.now()` with a 36-hour window; once real time passed that
+   window, "API + evidence fresh" could never render again, forever —
+   deterministic, not flaky. Fixed in `8d45601` by computing `now` at
+   server-start time instead.
+3. Real cause #2, surfaced only once cause #1 was fixed (the suite
+   could now progress far enough to expose it): the mock's `/changes/
+   unseen` handler still hardcoded `snapshot_at` to a frozen literal a
+   week earlier than the (now-dynamic) `changeEvent.created_at` —
+   acknowledging with it could never actually clear the unseen count.
+   Fixed in `b13782c` by computing `snapshot_at` per-request inside the
+   handler, matching the real backend's own `snapshot_at =
+   database._now()` pattern.
+
+No application or backend code was touched by any of these three
+commits, and no assertion was weakened at any point — both real fixes
+were in the E2E mock fixture only. Hosted Frontend CI on `b13782c`:
+green, all steps including "Run end-to-end tests" passing at the step
+level (confirmed via the GitHub Actions API, not just the job rollup).
+This sandbox still cannot run Playwright locally (`cdn.playwright.dev`
+blocked by network egress here) — every iteration above was verified
+against real hosted CI logs, not a local run.
 
 ## Part 1: Current System State
 
@@ -397,9 +512,12 @@ has never been live-validated, only unit-tested; Google Trends has been
 unit-tested against fixtures built from `pytrends`' own source, never
 against a live response, since `trends.google.com` wasn't reachable
 from that environment either. Schema v10's `collector_state` is now
-consumed by the adaptive scheduler (see Part 0a); `change_events` still
-has no producer, and `watchlists`/`alert_rules`/`operator_state` still
-have no consumer. Those remain deliberately deferred beyond scheduling.
+consumed by the adaptive scheduler (see Part 0a); `change_events` is now
+produced (Stage 3.6) and queryable (`GET /api/v1/changes`), and
+`operator_state` is now actively read/written through explicit
+acknowledgement (`POST /api/v1/operator-state/ack`) — see Part 0c for
+both. `watchlists`/`alert_rules` still have no consumer — that remains
+deliberately deferred.
 
 24. **Second-domain data-source generalization** (`ac19d5c`). Addresses
     exactly the gap the paragraph above used to describe as
@@ -747,20 +865,29 @@ six-layer model this list still describes.
     "nothing changed" if the collector layer can silently report success
     on a run where nothing was actually collected.
 21. ~~The frontend~~ — done for its originally-scoped surface (`079dced`,
-    hardened `42a1312`; see Part 0). No Collectors, Pipeline, Change
-    Events, Watchlists, or Alert Rules UI exists yet, by design — their
-    operational contracts don't exist yet either (see item 22).
-22. **Change detection, significance ranking, and alert delivery** —
-    still undesigned and unimplemented. Schema v10's
-    `change_events`/`watchlists`/`alert_rules`/`operator_state` tables
-    exist and are indexed, but no code populates or reads them yet
-    (confirmed by inspection — `database.py` defines the tables; nothing
-    else in `backend/` references `change_events` outside schema
-    creation and reporting stats). This was deliberately deferred past
-    the scheduler ("no point detecting changes faster than the
-    collectors that would produce them can actually run") and past
-    correctness of collector outcomes (item 20a) — both preconditions are
-    now satisfied. See Part 5 for the recommended next-milestone framing.
+    hardened `42a1312`; see Part 0), with the Overview "what changed"
+    panel added on top (`9126d8f`; see Part 0c). Still no dedicated
+    Collectors, Pipeline, or Change Events browsing UI, and no
+    Watchlists/Alert Rules UI — the latter two's operational contracts
+    still don't exist (see item 22a). A dedicated `/changes` browse
+    page was deliberately deferred even though its backend contract now
+    exists, per the reviewed read-side design.
+22. ~~Change detection~~ — done. Write side (`9fa09d0`) and read side
+    (`9126d8f`), both reviewed/approved before implementation; see
+    Part 0c for full detail. `change_events` is produced and queryable;
+    `operator_state.last_seen_at` is actively used through explicit,
+    global, monotonic, idempotent acknowledgement. Significance
+    ranking is the static `normal`/`high` model shipped with V1 — see
+    Part 0c; no separate ranking system was built, and none is
+    currently planned beyond that static table.
+22a. **Alert delivery, and watchlists/alert_rules consumption** — still
+    undesigned and unimplemented. `watchlists`/`alert_rules` remain
+    schema-only, with no consumer anywhere in `backend/` (confirmed by
+    inspection, unchanged since v10 was written) and no delivery
+    channel by design. This was and remains explicitly out of scope for
+    both Change Detection milestones — building it requires its own
+    design proposal, not an extension of the read-side's `GET /changes`
+    contract.
 
 **Frontend note (from the RFC review, worth restating):** the
 originally-planned "backend done → build Next.js frontend" ordering was
@@ -825,6 +952,11 @@ on any commit below):**
     see Part 0b.
 14. RSS/Trends aggregate-failure outcome correction (`cb38922`) — see
     Part 0b and Part 4 item 20a.
+15. Change Detection V1 (`9fa09d0`) — see Part 0c and Part 4 item 22.
+16. Change Detection Read-Side V1 (`9126d8f`) — see Part 0c and Part 4
+    item 22.
+17. E2E stabilization for the read-side's hosted CI run — `d57f135`
+    (reverted), `8d45601`, `b13782c` — see Part 0c.
 
 **Token handling note, still relevant for whoever continues this:**
 every GitHub Personal Access Token used in this project's history was
@@ -835,70 +967,45 @@ anything, confirm no stale token is still live at
 https://github.com/settings/tokens**, and treat any newly-provided token
 the same way — use once, then revoke.
 
-**Current state:** tracked `HEAD` is `cb38922` (RSS/Trends aggregate-failure
-correction). Working tree is clean; local `main` and `origin/main` are in
-sync; nothing is pending push. Backend suite: 726 passed in an environment
-with `pytrends` installed (2 of these are `skipif`-gated on `pytrends` and
-will show as skipped instead without it — a pre-existing, environment-
-dependent condition, not a regression). Frontend validation (`npm run lint`,
-`typecheck`, `test`, `build`, `check:performance`) last confirmed passing at
-the Part 0 handoff; not re-run as part of this backend-focused work — worth
-a fresh pass before relying on it, since three commits (`ac6fc6c`, `42a1312`,
-plus the CI workflow itself in `83bdad1`) have touched the console since
-that check.
+**Current state:** tracked `HEAD` is `b13782c` (E2E stabilization following
+Change Detection Read-Side V1). Working tree is clean; local `main` and
+`origin/main` are in sync; nothing is pending push. Backend suite: 794
+passed (2 remain `skipif`-gated on `pytrends` being installed — same
+pre-existing, environment-dependent condition noted at every prior
+revision, not a regression). Frontend: `npm run lint`/`typecheck` clean,
+`npm test` 19/19 Vitest passing, production `npm run build` succeeds,
+`npm run check:performance` reports 126.2 KiB gzip against the 150 KiB
+budget. Hosted Frontend CI on `b13782c` is green end-to-end, including
+Playwright E2E at the step level (confirmed via the GitHub Actions API,
+not inferred) — this is the first revision of this handoff where that
+statement is backed by a real hosted CI result rather than a "not re-run,
+worth checking" caveat.
 
-**Next backend milestone: Change detection (Part 4 item 22).**
+**Open items, current as of this revision (see Part 4 for full detail on
+each):**
 
-The scheduler (Part 0a) and the RSS/Trends outcome-correctness fix
-(Part 0b, item 20a) were both explicit preconditions the prior revision of
-this handoff named before change detection could start:
-
-- *"Do not start any of this before the scheduler exists — there's no point
-  detecting changes faster than the collectors that would produce them can
-  actually run."* — satisfied, scheduler is committed and hardened.
-- Collector outcomes must be trustworthy before anything reacts to them
-  automatically — satisfied by `cb38922`. Change detection specifically
-  needs to distinguish "the collector ran and found nothing new" from "the
-  collector didn't actually run correctly," and until this fix the RSS/Trends
-  aggregate-failure case collapsed those two into the same `SUCCESS` outcome.
-
-Both preconditions are now met, and schema v10 already provisioned
-`change_events`, `watchlists`, `alert_rules`, and `operator_state` for
-exactly this purpose — confirmed by inspection that these tables exist and
-are indexed but nothing outside `database.py`'s schema creation and the
-reporting-stats endpoint currently reads or writes them. This is a genuine
-gap between what the data model already supports and what the pipeline
-currently produces, not a speculative feature.
-
-Per the project's standing engineering-governance workflow (audit → design →
-approval → implement → test → review → commit), change detection needs its
-own design proposal before any code — at minimum:
-
-- What constitutes a meaningful change (Problem lifecycle-state transition?
-  Opportunity score movement past some threshold? new/decayed
-  Entity/Relationship?) — `change_events.event_type` already has a default
-  of `''` meaning "any," which implies the type vocabulary itself is still
-  open.
-- How significance is ranked, if at all, before something becomes a
-  `watchlists`/`alert_rules` match — deliberately undesigned so far, per
-  the prior handoff.
-- How an alert actually reaches an operator — no delivery mechanism exists
-  yet, and none should be assumed without a proposal.
-
-**Other open items, unaffected by this milestone, lower priority:**
-
-- **Collector live-validation debt** (Part 4 items 18–19) — Trends and
-  Reddit have still never been exercised against their real APIs, only unit
-  fixtures and the graceful-failure (missing-credentials) path. Worth doing
-  before change detection starts treating their output as a reliable signal
-  of real-world change, since a systematically-wrong parse would now
-  register as "change" rather than just a bad report.
-- **`explainer/*`'s narrative layer** (Part 4 item 17's remaining half) and
-  **RFC-001 implementation** (Part 4 item 13) — both independent of change
-  detection and of each other, unchanged since the prior revision (RFC-002's
+- **Alert delivery and watchlists/alert_rules consumption** (item 22a) —
+  still undesigned and unimplemented, schema-only, no delivery channel by
+  design. The natural next candidate given change detection now has real
+  data flowing through it, but needs its own design proposal — not
+  assumed here.
+- **A dedicated `/changes` Console browsing page** (item 21) — the
+  backend contract now exists and is proven by the Overview panel's
+  real usage, but a full browse/filter page was deliberately deferred at
+  the read-side design step; still open.
+- **Collector live-validation debt** (items 18–19) — Trends and Reddit
+  have still never been exercised against their real APIs, only unit
+  fixtures and the graceful-failure (missing-credentials) path. Now more
+  worth doing than before: change detection treats their output as real
+  signal, so a systematically-wrong parse would register as "change,"
+  not just a bad report.
+- **`explainer/*`'s narrative layer** (item 17's remaining half) and
+  **RFC-001 implementation** (item 13) — both unchanged since the prior
+  revision, independent of change detection and of each other (RFC-002's
   Findings contract still Proposed, not Accepted).
-- **`GET /reports` domain filter** (Part 4 item 15) — small, still open,
-  same shape as the fix already applied to Opportunities/Signals.
+- **`GET /reports` domain filter** (item 15) — small, still open, same
+  shape as the fix already applied to Opportunities/Signals.
 
-Do not start change-detection implementation from this handoff alone — it
-still needs the design/approval step above before any code is written.
+This handoff makes no recommendation among these for what to do next —
+that determination, per the project's standing engineering-governance
+workflow, belongs to its own audit/design step, not this refresh.
