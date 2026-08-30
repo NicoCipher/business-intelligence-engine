@@ -74,7 +74,7 @@ class TestInitializeAgainstPreV10Database:
             version = conn.execute(
                 "SELECT version FROM schema_info ORDER BY version DESC LIMIT 1"
             ).fetchone()["version"]
-        assert version == database.SCHEMA_VERSION == 10
+        assert version == database.SCHEMA_VERSION == 11
 
     @pytest.mark.parametrize("table", _NEW_TABLES)
     def test_new_table_created(self, pre_v10_db, table):
@@ -514,4 +514,3 @@ class TestOperatorState:
         with database.get_connection() as conn:
             collector_count = conn.execute("SELECT COUNT(*) FROM collector_state").fetchone()[0]
         assert collector_count == 5  # unchanged seeding behavior
-

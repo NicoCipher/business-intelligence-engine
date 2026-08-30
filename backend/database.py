@@ -35,7 +35,7 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # Full DDL. CREATE IF NOT EXISTS makes this idempotent — safe to call on
 # every startup without worrying about duplicate table errors.
@@ -392,6 +392,35 @@ CREATE TABLE IF NOT EXISTS operator_state (
     last_seen_at TEXT DEFAULT '',
     updated_at   TEXT NOT NULL
 );
+
+-- ── Slack ↔ Linear ticket sync (schema v11) ─────────────────────────────
+
+CREATE TABLE IF NOT EXISTS integration_events (
+    source       TEXT NOT NULL,
+    event_id     TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'received',
+    error        TEXT DEFAULT '',
+    received_at  TEXT NOT NULL,
+    completed_at TEXT DEFAULT '',
+    PRIMARY KEY (source, event_id)
+);
+
+CREATE TABLE IF NOT EXISTS ticket_links (
+    id                TEXT PRIMARY KEY,
+    slack_team_id     TEXT NOT NULL,
+    slack_channel_id  TEXT NOT NULL,
+    slack_message_ts  TEXT NOT NULL,
+    slack_permalink   TEXT DEFAULT '',
+    linear_issue_id   TEXT NOT NULL UNIQUE,
+    linear_identifier TEXT NOT NULL UNIQUE,
+    linear_url        TEXT DEFAULT '',
+    status            TEXT NOT NULL DEFAULT 'backlog',
+    completion_sent_at TEXT DEFAULT '',
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    UNIQUE (slack_team_id, slack_channel_id, slack_message_ts)
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_links_status ON ticket_links(status);
 """
 
 
@@ -465,6 +494,9 @@ def initialize() -> None:
 
         if current_version < 10:
             _migrate_v10(conn)
+
+        if current_version < 11:
+            _migrate_v11(conn)
 
         if current_version < SCHEMA_VERSION:
             conn.execute(
@@ -1256,6 +1288,44 @@ def _migrate_v10(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_watchlists_target ON watchlists(target_type, target_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_rules_client ON alert_rules(client_id, domain)")
 
+    conn.commit()
+
+
+def _migrate_v11(conn) -> None:
+    """Migration v10 → v11: durable Slack/Linear event and ticket mapping."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS integration_events (
+            source       TEXT NOT NULL,
+            event_id     TEXT NOT NULL,
+            status       TEXT NOT NULL DEFAULT 'received',
+            error        TEXT DEFAULT '',
+            received_at  TEXT NOT NULL,
+            completed_at TEXT DEFAULT '',
+            PRIMARY KEY (source, event_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ticket_links (
+            id                 TEXT PRIMARY KEY,
+            slack_team_id      TEXT NOT NULL,
+            slack_channel_id   TEXT NOT NULL,
+            slack_message_ts   TEXT NOT NULL,
+            slack_permalink    TEXT DEFAULT '',
+            linear_issue_id    TEXT NOT NULL UNIQUE,
+            linear_identifier  TEXT NOT NULL UNIQUE,
+            linear_url         TEXT DEFAULT '',
+            status             TEXT NOT NULL DEFAULT 'backlog',
+            completion_sent_at TEXT DEFAULT '',
+            created_at         TEXT NOT NULL,
+            updated_at         TEXT NOT NULL,
+            UNIQUE (slack_team_id, slack_channel_id, slack_message_ts)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ticket_links_status ON ticket_links(status)")
     conn.commit()
 
 

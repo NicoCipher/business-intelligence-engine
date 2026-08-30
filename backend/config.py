@@ -25,6 +25,24 @@ API_HOST  = os.getenv("BIA_HOST", "127.0.0.1")
 API_PORT  = int(os.getenv("BIA_PORT", "8000"))
 
 
+# ── Slack ↔ Linear ticket sync ───────────────────────────────────────────
+# Disabled by default so the existing Zap can remain the sole ticket creator
+# until the BIA webhook cutover is deliberately enabled.
+
+TICKET_SYNC_ENABLED = os.getenv("BIA_TICKET_SYNC_ENABLED", "false").lower() in {
+    "1", "true", "yes", "on",
+}
+SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "")
+SLACK_OPS_CHANNEL_ID = os.getenv("SLACK_OPS_CHANNEL_ID", "")
+SLACK_TICKET_REACTION = os.getenv("SLACK_TICKET_REACTION", "ticket")
+LINEAR_API_KEY = os.getenv("LINEAR_API_KEY", "")
+LINEAR_WEBHOOK_SECRET = os.getenv("LINEAR_WEBHOOK_SECRET", "")
+LINEAR_TEAM_ID = os.getenv("LINEAR_TEAM_ID", "")
+LINEAR_BACKLOG_STATE_ID = os.getenv("LINEAR_BACKLOG_STATE_ID", "")
+LINEAR_DONE_STATE_ID = os.getenv("LINEAR_DONE_STATE_ID", "")
+
+
 # ── Collector limits ───────────────────────────────────────────────────────
 # Keep these conservative. We are guests on public APIs.
 

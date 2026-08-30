@@ -42,7 +42,7 @@ import database
 import locking
 import persistence
 from config import API_HOST, API_PORT
-from api import opportunities, signals, reports, problems, changes, operator_state
+from api import opportunities, signals, reports, problems, changes, operator_state, integrations
 from domains.registry import DomainRegistry
 
 # ── Logging ───────────────────────────────────────────────────────────────
@@ -165,6 +165,11 @@ app.include_router(
     operator_state.router,
     prefix="/api/v1/operator-state",
     tags=["operator-state"],
+)
+app.include_router(
+    integrations.router,
+    prefix="/api/v1/integrations",
+    tags=["integrations"],
 )
 
 
