@@ -10,8 +10,10 @@ Reddit, Hacker News, and in an RSS feed in the same week is a signal.
 Algorithm:
 
   1. Load recent unprocessed signals from the database.
-  2. Extract keyword fingerprints from each signal's title + content.
-  3. Group signals by fingerprint similarity (a simple bag-of-words overlap).
+  2. Extract keyword fingerprints and deterministic correlation features from
+     each signal's title + content.
+  3. Group signals by topical lexical similarity with local-context
+     confirmation.
   4. Reject clusters with fewer than MIN_CLUSTER_SIZE signals or only one source.
   5. Reject clusters with no demand/complaint/willingness-to-pay evidence at
      all — a well-corroborated pure-news cluster (e.g. "OpenAI announced X"
@@ -109,6 +111,28 @@ _MIN_TOKEN_LEN = 4
 # This is intentionally loose — better to over-cluster and let the source-
 # diversity filter reduce noise than to under-cluster and miss real patterns.
 _JACCARD_THRESHOLD = 0.12
+
+# A high lexical overlap is already strong enough evidence to preserve the
+# original simple-match behaviour. Below this value, a loose overlap must also
+# agree in immediate token context; this prevents an ambiguous shared word
+# from joining unrelated clusters by itself.
+_STRONG_LEXICAL_JACCARD_THRESHOLD = 0.50
+_CONTEXT_JACCARD_THRESHOLD = 0.12
+
+_RECURRENCE_PATTERN = re.compile(
+    r"\b(?:every|each)\s+(?:other\s+)?(?:"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"days?|weeks?|months?|quarters?|years?)\b"
+    r"|\b(?:daily|weekly|monthly|quarterly|yearly|annually)\b"
+)
+_TIME_COST_EXPRESSION_PATTERN = re.compile(
+    r"\b(?:spend|spends|spending|spent|take|takes|taking|took|"
+    r"consume|consumes|consuming|consumed|eat|eats|eating|ate|"
+    r"lose|loses|losing|lost|waste|wastes|wasting|wasted)\s+"
+    r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"an?|half|couple|few|several)\s+(?:minutes?|hours?|days?|weeks?|"
+    r"months?|mornings?|afternoons?|evenings?)\b"
+)
 
 
 class PatternDetector:
@@ -327,12 +351,67 @@ class PatternDetector:
         Deliberate simplicity: split on non-alphanumeric, filter stop words.
         This handles most cases well for English-language tech content.
         """
-        text = signal.full_text  # already lowercased
-        tokens = re.split(r"[^a-z0-9]+", text)
-        return frozenset(
-            t for t in tokens
-            if len(t) >= _MIN_TOKEN_LEN and t not in _STOP_WORDS
+        return frozenset(self._topical_tokens(signal.full_text))
+
+    @staticmethod
+    def _topical_tokens(text: str) -> tuple[str, ...]:
+        """Exclude only matched generic effort constructions from topic matching."""
+        normalized = text.lower()
+        time_cost_spans = [
+            match.span() for match in _TIME_COST_EXPRESSION_PATTERN.finditer(normalized)
+        ]
+        excluded_spans = time_cost_spans[:]
+        if time_cost_spans:
+            excluded_spans.extend(match.span() for match in _RECURRENCE_PATTERN.finditer(normalized))
+
+        return tuple(
+            token.group()
+            for token in re.finditer(r"[a-z0-9]+", normalized)
+            if (
+                len(token.group()) >= _MIN_TOKEN_LEN
+                and token.group() not in _STOP_WORDS
+                and not any(
+                    token.start() < end and start < token.end()
+                    for start, end in excluded_spans
+                )
+            )
         )
+
+    def _context_features(self, signal: Signal) -> frozenset[tuple[str, str]]:
+        """
+        Adjacent meaningful-token pairs, used to confirm that shared words
+        retain the same local meaning. For example, ``sales pipeline`` and
+        ``ci/cd pipeline`` share ``pipeline`` but not enough surrounding
+        context to treat it as the same subject.
+        """
+        tokens = self._topical_tokens(signal.full_text)
+        return frozenset(zip(tokens, tokens[1:]))
+
+    def _should_join_cluster(
+        self,
+        fingerprint: frozenset[str],
+        context_features: frozenset[tuple[str, str]],
+        cluster_fingerprint: frozenset[str],
+        cluster_contexts: list[frozenset[tuple[str, str]]],
+    ) -> bool:
+        """
+        Decide whether one signal belongs in a candidate cluster.
+
+        The original lexical Jaccard path remains the primary signal. Loose
+        lexical matches now need an overlapping adjacent-token context, while
+        strong near-duplicate topical wording remains compatible with the
+        former behaviour. Generic effort shape cannot establish topic identity.
+        """
+        lexical_similarity = self._jaccard(fingerprint, cluster_fingerprint)
+        if lexical_similarity >= _JACCARD_THRESHOLD:
+            if lexical_similarity >= _STRONG_LEXICAL_JACCARD_THRESHOLD:
+                return True
+            return any(
+                self._jaccard(context_features, member_context)
+                >= _CONTEXT_JACCARD_THRESHOLD
+                for member_context in cluster_contexts
+            )
+        return False
 
     # ── Clustering ─────────────────────────────────────────────────────────
 
@@ -342,11 +421,13 @@ class PatternDetector:
         fingerprints: dict[str, frozenset],
     ) -> list[list[Signal]]:
         """
-        Single-pass greedy clustering by Jaccard similarity.
+        Single-pass greedy clustering by deterministic correlation evidence.
 
-        For each signal, check whether it belongs to an existing cluster
-        (Jaccard similarity against the cluster's merged fingerprint ≥ threshold).
-        If yes, merge. If no, start a new cluster.
+        For each signal, check whether it belongs to an existing cluster. The
+        primary route uses Jaccard similarity against the cluster's merged
+        topical fingerprint; loose lexical matches must retain a shared
+        adjacent-token context. If no topical route applies, start a new
+        cluster.
 
         Trade-off: greedy clustering is O(n²) in the worst case. For Version 1
         volumes (hundreds of signals per run, not millions) this is acceptable.
@@ -355,34 +436,50 @@ class PatternDetector:
         """
         by_id = {s.id: s for s in signals}
 
-        # Each cluster is represented by its merged fingerprint
+        # Each cluster keeps its merged topical fingerprint and per-signal
+        # contexts. The per-signal contexts prevent a phrase contributed by
+        # one member from being combined with another member's phrase to
+        # create synthetic evidence.
         cluster_fingerprints: list[frozenset] = []
         cluster_members: list[list[str]] = []    # lists of signal IDs
+        cluster_contexts: list[list[frozenset[tuple[str, str]]]] = []
 
         for sig in signals:
             fp = fingerprints[sig.id]
             if not fp:
                 continue   # skip signals with empty fingerprints
 
+            context_features = self._context_features(sig)
+
             best_cluster = -1
-            best_jaccard = 0.0
+            best_jaccard = -1.0
 
             for i, cfp in enumerate(cluster_fingerprints):
                 j = self._jaccard(fp, cfp)
-                if j > best_jaccard:
+                if (
+                    self._should_join_cluster(
+                        fp,
+                        context_features,
+                        cfp,
+                        cluster_contexts[i],
+                    )
+                    and j > best_jaccard
+                ):
                     best_jaccard = j
                     best_cluster = i
 
-            if best_jaccard >= _JACCARD_THRESHOLD:
+            if best_cluster >= 0:
                 # Merge into best matching cluster
                 cluster_members[best_cluster].append(sig.id)
                 cluster_fingerprints[best_cluster] = (
                     cluster_fingerprints[best_cluster] | fp
                 )
+                cluster_contexts[best_cluster].append(context_features)
             else:
                 # Start a new cluster
                 cluster_members.append([sig.id])
                 cluster_fingerprints.append(fp)
+                cluster_contexts.append([context_features])
 
         # Reconstruct signal objects from IDs
         return [
