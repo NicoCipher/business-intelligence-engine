@@ -114,29 +114,31 @@ def _fake_signals(prefix: str, source: str, n: int, offset: int = 0) -> list[Sig
 def _patch_collectors(
     monkeypatch, hn_signals, reddit_by_domain,
     rss_by_domain=None, github_by_domain=None, trends_by_domain=None,
+    stackexchange_by_domain=None,
 ):
     """
     Replace every collector's .collect() with canned data so pipeline
     tests never make a real HTTP request. Each fake respects
     `self.domain`, matching how the real collectors are used.
 
-    GitHub and Trends default to an empty dict, i.e. every domain gets
-    []. This is a deliberate choice, not an oversight: BUSINESS_DOMAIN_
+    GitHub, Trends, and StackExchange default to an empty dict, i.e. every
+    domain gets []. This is a deliberate choice, not an oversight: BUSINESS_DOMAIN_
     CONFIG (used directly by several tests below, since it's the real
-    production domain config) carries real github_queries/trends_keywords
-    -- pipeline._run_domain() calls those collectors unconditionally
-    whenever a domain configures them, live network calls and all, if
-    they aren't patched. This file's own docstring says collectors are
-    unit-tested elsewhere (see test_github_collector.py,
-    test_trends_collector.py) -- these tests exist to prove pipeline/
-    DomainRegistry/database wiring, not GitHub/Trends collection
-    behavior, so silencing them to [] here is correct, not a gap.
+    production domain config) carries real github_queries/trends_keywords/
+    stackexchange_queries -- pipeline._run_domain() calls those collectors
+    unconditionally whenever a domain configures them, live network calls and
+    all, if they aren't patched. This file's own docstring says collectors are
+    unit-tested elsewhere (see test_github_collector.py, test_trends_collector.py,
+    test_stackexchange_collector.py) -- these tests exist to prove pipeline/
+    DomainRegistry/database wiring, not individual collector behavior, so
+    silencing them to [] here is correct, not a gap.
     """
     import collectors.hn_collector as hn_mod
     import collectors.reddit_collector as reddit_mod
     import collectors.rss_collector as rss_mod
     import collectors.github_collector as github_mod
     import collectors.trends_collector as trends_mod
+    import collectors.stackexchange_collector as se_mod
 
     def fake_hn_collect(self, limit=None):
         return list(hn_signals)
@@ -153,11 +155,15 @@ def _patch_collectors(
     def fake_trends_collect(self, limit=None):
         return list((trends_by_domain or {}).get(self.domain, []))
 
+    def fake_se_collect(self, limit=None):
+        return list((stackexchange_by_domain or {}).get(self.domain, []))
+
     monkeypatch.setattr(hn_mod.HNCollector, "collect", fake_hn_collect)
     monkeypatch.setattr(reddit_mod.RedditCollector, "collect", fake_reddit_collect)
     monkeypatch.setattr(rss_mod.RSSCollector, "collect", fake_rss_collect)
     monkeypatch.setattr(github_mod.GitHubCollector, "collect", fake_github_collect)
     monkeypatch.setattr(trends_mod.TrendsCollector, "collect", fake_trends_collect)
+    monkeypatch.setattr(se_mod.StackExchangeCollector, "collect", fake_se_collect)
 
 
 def _rows(query: str) -> list:

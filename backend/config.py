@@ -46,6 +46,18 @@ GOOGLE_TRENDS_REQUEST_DELAY  = float(os.getenv("GOOGLE_TRENDS_REQUEST_DELAY", "3
                                                                              # engineered with no documented rate
                                                                              # limit; deliberately conservative
 
+# Total questions collected per full _fetch() invocation across all queries.
+# Each query paginates up to STACKEXCHANGE_PAGE_SIZE items per page.
+STACKEXCHANGE_QUESTION_LIMIT = int(os.getenv("STACKEXCHANGE_QUESTION_LIMIT", "100"))
+STACKEXCHANGE_PAGE_SIZE      = int(os.getenv("STACKEXCHANGE_PAGE_SIZE", "100"))   # max allowed by the API
+STACKEXCHANGE_REQUEST_DELAY  = float(os.getenv("STACKEXCHANGE_REQUEST_DELAY", "1.0")) # seconds between paginated
+                                                                             # requests; in addition to any
+                                                                             # mandatory `backoff` from the
+                                                                             # API response wrapper
+STACKEXCHANGE_WINDOW_DAYS    = int(os.getenv("STACKEXCHANGE_WINDOW_DAYS", "7"))    # lookback window; overlap
+                                                                             # between runs is harmless due
+                                                                             # to INSERT OR IGNORE dedup
+
 # Subreddits monitored. Ordered by signal quality for this system's purpose.
 REDDIT_SUBREDDITS = [
     "entrepreneur",

@@ -52,6 +52,7 @@ from collectors.reddit_collector import RedditCollector
 from collectors.rss_collector import RSSCollector
 from collectors.github_collector import GitHubCollector
 from collectors.trends_collector import TrendsCollector
+from collectors.stackexchange_collector import StackExchangeCollector
 import database
 from domains.base import DomainConfig
 from domains.registry import DomainRegistry
@@ -296,6 +297,13 @@ def _run_domain(
             )
             domain_signals.extend(trends.collect())
 
+        if domain.sources.stackexchange_queries:
+            se = StackExchangeCollector(
+                queries=domain.sources.stackexchange_queries,
+                domain=domain.id,
+            )
+            domain_signals.extend(se.collect())
+
     run_result.signals_collected = len(domain_signals)
     logger.info("[%s] collected %d signals this run", domain.id, len(domain_signals))
 
@@ -434,6 +442,11 @@ def _collector_for_source(source: str, domain: DomainConfig):
         return GitHubCollector(queries=domain.sources.github_queries, domain=domain.id)
     if source == "trends":
         return TrendsCollector(keywords=domain.sources.trends_keywords, domain=domain.id)
+    if source == "stackexchange":
+        return StackExchangeCollector(
+            queries=domain.sources.stackexchange_queries,
+            domain=domain.id,
+        )
     raise ValueError(f"Unsupported scheduled collector source: {source}")
 
 

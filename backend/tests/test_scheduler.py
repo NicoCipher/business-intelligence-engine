@@ -33,6 +33,7 @@ from domains.base import (
     DomainScoring,
     DomainSources,
     ScoringDimension,
+    StackExchangeQuery,
 )
 from domains.registry import DomainRegistry
 from models import Signal
@@ -145,7 +146,7 @@ class TestDuePlanning:
         }
         assert {
             item.source for item in plan.skipped if item.reason == "unconfigured"
-        } == {"rss", "github", "trends"}
+        } == {"rss", "github", "trends", "stackexchange"}
 
     def test_per_domain_state_is_provisioned_and_isolated(self, fresh_db):
         business = _domain("business")
@@ -157,7 +158,7 @@ class TestDuePlanning:
         assert _decision(plan, "hn", "business").reason == "interval_not_elapsed"
         assert _decision(plan, "hn", "other").due is True
         with database.get_connection() as conn:
-            assert conn.execute("SELECT COUNT(*) FROM collector_state WHERE domain = 'other'").fetchone()[0] == 5
+            assert conn.execute("SELECT COUNT(*) FROM collector_state WHERE domain = 'other'").fetchone()[0] == 6
 
     def test_disabled_backoff_quota_and_lazy_reset_gate_independently(self, fresh_db):
         domain = _domain("business", reddit=True)
@@ -318,3 +319,67 @@ def test_hourly_workflow_uses_scheduler_heartbeat_and_builtin_github_token():
     assert "contents: read" in workflow
     assert "actions: read" in workflow
     assert "adaptive" in workflow.lower()
+
+
+# ── Stack Exchange scheduler integration ─────────────────────────────────
+
+class TestStackExchangeSchedulerIntegration:
+    def test_stackexchange_in_collector_defaults(self):
+        sources = {name for name, *_ in scheduler.COLLECTOR_DEFAULTS}
+        assert "stackexchange" in sources
+
+    def test_source_is_configured_with_no_queries(self):
+        domain = _domain("business")
+        assert not scheduler._source_is_configured("stackexchange", domain)
+
+    def test_source_is_configured_with_queries(self):
+        domain_with_se = DomainConfig(
+            metadata=DomainMetadata(
+                id="business", name="business", description="SE fixture",
+                version="0.0.1", icon="flask", color="#123456", category="test",
+            ),
+            sources=DomainSources(
+                stackexchange_queries=[
+                    StackExchangeQuery("stackoverflow", ["saas"]),
+                ],
+            ),
+            keywords=DomainKeywords(),
+            graph=DomainKnowledgeGraph(),
+            scoring=DomainScoring(dimensions=[
+                ScoringDimension("signal_strength", "Signal Strength", "fixture", 1.0),
+            ]),
+            reporting=DomainReporting(title="SE fixture", description="fixture"),
+        )
+        assert scheduler._source_is_configured("stackexchange", domain_with_se)
+
+    def test_stackexchange_skipped_when_unconfigured(self, fresh_db):
+        domain = _domain("business")
+        plan = scheduler.AdaptiveScheduler(NOW).plan([domain])
+        skipped_sources = {item.source for item in plan.skipped if item.reason == "unconfigured"}
+        assert "stackexchange" in skipped_sources
+
+    def test_stackexchange_due_on_first_run_when_configured(self, fresh_db):
+        domain_with_se = DomainConfig(
+            metadata=DomainMetadata(
+                id="business", name="business", description="SE fixture",
+                version="0.0.1", icon="flask", color="#123456", category="test",
+            ),
+            sources=DomainSources(
+                stackexchange_queries=[
+                    StackExchangeQuery("stackoverflow", ["saas"]),
+                ],
+            ),
+            keywords=DomainKeywords(),
+            graph=DomainKnowledgeGraph(),
+            scoring=DomainScoring(dimensions=[
+                ScoringDimension("signal_strength", "Signal Strength", "fixture", 1.0),
+            ]),
+            reporting=DomainReporting(title="SE fixture", description="fixture"),
+        )
+        plan = scheduler.AdaptiveScheduler(NOW).plan([domain_with_se])
+        due_sources = {item.source for item in plan.due}
+        assert "stackexchange" in due_sources
+
+    def test_stackexchange_interval_is_240_minutes(self):
+        defaults_by_source = {name: interval for name, interval, *_ in scheduler.COLLECTOR_DEFAULTS}
+        assert defaults_by_source["stackexchange"] == 240

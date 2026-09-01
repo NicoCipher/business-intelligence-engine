@@ -68,6 +68,25 @@ class RSSFeed(NamedTuple):
     description: str
 
 
+class StackExchangeQuery(NamedTuple):
+    """A configured Stack Exchange API query.
+
+    site — Stack Exchange site slug, e.g. "stackoverflow" or "startups".
+           See https://api.stackexchange.com/docs/sites for valid slugs.
+
+    tags — Stack Exchange tags to filter by.  IMPORTANT: the API's `tagged`
+           parameter is an AND query — every tag in this list must appear on a
+           question for it to be returned.  For broad, independent topic
+           coverage, use one StackExchangeQuery per tag (single-element list)
+           rather than grouping unrelated tags into one multi-element list.
+           Multi-element lists are only appropriate for deliberate intersections,
+           e.g. ("stackoverflow", ["stripe", "subscriptions"]) when you
+           specifically want questions about Stripe billing.
+    """
+    site: str
+    tags: list[str]
+
+
 @dataclass
 class DomainSources:
     """
@@ -93,15 +112,21 @@ class DomainSources:
                      trending_up when the tracked term's own search
                      interest is currently increasing.
 
+    stackexchange_queries — StackExchangeQuery entries for the Stack Exchange
+                     collector.  Each entry is a (site, tags) pair:
+                       site — API site slug, e.g. "stackoverflow" or "startups"
+                       tags — AND-filtered tag list; prefer single-tag entries
+                              for broad coverage (see StackExchangeQuery docs).
+                     Empty list → collector is skipped for this domain.
+
     Shared collectors (Hacker News) run at the platform level and produce
     signals that every active domain processes. They are not configured here.
-    Domain-specific API collectors (e.g. NVD for cybersecurity) will be
-    added to this class in a future milestone.
     """
-    reddit_sources: list[str]    = field(default_factory=list)
-    rss_feeds:      list[RSSFeed] = field(default_factory=list)
-    github_queries: list[str]    = field(default_factory=list)
-    trends_keywords: list[str]   = field(default_factory=list)
+    reddit_sources:       list[str]                = field(default_factory=list)
+    rss_feeds:            list[RSSFeed]             = field(default_factory=list)
+    github_queries:       list[str]                = field(default_factory=list)
+    trends_keywords:      list[str]                = field(default_factory=list)
+    stackexchange_queries: list[StackExchangeQuery] = field(default_factory=list)
 
 
 # ── Keywords ──────────────────────────────────────────────────────────────
