@@ -10,8 +10,10 @@ Reddit, Hacker News, and in an RSS feed in the same week is a signal.
 Algorithm:
 
   1. Load recent unprocessed signals from the database.
-  2. Extract keyword fingerprints from each signal's title + content.
-  3. Group signals by fingerprint similarity (a simple bag-of-words overlap).
+  2. Extract keyword fingerprints and deterministic correlation features from
+     each signal's title + content.
+  3. Group signals by lexical similarity with local-context confirmation, or
+     by a narrowly-defined recurring-time-cost evidence shape.
   4. Reject clusters with fewer than MIN_CLUSTER_SIZE signals or only one source.
   5. Reject clusters with no demand/complaint/willingness-to-pay evidence at
      all — a well-corroborated pure-news cluster (e.g. "OpenAI announced X"
@@ -109,6 +111,36 @@ _MIN_TOKEN_LEN = 4
 # This is intentionally loose — better to over-cluster and let the source-
 # diversity filter reduce noise than to under-cluster and miss real patterns.
 _JACCARD_THRESHOLD = 0.12
+
+# A high lexical overlap is already strong enough evidence to preserve the
+# original simple-match behaviour. Below this value, a loose overlap must also
+# agree in immediate token context; this prevents an ambiguous shared word
+# from joining unrelated clusters by itself.
+_STRONG_LEXICAL_JACCARD_THRESHOLD = 0.50
+_CONTEXT_JACCARD_THRESHOLD = 0.12
+
+# Generic evidence-shape markers. These deliberately describe how effort is
+# reported (a recurring activity consuming an explicit duration), not a domain
+# topic such as invoices, bookkeeping, sales, or CI/CD.
+_RECURRENCE_PATTERN = re.compile(
+    r"\b(?:every|each)\s+(?:other\s+)?(?:"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"days?|weeks?|months?|quarters?|years?)\b"
+    r"|\b(?:daily|weekly|monthly|quarterly|yearly|annually)\b"
+)
+_DURATION_PATTERN = re.compile(
+    r"\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"an?|half|couple|few|several)\s+(?:minutes?|hours?|days?|weeks?|"
+    r"months?|mornings?|afternoons?|evenings?)\b"
+)
+_TIME_COST_VERBS = frozenset({
+    "spend", "spends", "spending", "spent",
+    "take", "takes", "taking", "took",
+    "consume", "consumes", "consuming", "consumed",
+    "eat", "eats", "eating", "ate",
+    "lose", "loses", "losing", "lost",
+    "waste", "wastes", "wasting", "wasted",
+})
 
 
 class PatternDetector:
@@ -327,11 +359,79 @@ class PatternDetector:
         Deliberate simplicity: split on non-alphanumeric, filter stop words.
         This handles most cases well for English-language tech content.
         """
-        text = signal.full_text  # already lowercased
-        tokens = re.split(r"[^a-z0-9]+", text)
-        return frozenset(
-            t for t in tokens
-            if len(t) >= _MIN_TOKEN_LEN and t not in _STOP_WORDS
+        return frozenset(self._meaningful_tokens(signal.full_text))
+
+    @staticmethod
+    def _meaningful_tokens(text: str) -> tuple[str, ...]:
+        """Return the same normalized token stream used by every correlation feature."""
+        return tuple(
+            token for token in re.split(r"[^a-z0-9]+", text)
+            if len(token) >= _MIN_TOKEN_LEN and token not in _STOP_WORDS
+        )
+
+    def _context_features(self, signal: Signal) -> frozenset[tuple[str, str]]:
+        """
+        Adjacent meaningful-token pairs, used to confirm that shared words
+        retain the same local meaning. For example, ``sales pipeline`` and
+        ``ci/cd pipeline`` share ``pipeline`` but not enough surrounding
+        context to treat it as the same subject.
+        """
+        tokens = self._meaningful_tokens(signal.full_text)
+        return frozenset(zip(tokens, tokens[1:]))
+
+    def _effort_features(self, signal: Signal) -> frozenset[str]:
+        """
+        Extract generic evidence shape, not a topic taxonomy.
+
+        A recurrence marker plus an explicit duration governed by a time-cost
+        verb captures independently-worded reports of recurring operational
+        effort. Both markers are required before this can supplement weak
+        lexical overlap.
+        """
+        text = signal.full_text
+        tokens = set(self._meaningful_tokens(text))
+        features: set[str] = set()
+
+        if _RECURRENCE_PATTERN.search(text):
+            features.add("recurring")
+        if _DURATION_PATTERN.search(text) and tokens & _TIME_COST_VERBS:
+            features.add("time_cost")
+
+        return frozenset(features)
+
+    def _should_join_cluster(
+        self,
+        fingerprint: frozenset[str],
+        context_features: frozenset[tuple[str, str]],
+        effort_features: frozenset[str],
+        cluster_fingerprint: frozenset[str],
+        cluster_contexts: list[frozenset[tuple[str, str]]],
+        cluster_efforts: list[frozenset[str]],
+    ) -> bool:
+        """
+        Decide whether one signal belongs in a candidate cluster.
+
+        The original lexical Jaccard path remains the primary signal. Loose
+        lexical matches now need an overlapping adjacent-token context, while
+        strong near-duplicate wording remains compatible with the former
+        behaviour. A second, independent route admits only pairs that both
+        explicitly report recurring time cost; it makes recurring operational
+        burdens correlatable without inventing a domain-specific topic label.
+        """
+        lexical_similarity = self._jaccard(fingerprint, cluster_fingerprint)
+        if lexical_similarity >= _JACCARD_THRESHOLD:
+            if lexical_similarity >= _STRONG_LEXICAL_JACCARD_THRESHOLD:
+                return True
+            return any(
+                self._jaccard(context_features, member_context)
+                >= _CONTEXT_JACCARD_THRESHOLD
+                for member_context in cluster_contexts
+            )
+
+        required_effort_shape = frozenset({"recurring", "time_cost"})
+        return any(
+            required_effort_shape <= effort_features & member_effort
+            for member_effort in cluster_efforts
         )
 
     # ── Clustering ─────────────────────────────────────────────────────────
@@ -342,11 +442,14 @@ class PatternDetector:
         fingerprints: dict[str, frozenset],
     ) -> list[list[Signal]]:
         """
-        Single-pass greedy clustering by Jaccard similarity.
+        Single-pass greedy clustering by deterministic correlation evidence.
 
-        For each signal, check whether it belongs to an existing cluster
-        (Jaccard similarity against the cluster's merged fingerprint ≥ threshold).
-        If yes, merge. If no, start a new cluster.
+        For each signal, check whether it belongs to an existing cluster. The
+        primary route uses Jaccard similarity against the cluster's merged
+        fingerprint; loose lexical matches must retain a shared adjacent-token
+        context. A tightly bounded fallback recognizes recurring explicit
+        time-cost reports even when their topic words do not overlap. If no
+        route applies, start a new cluster.
 
         Trade-off: greedy clustering is O(n²) in the worst case. For Version 1
         volumes (hundreds of signals per run, not millions) this is acceptable.
@@ -355,34 +458,58 @@ class PatternDetector:
         """
         by_id = {s.id: s for s in signals}
 
-        # Each cluster is represented by its merged fingerprint
+        # Each cluster keeps its merged lexical fingerprint plus per-signal
+        # context and effort features. The per-signal lists prevent a feature
+        # contributed by one member from being combined with a different
+        # feature contributed by another to create synthetic evidence.
         cluster_fingerprints: list[frozenset] = []
         cluster_members: list[list[str]] = []    # lists of signal IDs
+        cluster_contexts: list[list[frozenset[tuple[str, str]]]] = []
+        cluster_efforts: list[list[frozenset[str]]] = []
 
         for sig in signals:
             fp = fingerprints[sig.id]
             if not fp:
                 continue   # skip signals with empty fingerprints
 
+            context_features = self._context_features(sig)
+            effort_features = self._effort_features(sig)
+
             best_cluster = -1
-            best_jaccard = 0.0
+            # A valid recurring-time-cost match may have zero literal-token
+            # overlap, so zero is a possible score rather than a sentinel.
+            best_jaccard = -1.0
 
             for i, cfp in enumerate(cluster_fingerprints):
                 j = self._jaccard(fp, cfp)
-                if j > best_jaccard:
+                if (
+                    self._should_join_cluster(
+                        fp,
+                        context_features,
+                        effort_features,
+                        cfp,
+                        cluster_contexts[i],
+                        cluster_efforts[i],
+                    )
+                    and j > best_jaccard
+                ):
                     best_jaccard = j
                     best_cluster = i
 
-            if best_jaccard >= _JACCARD_THRESHOLD:
+            if best_cluster >= 0:
                 # Merge into best matching cluster
                 cluster_members[best_cluster].append(sig.id)
                 cluster_fingerprints[best_cluster] = (
                     cluster_fingerprints[best_cluster] | fp
                 )
+                cluster_contexts[best_cluster].append(context_features)
+                cluster_efforts[best_cluster].append(effort_features)
             else:
                 # Start a new cluster
                 cluster_members.append([sig.id])
                 cluster_fingerprints.append(fp)
+                cluster_contexts.append([context_features])
+                cluster_efforts.append([effort_features])
 
         # Reconstruct signal objects from IDs
         return [
