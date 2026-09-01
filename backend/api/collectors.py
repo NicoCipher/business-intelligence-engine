@@ -77,15 +77,23 @@ def _last_attempt_status(row) -> Literal["succeeded", "failed", "not_yet_run", "
     return "unknown"
 
 
-def _next_due_at(row) -> datetime | None:
+def _next_due_at(row, now: datetime) -> datetime | None:
     last_run_at = _parse_timestamp(row["last_run_at"])
     backoff_until = _parse_timestamp(row["backoff_until"])
-    if last_run_at is None:
-        return backoff_until
-
-    due_at = last_run_at + timedelta(minutes=row["interval_minutes"])
+    due_at = (
+        last_run_at + timedelta(minutes=row["interval_minutes"])
+        if last_run_at is not None
+        else backoff_until
+    )
     if backoff_until is not None:
-        due_at = max(due_at, backoff_until)
+        due_at = max(due_at, backoff_until) if due_at is not None else backoff_until
+
+    if row["quota_per_period"] and row["quota_used"] >= row["quota_per_period"]:
+        quota_reset_at = _parse_timestamp(row["quota_reset_at"])
+        if quota_reset_at is None:
+            return None
+        if quota_reset_at > now:
+            due_at = max(due_at, quota_reset_at) if due_at is not None else quota_reset_at
     return due_at
 
 
@@ -109,7 +117,7 @@ def _timing_gate_status(row, now: datetime, next_due_at: datetime | None) -> str
 
 
 def _row_to_item(row, now: datetime) -> CollectorStateItem:
-    next_due_at = _next_due_at(row)
+    next_due_at = _next_due_at(row, now)
     return CollectorStateItem(
         source=row["source"],
         domain=row["domain"],

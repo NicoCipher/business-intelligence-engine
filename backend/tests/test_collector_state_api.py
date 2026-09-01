@@ -60,7 +60,7 @@ class TestCollectorOperationsReadSide:
     def test_projects_failure_backoff_and_quota_without_claiming_rate_limit(self, client):
         now = datetime.now(timezone.utc).replace(microsecond=0)
         backoff = now + timedelta(hours=2)
-        reset = now + timedelta(hours=4)
+        reset = now + timedelta(hours=6)
         _update(
             "github",
             last_run_at=now.isoformat(),
@@ -78,7 +78,7 @@ class TestCollectorOperationsReadSide:
         assert item["last_attempt_status"] == "failed"
         assert item["timing_gate_status"] == "quota_exhausted"
         assert item["backoff_until"] == backoff.isoformat()
-        assert item["next_due_at"] == (now + timedelta(minutes=240)).isoformat()
+        assert item["next_due_at"] == reset.isoformat()
         assert item["quota"] == {"limit": 10, "period_minutes": 1440, "used": 10, "reset_at": reset.isoformat()}
         assert "rate_limit" not in item
 
