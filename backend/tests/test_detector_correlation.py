@@ -1,5 +1,7 @@
 """Focused regression tests for deterministic correlation evidence."""
 
+from itertools import permutations
+
 from opportunity_engine.detector import PatternDetector
 
 
@@ -8,21 +10,34 @@ def _clusters(detector, signals):
     return detector._cluster(signals, fingerprints)
 
 
-def test_recurring_time_cost_shape_clusters_paraphrased_operational_burden(make_signal):
+def _partition(detector, signals):
+    return frozenset(
+        frozenset(signal.title for signal in cluster)
+        for cluster in _clusters(detector, signals)
+    )
+
+
+def test_same_recurrence_and_duration_do_not_establish_topic_identity(make_signal):
     detector = PatternDetector()
     signals = [
-        make_signal(title="Monthly reporting consumes two mornings"),
-        make_signal(title="Every week, data-entry cleanup takes three hours", source="reddit"),
+        make_signal(title="Payroll takes three hours every Friday"),
+        make_signal(
+            title="Cleaning the office takes three hours every Friday",
+            source="reddit",
+        ),
     ]
 
-    assert len(_clusters(detector, signals)) == 1
+    assert len(_clusters(detector, signals)) == 2
 
 
-def test_recurring_shape_without_explicit_time_cost_does_not_override_topic_separation(make_signal):
+def test_zero_overlap_financial_admin_paraphrase_requires_topic_identity(make_signal):
     detector = PatternDetector()
     signals = [
-        make_signal(title="Every Friday I reconcile invoices manually"),
-        make_signal(title="Bookkeeping cleanup eats an afternoon every week", source="reddit"),
+        make_signal(title="I spend three hours every Friday reconciling invoices manually"),
+        make_signal(
+            title="Bookkeeping cleanup eats an afternoon every week",
+            source="reddit",
+        ),
     ]
 
     assert len(_clusters(detector, signals)) == 2
@@ -39,3 +54,18 @@ def test_loose_lexical_overlap_needs_shared_local_context(make_signal):
     ]
 
     assert len(_clusters(detector, signals)) == 2
+
+
+def test_generic_effort_shape_does_not_select_an_arbitrary_cluster_by_input_order(make_signal):
+    detector = PatternDetector()
+    signals = [
+        make_signal(title="Payroll processing takes three hours every Friday"),
+        make_signal(title="Office cleaning takes three hours every Friday", source="reddit"),
+        make_signal(title="Invoice reconciliation takes three hours every Friday", source="rss"),
+    ]
+    expected = frozenset(frozenset([signal.title]) for signal in signals)
+
+    assert {
+        _partition(detector, list(ordering))
+        for ordering in permutations(signals)
+    } == {expected}
