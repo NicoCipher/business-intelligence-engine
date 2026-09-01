@@ -1,15 +1,4 @@
-"""
-domains/business/sources.py
-
-Data collection sources for the Business Intelligence domain.
-These values were previously hardcoded in config.REDDIT_SUBREDDITS
-and collectors/rss_collector.DEFAULT_RSS_FEEDS.
-
-Imported by domains/business/config.py to assemble DOMAIN_CONFIG.
-The core pipeline reads these at collection time via DomainRegistry.
-"""
-
-from domains.base import DomainSources, RSSFeed
+from domains.base import DomainSources, RSSFeed, StackExchangeQuery
 
 SOURCES = DomainSources(
     reddit_sources=[
@@ -61,4 +50,33 @@ SOURCES = DomainSources(
             description="Stack Overflow automation tag — skill demand signals",
         ),
     ],
+    # Stack Exchange API queries — each entry is an independent topic.
+    # tagged= is an AND query, so each StackExchangeQuery uses a single tag
+    # for broad coverage.  Multi-tag entries are only for deliberate
+    # intersections (e.g. wanting questions about Stripe AND subscriptions).
+    #
+    # Tags validated against the live SE API:
+    #   stackoverflow: saas, multi-tenant, stripe-payments, webhooks,
+    #                  api-design, rate-limiting, oauth-2.0
+    #   freelancing:   invoicing, contracts, payment-terms
+    # Tags excluded (wrong site, off-topic, or too noisy):
+    #   automation (28k questions, dominated by Selenium/CI/Excel — too broad)
+    #   subscription (ambiguous: RxJS/pubsub/Azure, not SaaS billing)
+    #   pricing (off-topic on SO; ~450 questions, closed on arrival)
+    #   startups site (shut down by Stack Exchange)
+    stackexchange_queries=[
+        # Stack Overflow — SaaS and API-infrastructure pain points
+        StackExchangeQuery("stackoverflow", ["saas"]),
+        StackExchangeQuery("stackoverflow", ["multi-tenant"]),
+        StackExchangeQuery("stackoverflow", ["stripe-payments"]),
+        StackExchangeQuery("stackoverflow", ["webhooks"]),
+        StackExchangeQuery("stackoverflow", ["api-design"]),
+        StackExchangeQuery("stackoverflow", ["rate-limiting"]),
+        StackExchangeQuery("stackoverflow", ["oauth-2.0"]),
+        # Freelancing Stack Exchange — solopreneur operational pain points
+        StackExchangeQuery("freelancing", ["invoicing"]),
+        StackExchangeQuery("freelancing", ["contracts"]),
+        StackExchangeQuery("freelancing", ["payment-terms"]),
+    ],
 )
+
