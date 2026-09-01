@@ -119,26 +119,20 @@ _JACCARD_THRESHOLD = 0.12
 _STRONG_LEXICAL_JACCARD_THRESHOLD = 0.50
 _CONTEXT_JACCARD_THRESHOLD = 0.12
 
-# Recurrence, duration, and time-cost terms describe evidence shape rather
-# than the subject of the burden. They cannot establish topic identity, so
-# lexical correlation excludes them instead of allowing them to inflate a
-# topical match.
-_STRUCTURAL_EFFORT_TOKENS = frozenset({
-    "every", "each", "other", "daily", "weekly", "monthly", "quarterly",
-    "yearly", "annually", "monday", "tuesday", "wednesday", "thursday",
-    "friday", "saturday", "sunday", "day", "days", "week", "weeks",
-    "month", "months", "quarter", "quarters", "year", "years",
-    "one", "two", "three", "four", "five", "six", "seven", "eight",
-    "nine", "ten", "half", "couple", "several", "minute", "minutes",
-    "hour", "hours", "morning", "mornings", "afternoon", "afternoons",
-    "evening", "evenings",
-    "spend", "spends", "spending", "spent",
-    "take", "takes", "taking", "took",
-    "consume", "consumes", "consuming", "consumed",
-    "eat", "eats", "eating", "ate",
-    "lose", "loses", "losing", "lost",
-    "waste", "wastes", "wasting", "wasted",
-})
+_RECURRENCE_PATTERN = re.compile(
+    r"\b(?:every|each)\s+(?:other\s+)?(?:"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"days?|weeks?|months?|quarters?|years?)\b"
+    r"|\b(?:daily|weekly|monthly|quarterly|yearly|annually)\b"
+)
+_TIME_COST_EXPRESSION_PATTERN = re.compile(
+    r"\b(?:spend|spends|spending|spent|take|takes|taking|took|"
+    r"consume|consumes|consuming|consumed|eat|eats|eating|ate|"
+    r"lose|loses|losing|lost|waste|wastes|wasting|wasted)\s+"
+    r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"an?|half|couple|few|several)\s+(?:minutes?|hours?|days?|weeks?|"
+    r"months?|mornings?|afternoons?|evenings?)\b"
+)
 
 
 class PatternDetector:
@@ -357,17 +351,29 @@ class PatternDetector:
         Deliberate simplicity: split on non-alphanumeric, filter stop words.
         This handles most cases well for English-language tech content.
         """
-        return frozenset(self._meaningful_tokens(signal.full_text))
+        return frozenset(self._topical_tokens(signal.full_text))
 
     @staticmethod
-    def _meaningful_tokens(text: str) -> tuple[str, ...]:
-        """Return the same normalized token stream used by every correlation feature."""
+    def _topical_tokens(text: str) -> tuple[str, ...]:
+        """Exclude only matched generic effort constructions from topic matching."""
+        normalized = text.lower()
+        time_cost_spans = [
+            match.span() for match in _TIME_COST_EXPRESSION_PATTERN.finditer(normalized)
+        ]
+        excluded_spans = time_cost_spans[:]
+        if time_cost_spans:
+            excluded_spans.extend(match.span() for match in _RECURRENCE_PATTERN.finditer(normalized))
+
         return tuple(
-            token for token in re.split(r"[^a-z0-9]+", text)
+            token.group()
+            for token in re.finditer(r"[a-z0-9]+", normalized)
             if (
-                len(token) >= _MIN_TOKEN_LEN
-                and token not in _STOP_WORDS
-                and token not in _STRUCTURAL_EFFORT_TOKENS
+                len(token.group()) >= _MIN_TOKEN_LEN
+                and token.group() not in _STOP_WORDS
+                and not any(
+                    token.start() < end and start < token.end()
+                    for start, end in excluded_spans
+                )
             )
         )
 
@@ -378,7 +384,7 @@ class PatternDetector:
         ``ci/cd pipeline`` share ``pipeline`` but not enough surrounding
         context to treat it as the same subject.
         """
-        tokens = self._meaningful_tokens(signal.full_text)
+        tokens = self._topical_tokens(signal.full_text)
         return frozenset(zip(tokens, tokens[1:]))
 
     def _should_join_cluster(

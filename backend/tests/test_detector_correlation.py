@@ -43,6 +43,29 @@ def test_zero_overlap_financial_admin_paraphrase_requires_topic_identity(make_si
     assert len(_clusters(detector, signals)) == 2
 
 
+def test_ambiguous_effort_words_remain_topical_outside_effort_constructions(make_signal):
+    detector = PatternDetector()
+    examples = {
+        "spend": "Cloud spend governance reduces technology spend",
+        "waste": "Waste management procurement backlog",
+        "quarter": "Quarter fiscal reporting requirements",
+        "lost": "Lost customer analysis identifies churn",
+    }
+
+    for word, title in examples.items():
+        assert word in detector._fingerprint(make_signal(title=title))
+
+
+def test_effort_filter_removes_only_the_matched_expression_not_its_topic(make_signal):
+    detector = PatternDetector()
+    fingerprint = detector._fingerprint(
+        make_signal(title="Cloud spend review takes three hours every Friday")
+    )
+
+    assert {"cloud", "spend", "review"} <= fingerprint
+    assert fingerprint.isdisjoint({"takes", "three", "hours", "every", "friday"})
+
+
 def test_loose_lexical_overlap_needs_shared_local_context(make_signal):
     detector = PatternDetector()
     signals = [
