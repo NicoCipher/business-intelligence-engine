@@ -3,6 +3,7 @@ import "server-only";
 import type {
   AckResponse,
   ApiHealth,
+  CollectorStateResponse,
   Opportunity,
   OpportunityDetail,
   Paginated,
@@ -73,6 +74,9 @@ export const getHealth = () => request<ApiHealth>("/health", { cache: "no-store"
 
 export const getSignalStats = () =>
   request<SignalStats>("/signals/stats", { next: { revalidate: 30 } });
+
+export const getCollectorState = () =>
+  request<CollectorStateResponse>("/system/collectors", { cache: "no-store" });
 
 export const getSignals = (params: {
   source?: string;

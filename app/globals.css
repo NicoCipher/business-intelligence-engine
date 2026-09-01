@@ -88,6 +88,7 @@ h3 { margin: 0; font-size: .95rem; }
 .span-8 { grid-column: span 8; }
 .span-12 { grid-column: span 12; }
 .stack { display: grid; gap: 1rem; }
+.stack-tight { display: grid; gap: .3rem; }
 
 .status-line { display: flex; align-items: center; gap: .55rem; font-weight: 650; }
 .status-dot { width: .62rem; height: .62rem; border-radius: 50%; background: var(--faint); }
