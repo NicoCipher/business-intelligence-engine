@@ -363,6 +363,26 @@ class TestBackoffAndQuotaHandling:
             outcome = collector.collect_with_outcome()
             assert outcome.kind is CollectorOutcomeKind.RATE_LIMITED
 
+    def test_zero_quota_remaining_without_quota_max_raises_rate_limit_error(self):
+        """Regression: quota_remaining=0 must raise RateLimitError even when
+        quota_max is absent. quota_max is telemetry only and must not gate
+        exhaustion detection."""
+        collector = StackExchangeCollector(
+            queries=[StackExchangeQuery("stackoverflow", ["saas"])],
+        )
+        mock_resp = _make_response(
+            200,
+            {
+                "items": [_sample_question()],
+                "has_more": False,
+                "quota_remaining": 0,
+                # quota_max intentionally absent
+            },
+        )
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            outcome = collector.collect_with_outcome()
+            assert outcome.kind is CollectorOutcomeKind.RATE_LIMITED
+
     def test_missing_quota_metadata_does_not_trigger_rate_limiting(self):
         collector = StackExchangeCollector(
             queries=[StackExchangeQuery("stackoverflow", ["saas"])],

@@ -4,8 +4,9 @@ collectors/stackexchange_collector.py — Stack Exchange signal collection
 Data source: Stack Exchange REST API v2.3 (https://api.stackexchange.com/docs)
   Endpoint: /2.3/questions
   Authentication: Optional API key via ?key=<key>. Unauthenticated requests
-    use a shared IP-based quota. A registered key is recommended for
-    predictable quota allocation (10,000 requests/day per key).
+    use a shared IP-based quota. A registered key is recommended for more
+    predictable quota allocation; actual quota values (quota_remaining,
+    quota_max) are taken from the API response wrapper at runtime.
   Rate limits & throttling:
     - Checked via top-level JSON wrapper:
       - `backoff`: integer seconds; if present, client must pause before the
@@ -266,13 +267,19 @@ class StackExchangeCollector(BaseCollector):
             )
             time.sleep(backoff_s)
 
-        # Quota monitoring
+        # Quota monitoring: quota_remaining drives exhaustion detection.
+        # quota_max is telemetry only and must not gate exhaustion detection.
         quota_remaining = wrapper.get("quota_remaining")
         quota_max = wrapper.get("quota_max")
-        if quota_remaining is not None and quota_max is not None:
-            self.logger.debug(
-                f"Stack Exchange API quota: {quota_remaining}/{quota_max} remaining"
-            )
+        if quota_remaining is not None:
+            if quota_max is not None:
+                self.logger.debug(
+                    f"Stack Exchange API quota: {quota_remaining}/{quota_max} remaining"
+                )
+            else:
+                self.logger.debug(
+                    f"Stack Exchange API quota: {quota_remaining} remaining (quota_max not in response)"
+                )
             if quota_remaining == 0:
                 raise RateLimitError(
                     "Stack Exchange daily request quota exhausted (quota_remaining=0)"
