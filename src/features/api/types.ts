@@ -37,6 +37,34 @@ export type SignalStats = {
   top_tags: Array<{ tag: string; count: number }>;
 };
 
+export type CollectorState = {
+  source: string;
+  domain: string;
+  enabled: boolean;
+  interval_minutes: number;
+  priority: number;
+  quota: {
+    limit: number;
+    period_minutes: number;
+    used: number;
+    reset_at: string | null;
+  };
+  last_run_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  consecutive_failures: number;
+  backoff_until: string | null;
+  updated_at: string;
+  last_attempt_status: "succeeded" | "failed" | "not_yet_run" | "unknown";
+  timing_gate_status: "disabled" | "backing_off" | "quota_exhausted" | "not_yet_run" | "interval_elapsed" | "interval_waiting" | "unknown";
+  next_due_at: string | null;
+};
+
+export type CollectorStateResponse = {
+  collectors: CollectorState[];
+  server_time: string;
+};
+
 export type Paginated = {
   total: number;
   limit: number;

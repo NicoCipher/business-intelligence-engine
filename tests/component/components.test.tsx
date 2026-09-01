@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { NavLink } from "@/src/features/navigation/nav-link";
 import { EmptyState, ExternalEvidenceLink, StateTag, TableScroll } from "@/src/features/shared/components";
 import { ReportNarrative } from "@/src/features/reports/report-content";
+import { CollectorOperations } from "@/src/features/system/collector-operations";
 import RootError from "@/app/error";
 
 const { pathname } = vi.hoisted(() => ({ pathname: { current: "/overview" } }));
@@ -28,6 +29,21 @@ describe("external evidence links", () => {
 });
 
 describe("operational states", () => {
+  it("renders durable collector state without inventing a rate-limit cause", () => {
+    render(<CollectorOperations collectors={[{
+      source: "github", domain: "business", enabled: true, interval_minutes: 240, priority: 4,
+      quota: { limit: 10, period_minutes: 60, used: 10, reset_at: "2026-09-02T12:00:00+00:00" },
+      last_run_at: "2026-09-01T11:00:00+00:00", last_success_at: "2026-09-01T10:00:00+00:00",
+      last_failure_at: "2026-09-01T11:00:00+00:00", consecutive_failures: 2,
+      backoff_until: "2026-09-01T13:00:00+00:00", updated_at: "2026-09-01T11:00:00+00:00",
+      last_attempt_status: "failed", timing_gate_status: "quota_exhausted", next_due_at: "2026-09-01T15:00:00+00:00"
+    }]} />);
+    expect(screen.getByRole("region", { name: "Collector operations table" })).toBeTruthy();
+    expect(screen.getByText("Quota exhausted")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+    expect(screen.getByText("Failure cause and rate-limit classification are not stored.")).toBeTruthy();
+  });
+
   it("renders empty state context", () => {
     render(<EmptyState title="No opportunities">Read the latest report.</EmptyState>);
     expect(screen.getByText("No opportunities")).toBeTruthy();
