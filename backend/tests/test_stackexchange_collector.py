@@ -25,14 +25,25 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+import database
 from collectors.base import (
     CollectorOutcomeKind,
     CollectorError,
     RateLimitError,
+    persist_signals,
 )
 from collectors.stackexchange_collector import StackExchangeCollector
 from domains.base import StackExchangeQuery
 from models import Signal
+
+
+@pytest.fixture(autouse=True)
+def fresh_db(tmp_path, monkeypatch):
+    """Ensure a clean, isolated database with full schema for each test."""
+    db_path = tmp_path / "test_stackexchange.db"
+    monkeypatch.setattr(database, "DB_PATH", db_path)
+    database.initialize()
+    yield db_path
 
 
 def _make_response(
@@ -325,6 +336,29 @@ class TestQuerySemanticsAndPagination:
                 signals = collector.collect()
                 assert len(signals) == 1
                 assert signals[0].source_id == "2|stackoverflow"
+
+    def test_database_backed_deduplication(self):
+        collector = StackExchangeCollector(
+            queries=[StackExchangeQuery("stackoverflow", ["saas"])],
+            domain="business",
+        )
+        item1 = _sample_question(question_id=101)
+        item2 = _sample_question(question_id=102)
+
+        # Pre-populate item1 in the database using persist_signals
+        sig1 = collector._question_to_signal(item1, site="stackoverflow")
+        assert sig1 is not None
+        persist_signals([sig1])
+
+        mock_resp = _make_response(
+            200,
+            {"items": [item1, item2], "has_more": False},
+        )
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            # Live unpatched _is_duplicate: verifies SQL query against signals table
+            signals = collector.collect()
+            assert len(signals) == 1
+            assert signals[0].source_id == "102|stackoverflow"
 
 
 class TestBackoffAndQuotaHandling:
