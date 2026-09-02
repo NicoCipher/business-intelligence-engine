@@ -53,6 +53,7 @@ from collectors.rss_collector import RSSCollector
 from collectors.github_collector import GitHubCollector
 from collectors.trends_collector import TrendsCollector
 from collectors.stackexchange_collector import StackExchangeCollector
+from collectors.greenhouse_jobs_collector import GreenhouseJobsCollector
 import database
 from domains.base import DomainConfig
 from domains.registry import DomainRegistry
@@ -304,6 +305,13 @@ def _run_domain(
             )
             domain_signals.extend(se.collect())
 
+        if domain.sources.greenhouse_boards:
+            gh_jobs = GreenhouseJobsCollector(
+                boards=domain.sources.greenhouse_boards,
+                domain=domain.id,
+            )
+            domain_signals.extend(gh_jobs.collect())
+
     run_result.signals_collected = len(domain_signals)
     logger.info("[%s] collected %d signals this run", domain.id, len(domain_signals))
 
@@ -445,6 +453,11 @@ def _collector_for_source(source: str, domain: DomainConfig):
     if source == "stackexchange":
         return StackExchangeCollector(
             queries=domain.sources.stackexchange_queries,
+            domain=domain.id,
+        )
+    if source == "greenhouse_jobs":
+        return GreenhouseJobsCollector(
+            boards=domain.sources.greenhouse_boards,
             domain=domain.id,
         )
     raise ValueError(f"Unsupported scheduled collector source: {source}")

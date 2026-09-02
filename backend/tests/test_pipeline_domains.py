@@ -114,24 +114,19 @@ def _fake_signals(prefix: str, source: str, n: int, offset: int = 0) -> list[Sig
 def _patch_collectors(
     monkeypatch, hn_signals, reddit_by_domain,
     rss_by_domain=None, github_by_domain=None, trends_by_domain=None,
-    stackexchange_by_domain=None,
+    stackexchange_by_domain=None, greenhouse_by_domain=None,
 ):
     """
     Replace every collector's .collect() with canned data so pipeline
     tests never make a real HTTP request. Each fake respects
     `self.domain`, matching how the real collectors are used.
 
-    GitHub, Trends, and StackExchange default to an empty dict, i.e. every
-    domain gets []. This is a deliberate choice, not an oversight: BUSINESS_DOMAIN_
-    CONFIG (used directly by several tests below, since it's the real
-    production domain config) carries real github_queries/trends_keywords/
-    stackexchange_queries -- pipeline._run_domain() calls those collectors
-    unconditionally whenever a domain configures them, live network calls and
-    all, if they aren't patched. This file's own docstring says collectors are
-    unit-tested elsewhere (see test_github_collector.py, test_trends_collector.py,
-    test_stackexchange_collector.py) -- these tests exist to prove pipeline/
-    DomainRegistry/database wiring, not individual collector behavior, so
-    silencing them to [] here is correct, not a gap.
+    GitHub, Trends, StackExchange, and GreenhouseJobs default to an empty dict,
+    i.e. every domain gets []. This is a deliberate choice, not an oversight:
+    BUSINESS_DOMAIN_CONFIG (used directly by several tests below, since it's the real
+    production domain config) carries real queries/boards -- pipeline._run_domain()
+    calls those collectors unconditionally whenever a domain configures them,
+    live network calls and all, if they aren't patched.
     """
     import collectors.hn_collector as hn_mod
     import collectors.reddit_collector as reddit_mod
@@ -139,6 +134,7 @@ def _patch_collectors(
     import collectors.github_collector as github_mod
     import collectors.trends_collector as trends_mod
     import collectors.stackexchange_collector as se_mod
+    import collectors.greenhouse_jobs_collector as gh_mod
 
     def fake_hn_collect(self, limit=None):
         return list(hn_signals)
@@ -158,12 +154,16 @@ def _patch_collectors(
     def fake_se_collect(self, limit=None):
         return list((stackexchange_by_domain or {}).get(self.domain, []))
 
+    def fake_gh_collect(self, limit=None):
+        return list((greenhouse_by_domain or {}).get(self.domain, []))
+
     monkeypatch.setattr(hn_mod.HNCollector, "collect", fake_hn_collect)
     monkeypatch.setattr(reddit_mod.RedditCollector, "collect", fake_reddit_collect)
     monkeypatch.setattr(rss_mod.RSSCollector, "collect", fake_rss_collect)
     monkeypatch.setattr(github_mod.GitHubCollector, "collect", fake_github_collect)
     monkeypatch.setattr(trends_mod.TrendsCollector, "collect", fake_trends_collect)
     monkeypatch.setattr(se_mod.StackExchangeCollector, "collect", fake_se_collect)
+    monkeypatch.setattr(gh_mod.GreenhouseJobsCollector, "collect", fake_gh_collect)
 
 
 def _rows(query: str) -> list:
@@ -303,6 +303,26 @@ class TestMultiDomain:
         trends_rows = _rows("SELECT domain FROM signals WHERE source = 'trends'")
         assert len(trends_rows) == 3
         assert all(r["domain"] == "business" for r in trends_rows)
+
+    def test_greenhouse_signals_get_correct_domain_when_present(self, fresh_db, monkeypatch):
+        DomainRegistry.register(BUSINESS_DOMAIN_CONFIG)
+        DomainRegistry.register(_second_domain())
+
+        hn_signals = _fake_signals("shared", "hn", 1)
+        _patch_collectors(
+            monkeypatch, hn_signals,
+            reddit_by_domain={"business": [], "test_intel": []},
+            greenhouse_by_domain={"business": _fake_signals("business", "greenhouse_jobs", 3)},
+        )
+
+        result = pipeline.run_full_pipeline()
+
+        business = next(d for d in result.domains if d.domain_id == "business")
+        assert business.signals_collected == 4  # 1 HN + 3 greenhouse_jobs
+
+        gh_rows = _rows("SELECT domain FROM signals WHERE source = 'greenhouse_jobs'")
+        assert len(gh_rows) == 3
+        assert all(r["domain"] == "business" for r in gh_rows)
 
 
 # ── Entry-point parity ───────────────────────────────────────────────

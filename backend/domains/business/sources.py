@@ -1,4 +1,4 @@
-from domains.base import DomainSources, RSSFeed, StackExchangeQuery
+from domains.base import DomainSources, GreenhouseBoard, RSSFeed, StackExchangeQuery
 
 SOURCES = DomainSources(
     reddit_sources=[
@@ -77,6 +77,22 @@ SOURCES = DomainSources(
         StackExchangeQuery("freelancing", ["invoicing"]),
         StackExchangeQuery("freelancing", ["contracts"]),
         StackExchangeQuery("freelancing", ["payment-terms"]),
+    ],
+    # Greenhouse Public Job Boards — verified live against boards-api.greenhouse.io
+    # Focused on SaaS, dev tools, cloud infrastructure, fintech, observability, and AI.
+    greenhouse_boards=[
+        GreenhouseBoard(company="Stripe", board_token="stripe"),
+        GreenhouseBoard(company="Figma", board_token="figma"),
+        GreenhouseBoard(company="GitLab", board_token="gitlab"),
+        GreenhouseBoard(company="Vercel", board_token="vercel"),
+        GreenhouseBoard(company="Datadog", board_token="datadog"),
+        GreenhouseBoard(company="Cloudflare", board_token="cloudflare"),
+        GreenhouseBoard(company="Grafana Labs", board_token="grafanalabs"),
+        GreenhouseBoard(company="Anthropic", board_token="anthropic"),
+        GreenhouseBoard(company="Scale AI", board_token="scaleai"),
+        GreenhouseBoard(company="Airtable", board_token="airtable"),
+        GreenhouseBoard(company="Gusto", board_token="gusto"),
+        GreenhouseBoard(company="Postman", board_token="postman"),
     ],
 )
 

@@ -58,6 +58,11 @@ STACKEXCHANGE_WINDOW_DAYS    = int(os.getenv("STACKEXCHANGE_WINDOW_DAYS", "7")) 
                                                                              # between runs is harmless due
                                                                              # to INSERT OR IGNORE dedup
 
+# Greenhouse public job board collector limits
+GREENHOUSE_JOBS_LIMIT         = int(os.getenv("GREENHOUSE_JOBS_LIMIT", "100"))      # max jobs across all boards per run
+GREENHOUSE_REQUEST_DELAY      = float(os.getenv("GREENHOUSE_REQUEST_DELAY", "0.5")) # seconds between board requests
+GREENHOUSE_TIMEOUT_S          = float(os.getenv("GREENHOUSE_TIMEOUT_S", "15.0"))    # per-board request timeout
+
 # Subreddits monitored. Ordered by signal quality for this system's purpose.
 REDDIT_SUBREDDITS = [
     "entrepreneur",

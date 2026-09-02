@@ -32,6 +32,7 @@ from domains.base import (
     DomainReporting,
     DomainScoring,
     DomainSources,
+    GreenhouseBoard,
     ScoringDimension,
     StackExchangeQuery,
 )
@@ -146,7 +147,7 @@ class TestDuePlanning:
         }
         assert {
             item.source for item in plan.skipped if item.reason == "unconfigured"
-        } == {"rss", "github", "trends", "stackexchange"}
+        } == {"rss", "github", "trends", "stackexchange", "greenhouse_jobs"}
 
     def test_per_domain_state_is_provisioned_and_isolated(self, fresh_db):
         business = _domain("business")
@@ -158,7 +159,7 @@ class TestDuePlanning:
         assert _decision(plan, "hn", "business").reason == "interval_not_elapsed"
         assert _decision(plan, "hn", "other").due is True
         with database.get_connection() as conn:
-            assert conn.execute("SELECT COUNT(*) FROM collector_state WHERE domain = 'other'").fetchone()[0] == 6
+            assert conn.execute("SELECT COUNT(*) FROM collector_state WHERE domain = 'other'").fetchone()[0] == 7
 
     def test_disabled_backoff_quota_and_lazy_reset_gate_independently(self, fresh_db):
         domain = _domain("business", reddit=True)
@@ -383,3 +384,71 @@ class TestStackExchangeSchedulerIntegration:
     def test_stackexchange_interval_is_240_minutes(self):
         defaults_by_source = {name: interval for name, interval, *_ in scheduler.COLLECTOR_DEFAULTS}
         assert defaults_by_source["stackexchange"] == 240
+
+
+# ── Greenhouse Jobs scheduler integration ─────────────────────────────────
+
+class TestGreenhouseJobsSchedulerIntegration:
+    def test_greenhouse_jobs_in_collector_defaults(self):
+        sources = {name for name, *_ in scheduler.COLLECTOR_DEFAULTS}
+        assert "greenhouse_jobs" in sources
+
+    def test_source_is_configured_with_no_boards(self):
+        domain = _domain("business")
+        assert not scheduler._source_is_configured("greenhouse_jobs", domain)
+
+    def test_source_is_configured_with_boards(self):
+        domain_with_gh = DomainConfig(
+            metadata=DomainMetadata(
+                id="business", name="business", description="GH fixture",
+                version="0.0.1", icon="flask", color="#123456", category="test",
+            ),
+            sources=DomainSources(
+                greenhouse_boards=[
+                    GreenhouseBoard("Vercel", "vercel"),
+                ],
+            ),
+            keywords=DomainKeywords(),
+            graph=DomainKnowledgeGraph(),
+            scoring=DomainScoring(dimensions=[
+                ScoringDimension("signal_strength", "Signal Strength", "fixture", 1.0),
+            ]),
+            reporting=DomainReporting(title="GH fixture", description="fixture"),
+        )
+        assert scheduler._source_is_configured("greenhouse_jobs", domain_with_gh)
+
+    def test_greenhouse_jobs_skipped_when_unconfigured(self, fresh_db):
+        domain = _domain("business")
+        plan = scheduler.AdaptiveScheduler(NOW).plan([domain])
+        skipped_sources = {item.source for item in plan.skipped if item.reason == "unconfigured"}
+        assert "greenhouse_jobs" in skipped_sources
+
+    def test_greenhouse_jobs_due_on_first_run_when_configured(self, fresh_db):
+        domain_with_gh = DomainConfig(
+            metadata=DomainMetadata(
+                id="business", name="business", description="GH fixture",
+                version="0.0.1", icon="flask", color="#123456", category="test",
+            ),
+            sources=DomainSources(
+                greenhouse_boards=[
+                    GreenhouseBoard("Vercel", "vercel"),
+                ],
+            ),
+            keywords=DomainKeywords(),
+            graph=DomainKnowledgeGraph(),
+            scoring=DomainScoring(dimensions=[
+                ScoringDimension("signal_strength", "Signal Strength", "fixture", 1.0),
+            ]),
+            reporting=DomainReporting(title="GH fixture", description="fixture"),
+        )
+        plan = scheduler.AdaptiveScheduler(NOW).plan([domain_with_gh])
+        due_sources = {item.source for item in plan.due}
+        assert "greenhouse_jobs" in due_sources
+
+    def test_greenhouse_jobs_interval_is_720_minutes(self):
+        defaults_by_source = {name: interval for name, interval, *_ in scheduler.COLLECTOR_DEFAULTS}
+        assert defaults_by_source["greenhouse_jobs"] == 720
+
+    def test_greenhouse_jobs_priority_is_6(self):
+        priorities_by_source = {name: prio for name, _, prio, *_ in scheduler.COLLECTOR_DEFAULTS}
+        assert priorities_by_source["greenhouse_jobs"] == 6
