@@ -33,6 +33,9 @@ BIA currently supports collection from:
 - RSS feeds
 - GitHub
 - Google Trends
+- Stack Exchange
+- Greenhouse Jobs
+- SEC EDGAR (Form 8-K)
 
 Source availability depends on local configuration and the source itself.
 
