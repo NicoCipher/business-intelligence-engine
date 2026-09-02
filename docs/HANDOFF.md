@@ -1,4 +1,4 @@
-# BIA Project Handoff (updated through `b13782c`: Change Detection Read-Side V1 and its hosted-CI E2E stabilization, on top of Change Detection V1 and the schema v10 Continuous Intelligence Engine foundation)
+# BIA Project Handoff (updated through `6e1c684`: NIC-18 frozen rules baseline on top of NIC-13 canonical persistence, collectors expansion, and NIC-14 correlation safety)
 
 Supersedes the schema-v7-era handoff. Full architecture detail now lives
 in `docs/ARCHITECTURE.md` (current state) and `docs/SCHEMA.md` (full
@@ -13,10 +13,9 @@ repository root. Its intentionally narrow route set is:
 - `/overview`, `/signals`, `/problems`, `/problems/[problemId]`,
   `/opportunities`, `/opportunities/[opportunityId]`, `/reports`,
   `/reports/[weekKey]`, and `/system`.
-- No Collectors, Pipeline, Change Events, Watchlists, or Alert Rules UI has
-  been created. Their operational contracts do not exist yet. System health
-  names those limitations but does not expose their stored counts as a
-  substitute interface.
+- System health now displays live collector operations state (`GET /api/v1/system/collector-operations`,
+  added in `903feeb`). Dedicated Pipeline, Change Events browsing, Watchlists, and Alert Rules
+  interfaces remain undesigned.
 
 The console calls only existing API contracts. The server-only client in
 `src/features/api/client.ts` uses `BIA_API_BASE_URL` and `BIA_API_KEY`; no
@@ -293,6 +292,24 @@ level (confirmed via the GitHub Actions API, not just the job rollup).
 This sandbox still cannot run Playwright locally (`cdn.playwright.dev`
 blocked by network egress here) — every iteration above was verified
 against real hosted CI logs, not a local run.
+
+## Part 0d: Operations Visibility, Multi-Source Expansion, Canonical Persistence, and Condition State Evaluation
+
+**Collector Operations Visibility:** `GET /api/v1/system/collector-operations` exposes current collector run status, intervals, backoff, and quota consumption from `collector_state`. The Operations Console `/system` page renders live collector operational visibility.
+
+**NIC-14 Deterministic Correlation Safety:** Strengthened topic-matching in `opportunity_engine/detector.py`. Entity-cluster correlation requires verified topical evidence to join a problem cluster, and non-topical effort-expression spans are filtered to prevent false-positive joins.
+
+**Multi-Source Collector Expansion:**
+- **StackExchangeCollector:** Ingests developer questions and pain points via the official Stack Exchange `/questions` API across 7 curated technical tags (`saas`, `automation`, `api-design`, `stripe`, `multitenancy`, `subscription`, `pricing`).
+- **GreenhouseJobsCollector:** Ingests public job postings across configured SaaS company boards as hiring demand signals with deterministic per-board fairness allocation preventing starvation, and a 30-day lookback window.
+- **SECEdgarCollector:** Ingests material corporate change signals from official SEC EDGAR Form 8-K and 8-K/A filings across enterprise SaaS companies, enforcing strict parallel required-array length validation (`form`, `accessionNumber`, `filingDate`) to surface malformed SEC submissions.
+
+**NIC-13 Canonical SQLite Snapshot Continuity:** Single-file canonical artifact authority (`bia-database-canonical` carrying `bia-latest.db`) generated using SQLite's backup API. The hourly workflow restores only the newest non-expired canonical artifact; a one-time migration path handles legacy backups. Strict `set -o pipefail` guards ensure that listing or download failures halt execution rather than falling back to unverified cache copies. A subsequent hotfix decoupled `gh api --paginate --slurp` from external `jq -r` for runner compatibility.
+*Operational Status:* Done. Production verification completed successfully on hosted GitHub Actions run `33685932034` (manually triggered on commit `6e1c684`), confirming the full end-to-end cycle: authority discovery succeeded, newest legacy snapshot migrated, canonical database installed, collection pipeline executed, SQLite backup snapshot created, and canonical artifact `bia-database-canonical` published. Steady-state runs now restore directly from this canonical artifact.
+
+**NIC-17 & NIC-18 Condition State Semantics:**
+- **NIC-17 Evaluation Corpus:** 44-case Condition State evaluation dataset (`backend/tests/condition_state_eval/dataset.py`) using the NIC-15 EvidenceCase contract (32 Core, 12 Adversarial; 41 scored, 3 diagnostic) with literal target spans.
+- **NIC-18 Frozen Rules Baseline:** Deterministic `rules-v1` reference baseline interpreter (`backend/tests/condition_state_eval/rules_interpreter.py`), metric evaluation harness (`evaluate.py`), and runner (`run_rules_baseline.py`), freezing deterministic reference performance prior to model evaluation.
 
 ## Part 1: Current System State
 
@@ -841,12 +858,9 @@ six-layer model this list still describes.
     in conversation). A real second `DomainConfig` would work for
     extraction/detection/scoring today; its reports would still narrate
     in Business's own terms.
-18. ~~Add GitHub and Google Trends collectors~~ — done (`b5afceb`,
-    `cfa8624`). Not originally on this list — added by direct request
-    mid-session, not from the RFC review's prioritization. Google
-    Trends' parsing has never been live-validated (see Part 1's "Known
-    gaps"); worth a real validation pass before leaning on its output
-    for anything scored/reported.
+18. ~~Add GitHub, Google Trends, Stack Exchange, Greenhouse Jobs, and SEC EDGAR collectors~~ — done
+    (`b5afceb`, `cfa8624`, `9b35708`, `9d5408d`, `a0bcf4c`). All five added collectors are integrated into
+    the canonical pipeline, domain sources, and adaptive scheduler.
 19. Reddit live validation — credentials were never configured in the
     environment this project has been developed in so far; the
     collector has only ever been exercised via its unit tests (canned
@@ -859,14 +873,19 @@ six-layer model this list still describes.
 20a. ~~RSS/Trends aggregate-failure outcome correctness~~ — done
     (`cb38922`; see Part 0b). Closes the gap where a fully-failed
     RSS/Trends run was indistinguishable from a quiet no-op run at the
-    scheduler-outcome level. Worth noting explicitly: this was a
-    correctness prerequisite for item 21 below, not just general
-    hardening — change detection has no way to reason correctly about
-    "nothing changed" if the collector layer can silently report success
-    on a run where nothing was actually collected.
+    scheduler-outcome level.
+20b. ~~Collector operations visibility~~ — done (see Part 0d).
+    `GET /api/v1/system/collector-operations` and Console `/system` page render live status.
+20c. ~~SQLite snapshot continuity (NIC-13 Phase 1)~~ — done (see Part 0d).
+    Production-verified on hosted CI via manual run 33685932034.
+20d. ~~Deterministic correlation safety (NIC-14)~~ — done (see Part 0d).
+    Topic-matching hardened in `detector.py`.
+20e. ~~Condition State evaluation dataset and rules baseline (NIC-17 & NIC-18)~~ — done (see Part 0d).
+    44-case dataset and frozen rules-v1 baseline interpreter.
 21. ~~The frontend~~ — done for its originally-scoped surface (`079dced`,
     hardened `42a1312`; see Part 0), with the Overview "what changed"
-    panel added on top (`9126d8f`; see Part 0c). Still no dedicated
+    panel added on top (`9126d8f`; see Part 0c) and System health collector operations
+    visibility added on top (see Part 0d). Still no dedicated
     Collectors, Pipeline, or Change Events browsing UI, and no
     Watchlists/Alert Rules UI — the latter two's operational contracts
     still don't exist (see item 22a). A dedicated `/changes` browse
@@ -888,6 +907,11 @@ six-layer model this list still describes.
     both Change Detection milestones — building it requires its own
     design proposal, not an extension of the read-side's `GET /changes`
     contract.
+23. **Semantic evaluation progression (active track):**
+    The established semantic sequence is:
+    `NIC-19 → NIC-20 → NIC-5 → NIC-6 → NIC-7 → NIC-8 → NIC-9`.
+    The active task is **NIC-19: External Model Shadow Experiment**, running against the frozen NIC-17 dataset
+    and comparing against the NIC-18 rules-v1 baseline.
 
 **Frontend note (from the RFC review, worth restating):** the
 originally-planned "backend done → build Next.js frontend" ordering was
@@ -957,6 +981,7 @@ on any commit below):**
     item 22.
 17. E2E stabilization for the read-side's hosted CI run — `d57f135`
     (reverted), `8d45601`, `b13782c` — see Part 0c.
+18. Operations visibility, correlation safety hardening, multi-source expansion (Stack Exchange, Greenhouse, SEC EDGAR), canonical SQLite persistence, and Condition State frozen rules baseline — see Part 0d.
 
 **Token handling note, still relevant for whoever continues this:**
 every GitHub Personal Access Token used in this project's history was
@@ -967,44 +992,17 @@ anything, confirm no stale token is still live at
 https://github.com/settings/tokens**, and treat any newly-provided token
 the same way — use once, then revoke.
 
-**Current state:** tracked `HEAD` is `b13782c` (E2E stabilization following
-Change Detection Read-Side V1). Working tree is clean; local `main` and
-`origin/main` are in sync; nothing is pending push. Backend suite: 794
-passed (2 remain `skipif`-gated on `pytrends` being installed — same
-pre-existing, environment-dependent condition noted at every prior
-revision, not a regression). Frontend: `npm run lint`/`typecheck` clean,
-`npm test` 19/19 Vitest passing, production `npm run build` succeeds,
-`npm run check:performance` reports 126.2 KiB gzip against the 150 KiB
-budget. Hosted Frontend CI on `b13782c` is green end-to-end, including
-Playwright E2E at the step level (confirmed via the GitHub Actions API,
-not inferred) — this is the first revision of this handoff where that
-statement is backed by a real hosted CI result rather than a "not re-run,
-worth checking" caveat.
+**Current state:** authoritative `main` is `6e1c684` (NIC-18 frozen rules baseline). Working tree is clean; local `main` and `origin/main` are in sync; nothing is pending push. The backend suite passes in the project environment. Two Google Trends exception-mapping tests are conditionally skipped when pytrends is unavailable outside the project environment. Frontend: `npm run lint`/`typecheck` clean, `npm test` (Vitest) passing, production `npm run build` succeeds, `npm run check:performance` within budget. Hosted CI collection workflow is operational on canonical snapshot continuity (verified via manual run 33685932034). The next scheduled collection run should exercise steady-state restoration from bia-database-canonical; this is observational follow-up and does not block NIC-13 completion.
 
-**Open items, current as of this revision (see Part 4 for full detail on
-each):**
+**Open items, current as of this revision (see Part 4 for full detail on each):**
 
-- **Alert delivery and watchlists/alert_rules consumption** (item 22a) —
-  still undesigned and unimplemented, schema-only, no delivery channel by
-  design. The natural next candidate given change detection now has real
-  data flowing through it, but needs its own design proposal — not
-  assumed here.
-- **A dedicated `/changes` Console browsing page** (item 21) — the
-  backend contract now exists and is proven by the Overview panel's
-  real usage, but a full browse/filter page was deliberately deferred at
-  the read-side design step; still open.
-- **Collector live-validation debt** (items 18–19) — Trends and Reddit
-  have still never been exercised against their real APIs, only unit
-  fixtures and the graceful-failure (missing-credentials) path. Now more
-  worth doing than before: change detection treats their output as real
-  signal, so a systematically-wrong parse would register as "change,"
-  not just a bad report.
-- **`explainer/*`'s narrative layer** (item 17's remaining half) and
-  **RFC-001 implementation** (item 13) — both unchanged since the prior
-  revision, independent of change detection and of each other (RFC-002's
-  Findings contract still Proposed, not Accepted).
-- **`GET /reports` domain filter** (item 15) — small, still open, same
-  shape as the fix already applied to Opportunities/Signals.
+- **NIC-19 External Model Shadow Experiment (active semantic task):**
+  Evaluating LLM condition state extraction against the frozen NIC-17 dataset and comparing metrics against the frozen NIC-18 rules-v1 baseline. The planned semantic milestone sequence is:
+  `NIC-19 → NIC-20 → NIC-5 → NIC-6 → NIC-7 → NIC-8 → NIC-9`.
+- **Alert delivery and watchlists/alert_rules consumption** (item 22a) — still undesigned and unimplemented, schema-only, no delivery channel by design.
+- **A dedicated `/changes` Console browsing page** (item 21) — backend contract exists; full dedicated browse/filter page remains open.
+- **`explainer/*`'s narrative layer** (item 17's remaining half) and **RFC-001 implementation** (item 13) — unchanged.
+- **`GET /reports` domain filter** (item 15) — small, still open.
 
 This handoff makes no recommendation among these for what to do next —
 that determination, per the project's standing engineering-governance
