@@ -211,25 +211,42 @@ def test_existing_canonical_snapshot_takes_precedence_over_legacy(snapshot_paths
 
 def test_workflow_serializes_canonical_authority_and_rejects_retrieval_fallback():
     workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "collect.yml").read_text()
+    local_sync = (Path(__file__).parents[2] / "scripts" / "pull-ci-snapshot.sh").read_text()
 
     assert "concurrency:" in workflow
     assert "group: bia-collection-canonical-snapshot" in workflow
     assert "cancel-in-progress: false" in workflow
+    assert 'CANONICAL_ARTIFACT_NAME="bia-database-canonical"' in workflow
+    assert 'LEGACY_ARTIFACT_NAME="bia-database-backup"' in workflow
     assert "path: backend/data/backups/bia-latest.db" in workflow
+    assert "name: bia-database-canonical" in workflow
+    assert "name: bia-database-backup" not in workflow
     assert "Install validated canonical database snapshot" in workflow
     assert "Migrate selected legacy database snapshot" in workflow
     assert "persistence.migrate_legacy_snapshot" in workflow
     assert "persistence.restore_canonical_snapshot()" in workflow
     assert "Mark persistence authority ready" in workflow
     assert "if: ${{ always() && steps.persistence_authority.outputs.ready == 'true' }}" in workflow
-    assert "Unable to list completed workflow runs; refusing cache fallback." in workflow
-    assert "Unable to inspect canonical artifacts; refusing cache fallback." in workflow
+    assert "Unable to list canonical artifacts; refusing cache fallback." in workflow
+    assert "Unable to list legacy artifacts; refusing cache fallback." in workflow
     assert "Canonical artifact retrieval failed; refusing cache fallback." in workflow
+    assert "Legacy artifact retrieval failed; refusing cache fallback." in workflow
     assert "No prior database artifact found -- first run; cache/fresh start is allowed" in workflow
     assert "BIA_SNAPSHOT_FORMAT=legacy" in workflow
     assert "BIA_SNAPSHOT_FORMAT=canonical" in workflow
+    assert workflow.count("gh run download") == 2
+    assert 'gh run download "$CANONICAL_RUN_ID" -n "$CANONICAL_ARTIFACT_NAME"' in workflow
+    assert 'gh run download "$LEGACY_RUN_ID" -n "$LEGACY_ARTIFACT_NAME"' in workflow
+    assert workflow.index('if [ -n "$CANONICAL_ARTIFACT_RECORD" ]; then') < workflow.index("LEGACY_ARTIFACT_RECORD")
+    assert "while IFS= read -r RUN_ID" not in workflow
     assert "--paginate" in workflow
-    assert "actions/workflows/collect.yml/runs?status=completed&per_page=100" in workflow
+    assert "--slurp" in workflow
+    assert "sort_by(.created_at) | reverse" in workflow
+    assert "actions/artifacts?per_page=100" in workflow
+    assert "actions/workflows/collect.yml/runs?status=completed&per_page=100" not in workflow
     assert "--limit=20" not in workflow
     assert "continue-on-error" not in workflow
     assert "path: backend/data/backups/\n" not in workflow
+    assert "bia-database-canonical" in local_sync
+    assert "bia-database-backup" not in local_sync
+    assert "legacy artifacts are not used for local sync" in local_sync

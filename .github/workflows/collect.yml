@@ -51,63 +51,64 @@ jobs:
             bia-database-${{ runner.os }}-
 
       # ── Restore the canonical durable snapshot ──────────────────────────
-      # Cache is an optimization only. A canonical-format artifact is
-      # authoritative, including one from a run that failed after committing
-      # scheduler/collector state. Before the first canonical artifact exists,
-      # all retained legacy artifacts are staged for one safe migration. A
-      # retrieval failure for an existing artifact stops this run; only a
-      # genuine no-artifact first-run case may use cache or initialize fresh.
+      # Cache is an optimization only. Canonical artifacts use a distinct name
+      # so format is known from metadata without downloading retained history.
+      # A canonical artifact is authoritative, including one from a run that
+      # failed after committing scheduler/collector state. Before the first
+      # canonical artifact exists, only the newest legacy artifact is fetched
+      # for one safe migration. A retrieval failure for an authority candidate
+      # stops this run; only a genuine no-artifact first-run may use cache.
       - name: Restore canonical database artifact
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -o pipefail
           ARTIFACT_DIR="$(mktemp -d)"
-          FOUND_LEGACY_ARTIFACT=false
-          FOUND_CANONICAL_ARTIFACT=false
-          RUN_IDS="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/workflows/collect.yml/runs?status=completed&per_page=100" --jq '.workflow_runs[] | .id')" || {
-            echo "Unable to list completed workflow runs; refusing cache fallback." >&2
+          CANONICAL_ARTIFACT_NAME="bia-database-canonical"
+          LEGACY_ARTIFACT_NAME="bia-database-backup"
+          ARTIFACTS_ENDPOINT="repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100"
+
+          # Pagination reads metadata only; sort it explicitly before choosing
+          # one artifact so no artifact-content scan is needed for discovery.
+          CANONICAL_ARTIFACT_RECORD="$(gh api --paginate --slurp "$ARTIFACTS_ENDPOINT" --jq '[.[].artifacts[] | select(.name == "bia-database-canonical" and .expired == false)] | sort_by(.created_at) | reverse | .[0] | select(.) | [.id, .workflow_run.id] | @tsv')" || {
+            echo "Unable to list canonical artifacts; refusing cache fallback." >&2
             exit 1
           }
-          while IFS= read -r RUN_ID; do
-            [ -z "$RUN_ID" ] && continue
-            ARTIFACT_ID="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts" --jq '.artifacts[] | select(.name == "bia-database-backup" and .expired == false) | .id')" || {
-              echo "Unable to inspect canonical artifacts; refusing cache fallback." >&2
-              exit 1
-            }
-            if [ -z "$ARTIFACT_ID" ]; then
-              continue
-            fi
 
-            RUN_ARTIFACT_DIR="$ARTIFACT_DIR/$RUN_ID"
-            mkdir -p "$RUN_ARTIFACT_DIR"
-            echo "Inspecting database artifact from completed run $RUN_ID"
-            if ! gh run download "$RUN_ID" -n bia-database-backup -D "$RUN_ARTIFACT_DIR"; then
+          if [ -n "$CANONICAL_ARTIFACT_RECORD" ]; then
+            IFS=$'\t' read -r CANONICAL_ARTIFACT_ID CANONICAL_RUN_ID <<< "$CANONICAL_ARTIFACT_RECORD"
+            echo "Restoring selected canonical artifact $CANONICAL_ARTIFACT_ID from run $CANONICAL_RUN_ID"
+            if ! gh run download "$CANONICAL_RUN_ID" -n "$CANONICAL_ARTIFACT_NAME" -D "$ARTIFACT_DIR"; then
               echo "Canonical artifact retrieval failed; refusing cache fallback." >&2
               exit 1
             fi
-
-            CANONICAL_SNAPSHOT="$(find "$RUN_ARTIFACT_DIR" -type f -name bia-latest.db -print -quit)"
-            if [ -n "$CANONICAL_SNAPSHOT" ]; then
-              mkdir -p backend/data/backups
-              cp "$CANONICAL_SNAPSHOT" backend/data/backups/bia-latest.db
-              FOUND_CANONICAL_ARTIFACT=true
-              break
+            CANONICAL_SNAPSHOT="$(find "$ARTIFACT_DIR" -type f -name bia-latest.db -print -quit)"
+            if [ -z "$CANONICAL_SNAPSHOT" ]; then
+              echo "Selected canonical artifact did not contain bia-latest.db; refusing cache fallback." >&2
+              exit 1
             fi
-
-            if find "$RUN_ARTIFACT_DIR" -type f -name 'bia-*.db' ! -name bia-latest.db -print -quit | grep -q .; then
-              FOUND_LEGACY_ARTIFACT=true
-            fi
-          done <<< "$RUN_IDS"
-
-          if [ "$FOUND_CANONICAL_ARTIFACT" = true ]; then
+            mkdir -p backend/data/backups
+            cp "$CANONICAL_SNAPSHOT" backend/data/backups/bia-latest.db
             echo "BIA_SNAPSHOT_FORMAT=canonical" >> "$GITHUB_ENV"
-          elif [ "$FOUND_LEGACY_ARTIFACT" = true ]; then
+          else
+            LEGACY_ARTIFACT_RECORD="$(gh api --paginate --slurp "$ARTIFACTS_ENDPOINT" --jq '[.[].artifacts[] | select(.name == "bia-database-backup" and .expired == false)] | sort_by(.created_at) | reverse | .[0] | select(.) | [.id, .workflow_run.id] | @tsv')" || {
+              echo "Unable to list legacy artifacts; refusing cache fallback." >&2
+              exit 1
+            }
+            if [ -z "$LEGACY_ARTIFACT_RECORD" ]; then
+              echo "No prior database artifact found -- first run; cache/fresh start is allowed"
+              exit 0
+            fi
+
+            IFS=$'\t' read -r LEGACY_ARTIFACT_ID LEGACY_RUN_ID <<< "$LEGACY_ARTIFACT_RECORD"
+            echo "Downloading selected legacy artifact $LEGACY_ARTIFACT_ID from run $LEGACY_RUN_ID for migration"
+            if ! gh run download "$LEGACY_RUN_ID" -n "$LEGACY_ARTIFACT_NAME" -D "$ARTIFACT_DIR"; then
+              echo "Legacy artifact retrieval failed; refusing cache fallback." >&2
+              exit 1
+            fi
             echo "BIA_SNAPSHOT_FORMAT=legacy" >> "$GITHUB_ENV"
             echo "BIA_LEGACY_SNAPSHOT_DIR=$ARTIFACT_DIR" >> "$GITHUB_ENV"
-            echo "No canonical artifact found; migrating the newest valid retained legacy snapshot"
-          else
-            echo "No prior database artifact found -- first run; cache/fresh start is allowed"
+            echo "No canonical artifact found; migrating the newest valid snapshot from the selected legacy artifact"
           fi
 
       - name: Set up Python 3.11
@@ -163,7 +164,7 @@ jobs:
         if: ${{ always() && steps.persistence_authority.outputs.ready == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: bia-database-backup
+          name: bia-database-canonical
           path: backend/data/backups/bia-latest.db
           retention-days: 90
           if-no-files-found: warn

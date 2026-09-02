@@ -17,16 +17,21 @@ copies are not used.
 
 Hourly and manual workflow executions share one queued concurrency group, so
 only one run can restore and publish the canonical authority at a time. The
-workflow searches all retained completed workflow history, not a fixed recent
-run window. A canonical `bia-latest.db` artifact takes precedence wherever it
-appears in that history and, once present, ends legacy migration. On the first
-canonical rollout only, legacy `bia-*.db` artifacts are staged and the newest
-valid SQLite snapshot is migrated through the same SQLite backup and validation
-machinery into `bia-latest.db` before replacing the disposable cache copy.
-A failure while listing, inspecting, or downloading an existing artifact fails
-the run rather than treating the cache as authority. Invalid legacy candidates
-are skipped only when an older valid legacy snapshot remains; if none validates,
-migration fails before a cache copy can be installed. Only when there is
+workflow searches retained artifact metadata, not a fixed recent-run window.
+New snapshots use the distinct `bia-database-canonical` artifact name and
+contain only `bia-latest.db`; the newest non-expired canonical artifact takes
+precedence wherever it appears in history. It alone is downloaded in normal
+operation, and its presence ends legacy migration without inspecting legacy
+artifact contents.
+
+Only when no canonical artifact metadata exists does the one-time migration
+path download the newest non-expired legacy `bia-database-backup` artifact. It
+selects that artifact's newest valid `bia-*.db` through the same SQLite backup
+and validation machinery, creates `bia-latest.db`, and replaces the disposable
+cache copy. A corrupt selected legacy artifact fails before a cache copy can be
+installed; Phase 1 deliberately does not eagerly download older legacy
+artifacts. A failure while listing or downloading an authority candidate also
+fails the run rather than treating the cache as authority. Only when there is
 genuinely no prior database artifact may BIA use a cache copy or initialize
 fresh.
 
@@ -50,10 +55,11 @@ Stop local BIA processes before replacing their database, then run:
 scripts/pull-ci-snapshot.sh
 ```
 
-The command continues to download the latest successful workflow artifact
+The command downloads the newest non-expired `bia-database-canonical` artifact
 using the authenticated `gh` CLI and refuses to overwrite an existing local
-`bia.db`. This conservative local operator command is not changed by the CI
-failed-run durability policy above.
+`bia.db`. Before the migration has produced a canonical artifact, it reports
+that no local-sync authority exists rather than treating a legacy artifact as
+canonical.
 To replace deliberately:
 
 ```bash

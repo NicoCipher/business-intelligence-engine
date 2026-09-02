@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Download the latest successful CI snapshot, then invoke the explicit local
-# replacement command. Requires GitHub CLI authentication with artifact read access.
+# Download the latest retained canonical CI snapshot, then invoke the explicit
+# local replacement command. Requires GitHub CLI authentication with artifact read access.
 set -euo pipefail
 
 replace=false
@@ -13,16 +13,24 @@ if [[ $# -ne 0 ]]; then
   exit 2
 fi
 
-run_id="$(gh run list --workflow=collect.yml --status=success --limit=1 --json databaseId --jq '.[0].databaseId')"
-if [[ -z "$run_id" ]]; then
-  echo "No successful collection run with a canonical snapshot was found." >&2
+repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+artifact_record="$(gh api --paginate --slurp "repos/${repo}/actions/artifacts?per_page=100" --jq '[.[].artifacts[] | select(.name == "bia-database-canonical" and .expired == false)] | sort_by(.created_at) | reverse | .[0] | select(.) | [.id, .workflow_run.id] | @tsv')" || {
+  echo "Unable to list canonical CI artifacts." >&2
+  exit 1
+}
+if [[ -z "$artifact_record" ]]; then
+  echo "No retained canonical CI artifact exists yet; legacy artifacts are not used for local sync." >&2
   exit 1
 fi
+IFS=$'\t' read -r artifact_id run_id <<< "$artifact_record"
 
 download_dir="$(mktemp -d)"
 trap 'rm -rf "$download_dir"' EXIT
-echo "Downloading canonical snapshot from successful run: $run_id"
-gh run download "$run_id" -n bia-database-backup -D "$download_dir"
+echo "Downloading canonical artifact $artifact_id from run: $run_id"
+if ! gh run download "$run_id" -n bia-database-canonical -D "$download_dir"; then
+  echo "Canonical artifact retrieval failed; local database was not changed." >&2
+  exit 1
+fi
 
 snapshot="$(find "$download_dir" -type f -name bia-latest.db -print -quit)"
 if [[ -z "$snapshot" ]]; then
