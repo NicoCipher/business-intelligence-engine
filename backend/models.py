@@ -163,7 +163,7 @@ class Relationship:
 
 # ── Signal ────────────────────────────────────────────────────────────────
 
-VALID_SOURCES = frozenset(["hn", "reddit", "rss", "trends", "github", "stackexchange"])
+VALID_SOURCES = frozenset(["hn", "reddit", "rss", "trends", "github", "stackexchange", "greenhouse_jobs"])
 
 
 @dataclass

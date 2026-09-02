@@ -28,12 +28,13 @@ MAX_BACKOFF_MINUTES = 24 * 60
 # for newly activated domains; the migration remains responsible for seeding
 # an existing Business database exactly once.
 COLLECTOR_DEFAULTS: tuple[tuple[str, int, int], ...] = (
-    ("hn",             60, 3),
-    ("reddit",        120, 4),
-    ("rss",           180, 5),
-    ("github",        240, 4),
-    ("trends",        360, 7),
-    ("stackexchange", 240, 4),
+    ("hn",               60, 3),
+    ("reddit",          120, 4),
+    ("rss",             180, 5),
+    ("github",          240, 4),
+    ("trends",          360, 7),
+    ("stackexchange",   240, 4),
+    ("greenhouse_jobs", 720, 6),
 )
 
 
@@ -146,6 +147,8 @@ def _source_is_configured(source: str, domain: DomainConfig) -> bool:
         return bool(domain.sources.trends_keywords)
     if source == "stackexchange":
         return bool(domain.sources.stackexchange_queries)
+    if source == "greenhouse_jobs":
+        return bool(domain.sources.greenhouse_boards)
     return False
 
 
