@@ -63,6 +63,14 @@ GREENHOUSE_JOBS_LIMIT         = int(os.getenv("GREENHOUSE_JOBS_LIMIT", "100"))  
 GREENHOUSE_REQUEST_DELAY      = float(os.getenv("GREENHOUSE_REQUEST_DELAY", "0.5")) # seconds between board requests
 GREENHOUSE_TIMEOUT_S          = float(os.getenv("GREENHOUSE_TIMEOUT_S", "15.0"))    # per-board request timeout
 
+# SEC EDGAR public filings collector limits & access configuration
+# User-Agent is required by SEC policy (format: '<Sample Company Name AdminContact@<sample company domain>.com>')
+SEC_EDGAR_USER_AGENT          = os.getenv("SEC_EDGAR_USER_AGENT", "")
+SEC_EDGAR_LOOKBACK_DAYS       = int(os.getenv("SEC_EDGAR_LOOKBACK_DAYS", "30"))     # days to look back for 8-K filings
+SEC_EDGAR_LIMIT               = int(os.getenv("SEC_EDGAR_LIMIT", "50"))             # max filings across all companies per run
+SEC_EDGAR_REQUEST_DELAY       = float(os.getenv("SEC_EDGAR_REQUEST_DELAY", "0.5"))  # seconds between company requests (SEC max 10/s)
+SEC_EDGAR_TIMEOUT_S           = float(os.getenv("SEC_EDGAR_TIMEOUT_S", "15.0"))     # per-company request timeout
+
 # Subreddits monitored. Ordered by signal quality for this system's purpose.
 REDDIT_SUBREDDITS = [
     "entrepreneur",
