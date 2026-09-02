@@ -336,23 +336,28 @@ class GreenhouseJobsCollector(BaseCollector):
     def _fetch(self, limit: int) -> Iterator[Signal]:
         """Fetch signals across all configured Greenhouse job boards.
 
-        Fairness guarantee: the global ``limit`` is divided equally across all
-        configured boards upfront.  Each board may contribute at most
-        ``per_board_cap = max(1, limit // n_boards)`` new signals, regardless of
-        how many jobs that board publishes.  The global ``total_yielded`` counter
-        continues to enforce the outer safety bound so the total never exceeds
-        ``limit`` even when individual caps round up.
+        Allocation: the global ``limit`` is divided equally across all configured
+        boards upfront — ``per_board_cap = max(1, limit // n_boards)`` — so no
+        single early board can consume the entire run.  Each board that is reached
+        may contribute at most ``per_board_cap`` new signals, regardless of how many
+        jobs it publishes.  The global ``total_yielded`` counter enforces the outer
+        safety ceiling; once it reaches ``limit`` the loop exits immediately.
 
-        This prevents a single large board from exhausting the run and starving
-        later boards: every configured board is always queried, and every board
-        always has a fair, non-zero quota to fill.
+        Guarantee (when ``limit >= n_boards``): a large early board cannot starve
+        later boards, and every queried board receives a non-zero cap.
+
+        Limitation (when ``limit < n_boards``): the global ceiling is hit before
+        every board can be queried.  The first ``limit`` boards each contribute one
+        signal (cap is ``max(1, …) = 1``), and boards beyond that position are not
+        reached in that run.
         """
         if not self._boards:
             self.logger.info("[%s] No Greenhouse boards configured; skipping", self.domain)
             return
 
         n_boards = len(self._boards)
-        # Equal share, at least 1 per board; the global limit remains the hard ceiling.
+        # Equal share per board; at least 1 so cap is never zero.
+        # The global limit remains the hard ceiling regardless.
         per_board_cap = max(1, limit // n_boards)
 
         session = requests.Session()
