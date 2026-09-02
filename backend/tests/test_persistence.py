@@ -241,6 +241,8 @@ def test_workflow_serializes_canonical_authority_and_rejects_retrieval_fallback(
     assert "while IFS= read -r RUN_ID" not in workflow
     assert "--paginate" in workflow
     assert "--slurp" in workflow
+    assert 'gh api --paginate --slurp "$ARTIFACTS_ENDPOINT" | jq -r' in workflow
+    assert '--slurp "$ARTIFACTS_ENDPOINT" --jq' not in workflow
     assert "sort_by(.created_at) | reverse" in workflow
     assert "actions/artifacts?per_page=100" in workflow
     assert "actions/workflows/collect.yml/runs?status=completed&per_page=100" not in workflow
@@ -250,3 +252,5 @@ def test_workflow_serializes_canonical_authority_and_rejects_retrieval_fallback(
     assert "bia-database-canonical" in local_sync
     assert "bia-database-backup" not in local_sync
     assert "legacy artifacts are not used for local sync" in local_sync
+    assert 'gh api --paginate --slurp "repos/${repo}/actions/artifacts?per_page=100" | jq -r' in local_sync
+    assert '--slurp "repos/${repo}/actions/artifacts?per_page=100" --jq' not in local_sync
