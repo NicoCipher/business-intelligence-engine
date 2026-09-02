@@ -70,7 +70,7 @@ jobs:
 
           # Pagination reads metadata only; sort it explicitly before choosing
           # one artifact so no artifact-content scan is needed for discovery.
-          CANONICAL_ARTIFACT_RECORD="$(gh api --paginate --slurp "$ARTIFACTS_ENDPOINT" --jq '[.[].artifacts[] | select(.name == "bia-database-canonical" and .expired == false)] | sort_by(.created_at) | reverse | .[0] | select(.) | [.id, .workflow_run.id] | @tsv')" || {
+          CANONICAL_ARTIFACT_RECORD="$(gh api --paginate --slurp "$ARTIFACTS_ENDPOINT" | jq -r '[.[].artifacts[] | select(.name == "bia-database-canonical" and .expired == false)] | sort_by(.created_at) | reverse | .[0] | select(.) | [.id, .workflow_run.id] | @tsv')" || {
             echo "Unable to list canonical artifacts; refusing cache fallback." >&2
             exit 1
           }
@@ -91,7 +91,7 @@ jobs:
             cp "$CANONICAL_SNAPSHOT" backend/data/backups/bia-latest.db
             echo "BIA_SNAPSHOT_FORMAT=canonical" >> "$GITHUB_ENV"
           else
-            LEGACY_ARTIFACT_RECORD="$(gh api --paginate --slurp "$ARTIFACTS_ENDPOINT" --jq '[.[].artifacts[] | select(.name == "bia-database-backup" and .expired == false)] | sort_by(.created_at) | reverse | .[0] | select(.) | [.id, .workflow_run.id] | @tsv')" || {
+            LEGACY_ARTIFACT_RECORD="$(gh api --paginate --slurp "$ARTIFACTS_ENDPOINT" | jq -r '[.[].artifacts[] | select(.name == "bia-database-backup" and .expired == false)] | sort_by(.created_at) | reverse | .[0] | select(.) | [.id, .workflow_run.id] | @tsv')" || {
               echo "Unable to list legacy artifacts; refusing cache fallback." >&2
               exit 1
             }
