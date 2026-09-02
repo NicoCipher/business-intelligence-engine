@@ -310,6 +310,9 @@ class TestPartialRunDurability:
         assert collect.main() == 1
         assert _row("hn", "business")["last_success_at"]
         assert persistence.canonical_snapshot_path(backup_dir).exists()
+        workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "collect.yml").read_text()
+        assert "failed run may still contain valid committed scheduler/collector state" in workflow
+        assert "if: ${{ always() && steps.persistence_authority.outputs.ready == 'true' }}" in workflow
 
 
 def test_hourly_workflow_uses_scheduler_heartbeat_and_builtin_github_token():

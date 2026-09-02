@@ -16,8 +16,8 @@ pull() -- call BEFORE the database is used, to restore the most recent
 durable snapshot if the working database doesn't already exist. Never
 overwrites a live database -- this is a cold-start recovery path only.
 
-push() -- call AFTER a successful pipeline run, to snapshot the current
-database to the durable location.
+push() -- call after a database-backed pipeline invocation, to snapshot the
+current transactionally committed database state to the durable location.
 
 V1 backend: a configurable directory (BIA_DB_BACKUP_DIR, defaults to
 backend/data/backups/) containing exactly one canonical ``bia-latest.db``.

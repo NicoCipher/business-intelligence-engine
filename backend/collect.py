@@ -154,10 +154,11 @@ def main() -> int:
         logger.exception("Pipeline failed with unhandled exception")
         return 1
     finally:
-        # State transitions commit per collector attempt. Snapshot them even
-        # if a later extraction/detection/report stage fails, otherwise an
-        # ephemeral runner would forget completed work and immediately repeat
-        # it on the next hourly heartbeat.
+        # State transitions commit per collector attempt. Snapshot that valid
+        # committed state even if a later extraction/detection/report stage
+        # fails, otherwise an ephemeral runner would forget completed work and
+        # immediately repeat it on the next heartbeat. This snapshot records
+        # database state, not a successful analytical pipeline verdict.
         if database_ready and not args.dry_run and persistence is not None:
             try:
                 persistence.push()

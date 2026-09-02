@@ -140,11 +140,28 @@ def test_missing_or_invalid_remote_snapshot_preserves_existing_database(snapshot
     assert _read_value(destination) == "local work"
 
 
-def test_workflow_uploads_only_the_canonical_snapshot_after_success():
+def test_absent_canonical_snapshot_allows_first_run_without_overwriting_cache(snapshot_paths):
+    destination, _ = snapshot_paths
+    _write_value(destination, "cache copy")
+
+    assert persistence.restore_canonical_snapshot(destination) is False
+    assert _read_value(destination) == "cache copy"
+
+
+def test_workflow_serializes_canonical_authority_and_rejects_retrieval_fallback():
     workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "collect.yml").read_text()
 
+    assert "concurrency:" in workflow
+    assert "group: bia-collection-canonical-snapshot" in workflow
+    assert "cancel-in-progress: false" in workflow
     assert "path: backend/data/backups/bia-latest.db" in workflow
     assert "Install validated canonical database snapshot" in workflow
     assert "persistence.restore_canonical_snapshot()" in workflow
-    assert "if: success()" in workflow
+    assert "Mark persistence authority ready" in workflow
+    assert "if: ${{ always() && steps.persistence_authority.outputs.ready == 'true' }}" in workflow
+    assert "Unable to list completed workflow runs; refusing cache fallback." in workflow
+    assert "Unable to inspect canonical artifacts; refusing cache fallback." in workflow
+    assert "Canonical artifact retrieval failed; refusing cache fallback." in workflow
+    assert "No prior canonical artifact found -- first run or pre-canonical migration; cache/fresh start is allowed" in workflow
+    assert "continue-on-error" not in workflow
     assert "path: backend/data/backups/\n" not in workflow
