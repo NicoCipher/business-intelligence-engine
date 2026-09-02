@@ -309,7 +309,7 @@ class TestPartialRunDurability:
 
         assert collect.main() == 1
         assert _row("hn", "business")["last_success_at"]
-        assert list(backup_dir.glob("bia-*.db"))
+        assert persistence.canonical_snapshot_path(backup_dir).exists()
 
 
 def test_hourly_workflow_uses_scheduler_heartbeat_and_builtin_github_token():

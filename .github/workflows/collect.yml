@@ -44,25 +44,21 @@ jobs:
           restore-keys: |
             bia-database-${{ runner.os }}-
 
-      # ── Durable backup restore ───────────────────────────────────────────
-      # The cache above is best-effort and evictable. This finds the most
-      # recent successful run's artifact snapshot (see the upload step
-      # further down) and restores it into backend/data/backups/, which
-      # collect.py's persistence.pull() then restores from if the
-      # cache-provided database doesn't already exist. actions/download-
-      # artifact alone can't do this (it only sees the current run without
-      # an explicit prior run-id) -- gh CLI (preinstalled, no third-party
-      # action) finds that run-id first. Expected to find nothing on the
-      # very first run ever; continue-on-error handles that startup case.
-      - name: Restore database backup artifact
+      # ── Restore the canonical durable snapshot ──────────────────────────
+      # Cache is an optimization only. If the latest successful workflow
+      # artifact is available, it is authoritative. persistence restores it
+      # through SQLite's backup API only after validation, preserving a cache
+      # copy if the artifact cannot be read. Expected to find nothing on the
+      # first ever run.
+      - name: Restore canonical database artifact
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           RUN_ID=$(gh run list --workflow=collect.yml --status=success --limit=1 --json databaseId --jq '.[0].databaseId')
           if [ -n "$RUN_ID" ]; then
-            echo "Restoring backup artifact from run $RUN_ID"
-            gh run download "$RUN_ID" -n bia-database-backup -D backend/data/backups/ || echo "No backup artifact found on run $RUN_ID"
+            echo "Restoring canonical database artifact from run $RUN_ID"
+            gh run download "$RUN_ID" -n bia-database-backup -D backend/data/backups/ || echo "No canonical artifact found on run $RUN_ID"
           else
             echo "No previous successful run found -- starting fresh"
           fi
@@ -76,6 +72,10 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
+
+      - name: Install validated canonical database snapshot
+        if: ${{ hashFiles('backend/data/backups/bia-latest.db') != '' }}
+        run: python -c "import sys; sys.path.insert(0, 'backend'); import persistence; persistence.restore_canonical_snapshot()"
 
       # ── Run the intelligence pipeline ───────────────────────────────────
       - name: Run collection pipeline
@@ -95,21 +95,16 @@ jobs:
           GITHUB_TOKEN:         ${{ github.token }}
           BIA_DATA_DIR:         backend/data
 
-      # ── Durable backup ───────────────────────────────────────────────────
-      # The database cache above is NOT a durability guarantee -- GitHub
-      # Actions cache is explicitly subject to eviction with no restore
-      # path. collect.py calls persistence.pull()/push() around every run,
-      # snapshotting to backend/data/backups/; this step uploads that
-      # directory as a build artifact, which has far longer, more explicit
-      # retention than the cache. See persistence.py for the pull/push seam
-      # this can later be pointed at real durable storage through, without
-      # any caller needing to change.
-      - name: Upload database backup artifact
-        if: always()
+      # ── Durable canonical snapshot ───────────────────────────────────────
+      # One SQLite-backup-API snapshot is uploaded, never the historical
+      # backup directory. GitHub artifacts provide run-level retention; the
+      # latest successful artifact is the cold-start durability fallback.
+      - name: Upload canonical database artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: bia-database-backup
-          path: backend/data/backups/
+          path: backend/data/backups/bia-latest.db
           retention-days: 90
           if-no-files-found: warn
 
