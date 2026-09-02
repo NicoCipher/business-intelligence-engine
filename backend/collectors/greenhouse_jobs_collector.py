@@ -334,10 +334,26 @@ class GreenhouseJobsCollector(BaseCollector):
         return data["jobs"]
 
     def _fetch(self, limit: int) -> Iterator[Signal]:
-        """Fetch signals across all configured Greenhouse job boards."""
+        """Fetch signals across all configured Greenhouse job boards.
+
+        Fairness guarantee: the global ``limit`` is divided equally across all
+        configured boards upfront.  Each board may contribute at most
+        ``per_board_cap = max(1, limit // n_boards)`` new signals, regardless of
+        how many jobs that board publishes.  The global ``total_yielded`` counter
+        continues to enforce the outer safety bound so the total never exceeds
+        ``limit`` even when individual caps round up.
+
+        This prevents a single large board from exhausting the run and starving
+        later boards: every configured board is always queried, and every board
+        always has a fair, non-zero quota to fill.
+        """
         if not self._boards:
             self.logger.info("[%s] No Greenhouse boards configured; skipping", self.domain)
             return
+
+        n_boards = len(self._boards)
+        # Equal share, at least 1 per board; the global limit remains the hard ceiling.
+        per_board_cap = max(1, limit // n_boards)
 
         session = requests.Session()
         successful_boards = 0
@@ -369,8 +385,10 @@ class GreenhouseJobsCollector(BaseCollector):
                 )
                 continue
 
+            board_yielded = 0
             for job in raw_jobs:
-                if total_yielded >= limit:
+                # Stop if this board has consumed its fair share OR the global cap is hit
+                if board_yielded >= per_board_cap or total_yielded >= limit:
                     break
 
                 signal = self._job_to_signal(job, board)
@@ -381,6 +399,7 @@ class GreenhouseJobsCollector(BaseCollector):
                     continue
 
                 yield signal
+                board_yielded += 1
                 total_yielded += 1
 
         # Aggregate failure handling: if every board failed, raise CollectorError

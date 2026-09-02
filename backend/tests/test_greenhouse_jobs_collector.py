@@ -430,3 +430,198 @@ class TestBoardExecutionAndErrors:
             outcome = collector.collect_with_outcome()
             assert outcome.kind is CollectorOutcomeKind.TRANSIENT_FAILURE
             assert "All 2 configured Greenhouse job boards failed" in outcome.detail
+
+
+# ── 8. Fairness / Per-board Cap Regression ──────────────────────────────────
+
+class TestFairnessPerBoardCap:
+    """
+    Regression coverage proving a large first board cannot prevent later boards
+    from ever being queried or yielding signals.
+
+    All tests in this class use controlled mocks — zero live network calls.
+    """
+
+    def _big_jobs(self, board_token: str, count: int, id_offset: int = 0) -> list[dict]:
+        """Build `count` synthetic job dicts for the given board."""
+        return [
+            _sample_job(
+                job_id=id_offset + i,
+                title=f"Job {i} from {board_token}",
+                absolute_url=f"https://example.com/{board_token}/jobs/{id_offset + i}",
+            )
+            for i in range(count)
+        ]
+
+    def test_large_first_board_does_not_starve_second_board(self):
+        """
+        Even if board A publishes 500 jobs (far exceeding the global limit alone),
+        board B must still be queried and contribute signals.
+        """
+        board_a = GreenhouseBoard(company="Huge Corp", board_token="huge")
+        board_b = GreenhouseBoard(company="Small Corp", board_token="small")
+        # limit=4, 2 boards → per_board_cap=2; board_a can only take 2 slots
+        collector = GreenhouseJobsCollector(boards=[board_a, board_b])
+
+        queried_boards: list[str] = []
+
+        def mock_get(url: str, *args, **kwargs):
+            if "huge" in url:
+                queried_boards.append("huge")
+                return _make_response(200, {"jobs": self._big_jobs("huge", 500, id_offset=0)})
+            if "small" in url:
+                queried_boards.append("small")
+                return _make_response(200, {"jobs": self._big_jobs("small", 10, id_offset=10000)})
+            return _make_response(404)
+
+        with patch.object(requests.Session, "get", side_effect=mock_get):
+            signals = collector.collect(limit=4)
+
+        # Both boards must have been queried
+        assert "huge" in queried_boards, "board 'huge' was never queried"
+        assert "small" in queried_boards, "board 'small' was never queried — starvation detected"
+
+        # Both boards must have yielded signals
+        from_huge = [s for s in signals if "huge" in s.source_id]
+        from_small = [s for s in signals if "small" in s.source_id]
+        assert len(from_huge) >= 1, "No signals from large first board"
+        assert len(from_small) >= 1, "Small board was starved — received zero signals despite being queried"
+
+        # Global limit is still respected
+        assert len(signals) <= 4
+
+    def test_per_board_cap_limits_large_board_signals(self):
+        """
+        With limit=6 and 3 boards, per_board_cap=2.  A board with 100 published
+        jobs must contribute at most 2 signals (its fair share).
+        """
+        boards = [
+            GreenhouseBoard(company="Big", board_token="big"),
+            GreenhouseBoard(company="Mid", board_token="mid"),
+            GreenhouseBoard(company="Sml", board_token="sml"),
+        ]
+        collector = GreenhouseJobsCollector(boards=boards)
+
+        def mock_get(url: str, *args, **kwargs):
+            for board in boards:
+                if board.board_token in url:
+                    return _make_response(
+                        200,
+                        {"jobs": self._big_jobs(board.board_token, 100,
+                                                id_offset=boards.index(board) * 1000)},
+                    )
+            return _make_response(404)
+
+        with patch.object(requests.Session, "get", side_effect=mock_get):
+            signals = collector.collect(limit=6)
+
+        # Each board should contribute exactly 2 signals (6 // 3 = 2)
+        for board in boards:
+            board_signals = [s for s in signals if board.board_token in s.source_id]
+            assert len(board_signals) == 2, (
+                f"Board '{board.board_token}' yielded {len(board_signals)} signals, expected 2"
+            )
+
+        # Total does not exceed global limit
+        assert len(signals) == 6
+
+    def test_all_boards_queried_even_when_first_is_huge(self):
+        """Every configured board must be queried regardless of first board size."""
+        board_tokens = ["alpha", "beta", "gamma", "delta"]
+        boards = [GreenhouseBoard(company=t.title(), board_token=t) for t in board_tokens]
+        collector = GreenhouseJobsCollector(boards=boards)
+
+        queried: set[str] = set()
+
+        def mock_get(url: str, *args, **kwargs):
+            for t in board_tokens:
+                if t in url:
+                    queried.add(t)
+                    offset = board_tokens.index(t) * 1000
+                    # First board is extremely large; others have just 2 jobs
+                    count = 500 if t == "alpha" else 2
+                    return _make_response(200, {"jobs": self._big_jobs(t, count, id_offset=offset)})
+            return _make_response(404)
+
+        with patch.object(requests.Session, "get", side_effect=mock_get):
+            signals = collector.collect(limit=8)
+
+        # All four boards must have been queried
+        assert queried == set(board_tokens), (
+            f"Not all boards queried. Queried: {queried}, Missing: {set(board_tokens) - queried}"
+        )
+        # All four boards must have yielded at least 1 signal (2 each with limit=8, 4 boards)
+        for t in board_tokens:
+            board_signals = [s for s in signals if t in s.source_id]
+            assert len(board_signals) >= 1, f"Board '{t}' contributed zero signals — starvation"
+
+    def test_global_limit_still_respected_with_fair_caps(self):
+        """Total yielded never exceeds the global limit, even with all boards overflowing."""
+        boards = [GreenhouseBoard(company=f"Co{i}", board_token=f"co{i}") for i in range(5)]
+        collector = GreenhouseJobsCollector(boards=boards)
+
+        def mock_get(url: str, *args, **kwargs):
+            for board in boards:
+                if board.board_token in url:
+                    offset = boards.index(board) * 1000
+                    return _make_response(200, {"jobs": self._big_jobs(board.board_token, 200, id_offset=offset)})
+            return _make_response(404)
+
+        limit = 7  # Odd, to verify floor division doesn't bust the ceiling
+        with patch.object(requests.Session, "get", side_effect=mock_get):
+            signals = collector.collect(limit=limit)
+
+        assert len(signals) <= limit, (
+            f"Global limit {limit} violated: got {len(signals)} signals"
+        )
+
+    def test_single_board_gets_full_limit(self):
+        """With only one board, per_board_cap equals the full limit — no waste."""
+        board = GreenhouseBoard(company="Solo", board_token="solo")
+        collector = GreenhouseJobsCollector(boards=[board])
+        jobs = self._big_jobs("solo", 50)
+        mock_resp = _make_response(200, {"jobs": jobs})
+
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            signals = collector.collect(limit=10)
+
+        assert len(signals) == 10
+
+    def test_cap_is_at_least_one_per_board(self):
+        """When limit < n_boards, every queried board still gets cap=1 (max(1, …) not 0).
+
+        With limit=3 and 5 boards, per_board_cap = max(1, 3//5) = 1.
+        The first 3 boards fill the global limit (1 signal each) and the outer loop
+        exits — boards 4 and 5 are not queried, which is correct since we're already
+        at the global ceiling.  The important invariant is that cap is 1, not 0: if it
+        were 0 no signals would ever be collected at all.
+        """
+        boards = [GreenhouseBoard(company=f"Co{i}", board_token=f"co{i}") for i in range(5)]
+        collector = GreenhouseJobsCollector(boards=boards)
+
+        queried: list[str] = []
+
+        def mock_get(url: str, *args, **kwargs):
+            for board in boards:
+                if board.board_token in url:
+                    queried.append(board.board_token)
+                    offset = boards.index(board) * 1000
+                    return _make_response(200, {"jobs": self._big_jobs(board.board_token, 10, id_offset=offset)})
+            return _make_response(404)
+
+        with patch.object(requests.Session, "get", side_effect=mock_get):
+            signals = collector.collect(limit=3)
+
+        # Total must not exceed the global limit
+        assert len(signals) <= 3
+
+        # With per_board_cap=1 each queried board contributes exactly 1 signal.
+        # This proves cap is 1, not 0 (which would yield nothing at all).
+        assert len(signals) == len(queried), (
+            "Expected one signal per queried board (per_board_cap=1)"
+        )
+        for board_token in queried:
+            board_signals = [s for s in signals if board_token in s.source_id]
+            assert len(board_signals) == 1, (
+                f"Board '{board_token}' yielded {len(board_signals)}, expected exactly 1"
+            )
