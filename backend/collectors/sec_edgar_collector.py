@@ -406,7 +406,14 @@ class SECEdgarCollector(BaseCollector):
                 f"Malformed SEC EDGAR response for CIK {cik_10} ({company.name}): 'filingDate' must be a list"
             )
 
-        length = min(len(forms), len(accessions), len(filing_dates))
+        if not (len(forms) == len(accessions) == len(filing_dates)):
+            raise CollectorError(
+                f"Malformed SEC EDGAR response for CIK {cik_10} ({company.name}): "
+                f"parallel required array length mismatch: form={len(forms)}, "
+                f"accessionNumber={len(accessions)}, filingDate={len(filing_dates)}"
+            )
+
+        length = len(forms)
         records: list[dict[str, Any]] = []
 
         for i in range(length):

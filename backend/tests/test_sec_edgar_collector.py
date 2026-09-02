@@ -628,8 +628,77 @@ class TestStructuralValidation:
             assert outcome.kind is CollectorOutcomeKind.TRANSIENT_FAILURE
             assert "All 2 configured SEC EDGAR companies failed" in outcome.detail
 
+    def test_mismatched_required_array_lengths_fails_company(self):
+        """When form, accessionNumber, or filingDate lengths differ, company fails."""
+        company = SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc.")
+        collector = SECEdgarCollector(companies=[company], user_agent=_TEST_USER_AGENT)
+
+        mismatched_recent = {
+            "form": ["8-K", "8-K"],
+            "accessionNumber": ["acc-1"],  # only 1 item while form has 2
+            "filingDate": ["2026-08-01", "2026-08-02"],
+        }
+        mock_resp = _make_response(200, {"cik": "1561550", "filings": {"recent": mismatched_recent}})
+
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            outcome = collector.collect_with_outcome()
+            assert outcome.kind is CollectorOutcomeKind.TRANSIENT_FAILURE
+            assert "All 1 configured SEC EDGAR companies failed" in outcome.detail
+
+    def test_mismatched_arrays_on_one_company_allows_second_company_to_succeed(self):
+        """A company with mismatched array lengths fails, but valid second company succeeds."""
+        co_mismatched = SECCompany(cik="0001108524", ticker="CRM", name="Salesforce, Inc.")
+        co_valid = SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc.")
+        collector = SECEdgarCollector(companies=[co_mismatched, co_valid], user_agent=_TEST_USER_AGENT)
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        mismatched_recent = {
+            "form": ["8-K", "8-K"],
+            "accessionNumber": ["acc-1"],
+            "filingDate": [today, today],
+        }
+        good_filings = {
+            "accessionNumber": ["acc-good-1"],
+            "filingDate": [today],
+            "form": ["8-K"],
+            "primaryDocument": ["good.htm"],
+            "items": ["2.02"],
+        }
+
+        def mock_get(url, *args, **kwargs):
+            if "0001108524" in url:
+                return _make_response(200, {"cik": "1108524", "filings": {"recent": mismatched_recent}})
+            if "0001561550" in url:
+                return _make_response(200, _sample_submissions(cik="0001561550", name="Datadog", filings_recent=good_filings))
+            return _make_response(404)
+
+        with patch.object(requests.Session, "get", side_effect=mock_get):
+            outcome = collector.collect_with_outcome()
+            assert outcome.kind is CollectorOutcomeKind.SUCCESS
+            assert len(outcome.signals) == 1
+            assert outcome.signals[0].source_id == "acc-good-1|0001561550"
+
+    def test_all_required_arrays_empty_and_equal_is_valid_successful_empty(self):
+        """When form, accessionNumber, and filingDate are all empty lists, result is successful empty."""
+        company = SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc.")
+        collector = SECEdgarCollector(companies=[company], user_agent=_TEST_USER_AGENT)
+
+        empty_recent = {
+            "form": [],
+            "accessionNumber": [],
+            "filingDate": [],
+            "primaryDocument": [],
+            "items": [],
+        }
+        mock_resp = _make_response(200, _sample_submissions(cik="0001561550", name="Datadog", filings_recent=empty_recent))
+
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            outcome = collector.collect_with_outcome()
+            assert outcome.kind is CollectorOutcomeKind.SUCCESS
+            assert outcome.signals == []
+
     def test_valid_sec_structure_with_zero_8k_filings_is_successful_empty(self):
-        """A valid SEC response that has no 8-K filings is legitimate empty evidence."""
+        """A valid SEC response that has only non-8-K filings is legitimate empty evidence."""
         company = SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc.")
         collector = SECEdgarCollector(companies=[company], user_agent=_TEST_USER_AGENT)
 
