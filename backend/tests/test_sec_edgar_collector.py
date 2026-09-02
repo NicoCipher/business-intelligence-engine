@@ -544,6 +544,111 @@ class TestErrorHandling:
             assert outcome.kind is CollectorOutcomeKind.TRANSIENT_FAILURE
 
 
+# ── 9. Structural Validation Regressions ─────────────────────────────────────
+
+class TestStructuralValidation:
+    """
+    Regression coverage proving malformed/unexpected SEC responses fail properly
+    rather than being silently swallowed as successful empty results.
+    """
+
+    def test_filings_not_a_dict_fails_company(self):
+        company = SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc.")
+        collector = SECEdgarCollector(companies=[company], user_agent=_TEST_USER_AGENT)
+        mock_resp = _make_response(200, {"cik": "1561550", "filings": "not-a-dict"})
+
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            outcome = collector.collect_with_outcome()
+            assert outcome.kind is CollectorOutcomeKind.TRANSIENT_FAILURE
+            assert "All 1 configured SEC EDGAR companies failed" in outcome.detail
+
+    def test_filings_recent_not_a_dict_fails_company(self):
+        company = SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc.")
+        collector = SECEdgarCollector(companies=[company], user_agent=_TEST_USER_AGENT)
+        mock_resp = _make_response(200, {"cik": "1561550", "filings": {"recent": [1, 2, 3]}})
+
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            outcome = collector.collect_with_outcome()
+            assert outcome.kind is CollectorOutcomeKind.TRANSIENT_FAILURE
+            assert "All 1 configured SEC EDGAR companies failed" in outcome.detail
+
+    @pytest.mark.parametrize("bad_recent", [
+        {"accessionNumber": ["acc-1"], "filingDate": ["2026-08-01"]},  # missing 'form'
+        {"form": "not-a-list", "accessionNumber": ["acc-1"], "filingDate": ["2026-08-01"]},  # 'form' is str
+        {"form": ["8-K"], "accessionNumber": 12345, "filingDate": ["2026-08-01"]},  # 'accessionNumber' is int
+        {"form": ["8-K"], "accessionNumber": ["acc-1"], "filingDate": None},  # 'filingDate' is None
+    ])
+    def test_missing_or_non_list_required_arrays_fails_company(self, bad_recent):
+        company = SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc.")
+        collector = SECEdgarCollector(companies=[company], user_agent=_TEST_USER_AGENT)
+        mock_resp = _make_response(200, {"cik": "1561550", "filings": {"recent": bad_recent}})
+
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            outcome = collector.collect_with_outcome()
+            assert outcome.kind is CollectorOutcomeKind.TRANSIENT_FAILURE
+
+    def test_malformed_one_company_plus_valid_second_company_is_partial_success(self):
+        """A structurally malformed response on Company A must not abort Company B."""
+        co_bad = SECCompany(cik="0001108524", ticker="CRM", name="Salesforce, Inc.")
+        co_good = SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc.")
+        collector = SECEdgarCollector(companies=[co_bad, co_good], user_agent=_TEST_USER_AGENT)
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        good_filings = {
+            "accessionNumber": ["acc-good-1"],
+            "filingDate": [today],
+            "form": ["8-K"],
+            "primaryDocument": ["good.htm"],
+            "items": ["2.02"],
+        }
+
+        def mock_get(url, *args, **kwargs):
+            if "0001108524" in url:
+                # Malformed structure for Salesforce
+                return _make_response(200, {"cik": "1108524", "filings": {"recent": "corrupted"}})
+            if "0001561550" in url:
+                # Valid structure for Datadog
+                return _make_response(200, _sample_submissions(cik="0001561550", name="Datadog", filings_recent=good_filings))
+            return _make_response(404)
+
+        with patch.object(requests.Session, "get", side_effect=mock_get):
+            outcome = collector.collect_with_outcome()
+            assert outcome.kind is CollectorOutcomeKind.SUCCESS
+            assert len(outcome.signals) == 1
+            assert outcome.signals[0].source_id == "acc-good-1|0001561550"
+
+    def test_malformed_all_companies_aggregates_to_collector_error(self):
+        co_a = SECCompany(cik="0001108524", ticker="CRM", name="Salesforce, Inc.")
+        co_b = SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc.")
+        collector = SECEdgarCollector(companies=[co_a, co_b], user_agent=_TEST_USER_AGENT)
+
+        mock_resp = _make_response(200, {"filings": "not-a-dict"})
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            outcome = collector.collect_with_outcome()
+            assert outcome.kind is CollectorOutcomeKind.TRANSIENT_FAILURE
+            assert "All 2 configured SEC EDGAR companies failed" in outcome.detail
+
+    def test_valid_sec_structure_with_zero_8k_filings_is_successful_empty(self):
+        """A valid SEC response that has no 8-K filings is legitimate empty evidence."""
+        company = SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc.")
+        collector = SECEdgarCollector(companies=[company], user_agent=_TEST_USER_AGENT)
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        filings_no_8k = {
+            "accessionNumber": ["acc-10k", "acc-10q"],
+            "filingDate": [today, today],
+            "form": ["10-K", "10-Q"],
+            "primaryDocument": ["doc1.htm", "doc2.htm"],
+            "items": ["", ""],
+        }
+        mock_resp = _make_response(200, _sample_submissions(cik="0001561550", name="Datadog", filings_recent=filings_no_8k))
+
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            outcome = collector.collect_with_outcome()
+            assert outcome.kind is CollectorOutcomeKind.SUCCESS
+            assert outcome.signals == []
+
+
 # ── 9. Privacy Protection ───────────────────────────────────────────────────
 
 class TestPrivacyProtection:

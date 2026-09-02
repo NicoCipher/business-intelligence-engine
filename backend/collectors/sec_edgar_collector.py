@@ -346,9 +346,9 @@ class SECEdgarCollector(BaseCollector):
                 f"SEC EDGAR returned non-JSON response for CIK {cik_10}: {e}"
             ) from e
 
-        if not isinstance(data, dict) or "filings" not in data:
+        if not isinstance(data, dict):
             raise CollectorError(
-                f"Unexpected JSON structure from SEC EDGAR for CIK {cik_10}"
+                f"Unexpected non-dict JSON structure from SEC EDGAR for CIK {cik_10}"
             )
 
         return data
@@ -357,19 +357,54 @@ class SECEdgarCollector(BaseCollector):
         self,
         submissions: dict[str, Any],
         cutoff_date_str: str,
+        company: SECCompany,
     ) -> list[dict[str, Any]]:
-        """Extract recent 8-K filings within lookback window from columnar JSON."""
-        filings = submissions.get("filings", {})
-        recent = filings.get("recent", {})
+        """Extract recent 8-K filings within lookback window from columnar JSON.
+
+        Validates that submissions JSON conforms to the required SEC EDGAR structure:
+          - submissions is a dict with 'filings' as a dict
+          - filings['recent'] is a dict
+          - required V1 parallel arrays ('form', 'accessionNumber', 'filingDate') are lists
+
+        Raises CollectorError if the response structure is invalid.
+        Returns an empty list (without error) if the structure is valid but contains
+        no matching 8-K filings.
+        """
+        cik_10 = _normalize_cik(company.cik)
+
+        if not isinstance(submissions, dict) or "filings" not in submissions:
+            raise CollectorError(
+                f"Malformed SEC EDGAR response for CIK {cik_10} ({company.name}): missing 'filings' key"
+            )
+
+        filings = submissions.get("filings")
+        if not isinstance(filings, dict):
+            raise CollectorError(
+                f"Malformed SEC EDGAR response for CIK {cik_10} ({company.name}): 'filings' must be a dict"
+            )
+
+        recent = filings.get("recent")
         if not isinstance(recent, dict):
-            return []
+            raise CollectorError(
+                f"Malformed SEC EDGAR response for CIK {cik_10} ({company.name}): 'filings.recent' must be a dict"
+            )
 
-        forms = recent.get("form") or []
-        accessions = recent.get("accessionNumber") or []
-        filing_dates = recent.get("filingDate") or []
+        forms = recent.get("form")
+        accessions = recent.get("accessionNumber")
+        filing_dates = recent.get("filingDate")
 
-        if not isinstance(forms, list) or not isinstance(accessions, list):
-            return []
+        if not isinstance(forms, list):
+            raise CollectorError(
+                f"Malformed SEC EDGAR response for CIK {cik_10} ({company.name}): 'form' must be a list"
+            )
+        if not isinstance(accessions, list):
+            raise CollectorError(
+                f"Malformed SEC EDGAR response for CIK {cik_10} ({company.name}): 'accessionNumber' must be a list"
+            )
+        if not isinstance(filing_dates, list):
+            raise CollectorError(
+                f"Malformed SEC EDGAR response for CIK {cik_10} ({company.name}): 'filingDate' must be a list"
+            )
 
         length = min(len(forms), len(accessions), len(filing_dates))
         records: list[dict[str, Any]] = []
@@ -425,6 +460,11 @@ class SECEdgarCollector(BaseCollector):
 
             try:
                 submissions = self._fetch_company_submissions(company, session)
+                filing_records = self._extract_recent_filing_records(
+                    submissions,
+                    cutoff_date_str=cutoff_date_str,
+                    company=company,
+                )
                 successful_companies += 1
             except RateLimitError:
                 # Re-raise rate-limiting immediately so the scheduler applies backoff
@@ -439,11 +479,6 @@ class SECEdgarCollector(BaseCollector):
                     e,
                 )
                 continue
-
-            filing_records = self._extract_recent_filing_records(
-                submissions,
-                cutoff_date_str=cutoff_date_str,
-            )
 
             company_yielded = 0
             for filing_data in filing_records:
