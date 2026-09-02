@@ -98,6 +98,18 @@ class GreenhouseBoard(NamedTuple):
     board_token: str
 
 
+class SECCompany(NamedTuple):
+    """A configured company for SEC EDGAR filing collection.
+
+    cik    — SEC Central Index Key (10-digit zero-padded or numeric string, e.g. "0001561550").
+    ticker — Trading ticker symbol if applicable (e.g. "DDOG").
+    name   — Canonical company name (e.g. "Datadog, Inc.").
+    """
+    cik:    str
+    ticker: str
+    name:   str
+
+
 @dataclass
 class DomainSources:
     """
@@ -136,6 +148,13 @@ class DomainSources:
                        board_token — public Greenhouse board token
                      Empty list → collector is skipped for this domain.
 
+    sec_companies — SECCompany entries for the SEC EDGAR 8-K collector.
+                     Each entry is a (cik, ticker, name) tuple:
+                       cik    — SEC Central Index Key
+                       ticker — stock ticker symbol
+                       name   — canonical company name
+                     Empty list → collector is skipped for this domain.
+
     Shared collectors (Hacker News) run at the platform level and produce
     signals that every active domain processes. They are not configured here.
     """
@@ -145,6 +164,7 @@ class DomainSources:
     trends_keywords:      list[str]                = field(default_factory=list)
     stackexchange_queries: list[StackExchangeQuery] = field(default_factory=list)
     greenhouse_boards:    list[GreenhouseBoard]    = field(default_factory=list)
+    sec_companies:        list[SECCompany]         = field(default_factory=list)
 
 
 # ── Keywords ──────────────────────────────────────────────────────────────

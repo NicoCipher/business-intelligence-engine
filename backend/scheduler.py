@@ -35,6 +35,7 @@ COLLECTOR_DEFAULTS: tuple[tuple[str, int, int], ...] = (
     ("trends",          360, 7),
     ("stackexchange",   240, 4),
     ("greenhouse_jobs", 720, 6),
+    ("sec_edgar",       360, 5),
 )
 
 
@@ -149,6 +150,8 @@ def _source_is_configured(source: str, domain: DomainConfig) -> bool:
         return bool(domain.sources.stackexchange_queries)
     if source == "greenhouse_jobs":
         return bool(domain.sources.greenhouse_boards)
+    if source == "sec_edgar":
+        return bool(domain.sources.sec_companies)
     return False
 
 

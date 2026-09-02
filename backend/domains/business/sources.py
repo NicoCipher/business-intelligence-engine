@@ -1,4 +1,10 @@
-from domains.base import DomainSources, GreenhouseBoard, RSSFeed, StackExchangeQuery
+from domains.base import (
+    DomainSources,
+    GreenhouseBoard,
+    RSSFeed,
+    SECCompany,
+    StackExchangeQuery,
+)
 
 SOURCES = DomainSources(
     reddit_sources=[
@@ -93,6 +99,24 @@ SOURCES = DomainSources(
         GreenhouseBoard(company="Airtable", board_token="airtable"),
         GreenhouseBoard(company="Gusto", board_token="gusto"),
         GreenhouseBoard(company="Postman", board_token="postman"),
+    ],
+    # SEC EDGAR Public Company Filings (8-K material events)
+    # CIKs verified directly against official SEC company_tickers.json and submissions API:
+    #   Datadog (0001561550, DDOG), Cloudflare (0001477333, NET), Gitlab (0001653482, GTLB)
+    #   align with Greenhouse job boards for cross-source company monitoring.
+    #   Salesforce, Snowflake, MongoDB, CrowdStrike, Workday, Elastic, ServiceNow
+    #   span core enterprise B2B SaaS and cloud infrastructure leaders.
+    sec_companies=[
+        SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc."),
+        SECCompany(cik="0001477333", ticker="NET",  name="Cloudflare, Inc."),
+        SECCompany(cik="0001653482", ticker="GTLB", name="Gitlab Inc."),
+        SECCompany(cik="0001108524", ticker="CRM",  name="Salesforce, Inc."),
+        SECCompany(cik="0001640147", ticker="SNOW", name="Snowflake Inc."),
+        SECCompany(cik="0001441816", ticker="MDB",  name="MongoDB, Inc."),
+        SECCompany(cik="0001535527", ticker="CRWD", name="CrowdStrike Holdings, Inc."),
+        SECCompany(cik="0001327811", ticker="WDAY", name="Workday, Inc."),
+        SECCompany(cik="0001707753", ticker="ESTC", name="Elastic N.V."),
+        SECCompany(cik="0001373715", ticker="NOW",  name="ServiceNow, Inc."),
     ],
 )
 

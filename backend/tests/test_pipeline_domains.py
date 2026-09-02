@@ -115,16 +115,17 @@ def _patch_collectors(
     monkeypatch, hn_signals, reddit_by_domain,
     rss_by_domain=None, github_by_domain=None, trends_by_domain=None,
     stackexchange_by_domain=None, greenhouse_by_domain=None,
+    sec_edgar_by_domain=None,
 ):
     """
     Replace every collector's .collect() with canned data so pipeline
     tests never make a real HTTP request. Each fake respects
     `self.domain`, matching how the real collectors are used.
 
-    GitHub, Trends, StackExchange, and GreenhouseJobs default to an empty dict,
+    GitHub, Trends, StackExchange, GreenhouseJobs, and SECEdgar default to an empty dict,
     i.e. every domain gets []. This is a deliberate choice, not an oversight:
     BUSINESS_DOMAIN_CONFIG (used directly by several tests below, since it's the real
-    production domain config) carries real queries/boards -- pipeline._run_domain()
+    production domain config) carries real queries/boards/companies -- pipeline._run_domain()
     calls those collectors unconditionally whenever a domain configures them,
     live network calls and all, if they aren't patched.
     """
@@ -135,6 +136,7 @@ def _patch_collectors(
     import collectors.trends_collector as trends_mod
     import collectors.stackexchange_collector as se_mod
     import collectors.greenhouse_jobs_collector as gh_mod
+    import collectors.sec_edgar_collector as sec_mod
 
     def fake_hn_collect(self, limit=None):
         return list(hn_signals)
@@ -157,6 +159,9 @@ def _patch_collectors(
     def fake_gh_collect(self, limit=None):
         return list((greenhouse_by_domain or {}).get(self.domain, []))
 
+    def fake_sec_collect(self, limit=None):
+        return list((sec_edgar_by_domain or {}).get(self.domain, []))
+
     monkeypatch.setattr(hn_mod.HNCollector, "collect", fake_hn_collect)
     monkeypatch.setattr(reddit_mod.RedditCollector, "collect", fake_reddit_collect)
     monkeypatch.setattr(rss_mod.RSSCollector, "collect", fake_rss_collect)
@@ -164,6 +169,7 @@ def _patch_collectors(
     monkeypatch.setattr(trends_mod.TrendsCollector, "collect", fake_trends_collect)
     monkeypatch.setattr(se_mod.StackExchangeCollector, "collect", fake_se_collect)
     monkeypatch.setattr(gh_mod.GreenhouseJobsCollector, "collect", fake_gh_collect)
+    monkeypatch.setattr(sec_mod.SECEdgarCollector, "collect", fake_sec_collect)
 
 
 def _rows(query: str) -> list:
@@ -323,6 +329,26 @@ class TestMultiDomain:
         gh_rows = _rows("SELECT domain FROM signals WHERE source = 'greenhouse_jobs'")
         assert len(gh_rows) == 3
         assert all(r["domain"] == "business" for r in gh_rows)
+
+    def test_sec_edgar_signals_get_correct_domain_when_present(self, fresh_db, monkeypatch):
+        DomainRegistry.register(BUSINESS_DOMAIN_CONFIG)
+        DomainRegistry.register(_second_domain())
+
+        hn_signals = _fake_signals("shared", "hn", 1)
+        _patch_collectors(
+            monkeypatch, hn_signals,
+            reddit_by_domain={"business": [], "test_intel": []},
+            sec_edgar_by_domain={"business": _fake_signals("business", "sec_edgar", 3)},
+        )
+
+        result = pipeline.run_full_pipeline()
+
+        business = next(d for d in result.domains if d.domain_id == "business")
+        assert business.signals_collected == 4  # 1 HN + 3 sec_edgar
+
+        sec_rows = _rows("SELECT domain FROM signals WHERE source = 'sec_edgar'")
+        assert len(sec_rows) == 3
+        assert all(r["domain"] == "business" for r in sec_rows)
 
 
 # ── Entry-point parity ───────────────────────────────────────────────
