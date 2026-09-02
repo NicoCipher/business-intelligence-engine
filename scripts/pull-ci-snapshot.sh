@@ -14,7 +14,7 @@ if [[ $# -ne 0 ]]; then
 fi
 
 repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
-artifact_record="$(gh api --paginate --slurp "repos/${repo}/actions/artifacts?per_page=100" --jq '[.[].artifacts[] | select(.name == "bia-database-canonical" and .expired == false)] | sort_by(.created_at) | reverse | .[0] | select(.) | [.id, .workflow_run.id] | @tsv')" || {
+artifact_record="$(gh api --paginate --slurp "repos/${repo}/actions/artifacts?per_page=100" | jq -r '[.[].artifacts[] | select(.name == "bia-database-canonical" and .expired == false)] | sort_by(.created_at) | reverse | .[0] | select(.) | [.id, .workflow_run.id] | @tsv')" || {
   echo "Unable to list canonical CI artifacts." >&2
   exit 1
 }
