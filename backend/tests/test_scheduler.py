@@ -33,6 +33,7 @@ from domains.base import (
     DomainScoring,
     DomainSources,
     GreenhouseBoard,
+    SECCompany,
     ScoringDimension,
     StackExchangeQuery,
 )
@@ -147,7 +148,7 @@ class TestDuePlanning:
         }
         assert {
             item.source for item in plan.skipped if item.reason == "unconfigured"
-        } == {"rss", "github", "trends", "stackexchange", "greenhouse_jobs"}
+        } == {"rss", "github", "trends", "stackexchange", "greenhouse_jobs", "sec_edgar"}
 
     def test_per_domain_state_is_provisioned_and_isolated(self, fresh_db):
         business = _domain("business")
@@ -159,7 +160,7 @@ class TestDuePlanning:
         assert _decision(plan, "hn", "business").reason == "interval_not_elapsed"
         assert _decision(plan, "hn", "other").due is True
         with database.get_connection() as conn:
-            assert conn.execute("SELECT COUNT(*) FROM collector_state WHERE domain = 'other'").fetchone()[0] == 7
+            assert conn.execute("SELECT COUNT(*) FROM collector_state WHERE domain = 'other'").fetchone()[0] == 8
 
     def test_disabled_backoff_quota_and_lazy_reset_gate_independently(self, fresh_db):
         domain = _domain("business", reddit=True)
@@ -309,7 +310,10 @@ class TestPartialRunDurability:
 
         assert collect.main() == 1
         assert _row("hn", "business")["last_success_at"]
-        assert list(backup_dir.glob("bia-*.db"))
+        assert persistence.canonical_snapshot_path(backup_dir).exists()
+        workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "collect.yml").read_text()
+        assert "failed run may still contain valid committed scheduler/collector state" in workflow
+        assert "if: ${{ always() && steps.persistence_authority.outputs.ready == 'true' }}" in workflow
 
 
 def test_hourly_workflow_uses_scheduler_heartbeat_and_builtin_github_token():
@@ -452,3 +456,71 @@ class TestGreenhouseJobsSchedulerIntegration:
     def test_greenhouse_jobs_priority_is_6(self):
         priorities_by_source = {name: prio for name, _, prio, *_ in scheduler.COLLECTOR_DEFAULTS}
         assert priorities_by_source["greenhouse_jobs"] == 6
+
+
+# ── SEC EDGAR scheduler integration ───────────────────────────────────────
+
+class TestSECEdgarSchedulerIntegration:
+    def test_sec_edgar_in_collector_defaults(self):
+        sources = {name for name, *_ in scheduler.COLLECTOR_DEFAULTS}
+        assert "sec_edgar" in sources
+
+    def test_source_is_configured_with_no_companies(self):
+        domain = _domain("business")
+        assert not scheduler._source_is_configured("sec_edgar", domain)
+
+    def test_source_is_configured_with_companies(self):
+        domain_with_sec = DomainConfig(
+            metadata=DomainMetadata(
+                id="business", name="business", description="SEC fixture",
+                version="0.0.1", icon="flask", color="#123456", category="test",
+            ),
+            sources=DomainSources(
+                sec_companies=[
+                    SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc."),
+                ],
+            ),
+            keywords=DomainKeywords(),
+            graph=DomainKnowledgeGraph(),
+            scoring=DomainScoring(dimensions=[
+                ScoringDimension("signal_strength", "Signal Strength", "fixture", 1.0),
+            ]),
+            reporting=DomainReporting(title="SEC fixture", description="fixture"),
+        )
+        assert scheduler._source_is_configured("sec_edgar", domain_with_sec)
+
+    def test_sec_edgar_skipped_when_unconfigured(self, fresh_db):
+        domain = _domain("business")
+        plan = scheduler.AdaptiveScheduler(NOW).plan([domain])
+        skipped_sources = {item.source for item in plan.skipped if item.reason == "unconfigured"}
+        assert "sec_edgar" in skipped_sources
+
+    def test_sec_edgar_due_on_first_run_when_configured(self, fresh_db):
+        domain_with_sec = DomainConfig(
+            metadata=DomainMetadata(
+                id="business", name="business", description="SEC fixture",
+                version="0.0.1", icon="flask", color="#123456", category="test",
+            ),
+            sources=DomainSources(
+                sec_companies=[
+                    SECCompany(cik="0001561550", ticker="DDOG", name="Datadog, Inc."),
+                ],
+            ),
+            keywords=DomainKeywords(),
+            graph=DomainKnowledgeGraph(),
+            scoring=DomainScoring(dimensions=[
+                ScoringDimension("signal_strength", "Signal Strength", "fixture", 1.0),
+            ]),
+            reporting=DomainReporting(title="SEC fixture", description="fixture"),
+        )
+        plan = scheduler.AdaptiveScheduler(NOW).plan([domain_with_sec])
+        due_sources = {item.source for item in plan.due}
+        assert "sec_edgar" in due_sources
+
+    def test_sec_edgar_interval_is_360_minutes(self):
+        defaults_by_source = {name: interval for name, interval, *_ in scheduler.COLLECTOR_DEFAULTS}
+        assert defaults_by_source["sec_edgar"] == 360
+
+    def test_sec_edgar_priority_is_5(self):
+        priorities_by_source = {name: prio for name, _, prio, *_ in scheduler.COLLECTOR_DEFAULTS}
+        assert priorities_by_source["sec_edgar"] == 5

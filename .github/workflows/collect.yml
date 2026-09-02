@@ -20,6 +20,12 @@ permissions:
   contents: read
   actions: read
 
+# The CI snapshot is one shared persistence authority. Do not cancel an
+# in-progress collector: it may already have committed useful scheduler state.
+concurrency:
+  group: bia-collection-canonical-snapshot
+  cancel-in-progress: false
+
 jobs:
   collect:
     name: Schedule · Collect · Extract · Detect · Report
@@ -44,27 +50,65 @@ jobs:
           restore-keys: |
             bia-database-${{ runner.os }}-
 
-      # ── Durable backup restore ───────────────────────────────────────────
-      # The cache above is best-effort and evictable. This finds the most
-      # recent successful run's artifact snapshot (see the upload step
-      # further down) and restores it into backend/data/backups/, which
-      # collect.py's persistence.pull() then restores from if the
-      # cache-provided database doesn't already exist. actions/download-
-      # artifact alone can't do this (it only sees the current run without
-      # an explicit prior run-id) -- gh CLI (preinstalled, no third-party
-      # action) finds that run-id first. Expected to find nothing on the
-      # very first run ever; continue-on-error handles that startup case.
-      - name: Restore database backup artifact
-        continue-on-error: true
+      # ── Restore the canonical durable snapshot ──────────────────────────
+      # Cache is an optimization only. Canonical artifacts use a distinct name
+      # so format is known from metadata without downloading retained history.
+      # A canonical artifact is authoritative, including one from a run that
+      # failed after committing scheduler/collector state. Before the first
+      # canonical artifact exists, only the newest legacy artifact is fetched
+      # for one safe migration. A retrieval failure for an authority candidate
+      # stops this run; only a genuine no-artifact first-run may use cache.
+      - name: Restore canonical database artifact
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          RUN_ID=$(gh run list --workflow=collect.yml --status=success --limit=1 --json databaseId --jq '.[0].databaseId')
-          if [ -n "$RUN_ID" ]; then
-            echo "Restoring backup artifact from run $RUN_ID"
-            gh run download "$RUN_ID" -n bia-database-backup -D backend/data/backups/ || echo "No backup artifact found on run $RUN_ID"
+          set -o pipefail
+          ARTIFACT_DIR="$(mktemp -d)"
+          CANONICAL_ARTIFACT_NAME="bia-database-canonical"
+          LEGACY_ARTIFACT_NAME="bia-database-backup"
+          ARTIFACTS_ENDPOINT="repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100"
+
+          # Pagination reads metadata only; sort it explicitly before choosing
+          # one artifact so no artifact-content scan is needed for discovery.
+          CANONICAL_ARTIFACT_RECORD="$(gh api --paginate --slurp "$ARTIFACTS_ENDPOINT" --jq '[.[].artifacts[] | select(.name == "bia-database-canonical" and .expired == false)] | sort_by(.created_at) | reverse | .[0] | select(.) | [.id, .workflow_run.id] | @tsv')" || {
+            echo "Unable to list canonical artifacts; refusing cache fallback." >&2
+            exit 1
+          }
+
+          if [ -n "$CANONICAL_ARTIFACT_RECORD" ]; then
+            IFS=$'\t' read -r CANONICAL_ARTIFACT_ID CANONICAL_RUN_ID <<< "$CANONICAL_ARTIFACT_RECORD"
+            echo "Restoring selected canonical artifact $CANONICAL_ARTIFACT_ID from run $CANONICAL_RUN_ID"
+            if ! gh run download "$CANONICAL_RUN_ID" -n "$CANONICAL_ARTIFACT_NAME" -D "$ARTIFACT_DIR"; then
+              echo "Canonical artifact retrieval failed; refusing cache fallback." >&2
+              exit 1
+            fi
+            CANONICAL_SNAPSHOT="$(find "$ARTIFACT_DIR" -type f -name bia-latest.db -print -quit)"
+            if [ -z "$CANONICAL_SNAPSHOT" ]; then
+              echo "Selected canonical artifact did not contain bia-latest.db; refusing cache fallback." >&2
+              exit 1
+            fi
+            mkdir -p backend/data/backups
+            cp "$CANONICAL_SNAPSHOT" backend/data/backups/bia-latest.db
+            echo "BIA_SNAPSHOT_FORMAT=canonical" >> "$GITHUB_ENV"
           else
-            echo "No previous successful run found -- starting fresh"
+            LEGACY_ARTIFACT_RECORD="$(gh api --paginate --slurp "$ARTIFACTS_ENDPOINT" --jq '[.[].artifacts[] | select(.name == "bia-database-backup" and .expired == false)] | sort_by(.created_at) | reverse | .[0] | select(.) | [.id, .workflow_run.id] | @tsv')" || {
+              echo "Unable to list legacy artifacts; refusing cache fallback." >&2
+              exit 1
+            }
+            if [ -z "$LEGACY_ARTIFACT_RECORD" ]; then
+              echo "No prior database artifact found -- first run; cache/fresh start is allowed"
+              exit 0
+            fi
+
+            IFS=$'\t' read -r LEGACY_ARTIFACT_ID LEGACY_RUN_ID <<< "$LEGACY_ARTIFACT_RECORD"
+            echo "Downloading selected legacy artifact $LEGACY_ARTIFACT_ID from run $LEGACY_RUN_ID for migration"
+            if ! gh run download "$LEGACY_RUN_ID" -n "$LEGACY_ARTIFACT_NAME" -D "$ARTIFACT_DIR"; then
+              echo "Legacy artifact retrieval failed; refusing cache fallback." >&2
+              exit 1
+            fi
+            echo "BIA_SNAPSHOT_FORMAT=legacy" >> "$GITHUB_ENV"
+            echo "BIA_LEGACY_SNAPSHOT_DIR=$ARTIFACT_DIR" >> "$GITHUB_ENV"
+            echo "No canonical artifact found; migrating the newest valid snapshot from the selected legacy artifact"
           fi
 
       - name: Set up Python 3.11
@@ -76,6 +120,21 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
+
+      - name: Migrate selected legacy database snapshot
+        if: ${{ env.BIA_SNAPSHOT_FORMAT == 'legacy' }}
+        run: python -c "import os, sys; from pathlib import Path; sys.path.insert(0, 'backend'); import persistence; persistence.migrate_legacy_snapshot(Path(os.environ['BIA_LEGACY_SNAPSHOT_DIR']))"
+
+      - name: Install validated canonical database snapshot
+        if: ${{ env.BIA_SNAPSHOT_FORMAT != '' }}
+        run: python -c "import sys; sys.path.insert(0, 'backend'); import persistence; persistence.restore_canonical_snapshot()"
+
+      # A failure before this point must not republish a cache copy as a new
+      # canonical artifact. Once this point is reached, collect.py owns
+      # snapshotting transactionally committed database state in its finally.
+      - name: Mark persistence authority ready
+        id: persistence_authority
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
       # ── Run the intelligence pipeline ───────────────────────────────────
       - name: Run collection pipeline
@@ -95,21 +154,18 @@ jobs:
           GITHUB_TOKEN:         ${{ github.token }}
           BIA_DATA_DIR:         backend/data
 
-      # ── Durable backup ───────────────────────────────────────────────────
-      # The database cache above is NOT a durability guarantee -- GitHub
-      # Actions cache is explicitly subject to eviction with no restore
-      # path. collect.py calls persistence.pull()/push() around every run,
-      # snapshotting to backend/data/backups/; this step uploads that
-      # directory as a build artifact, which has far longer, more explicit
-      # retention than the cache. See persistence.py for the pull/push seam
-      # this can later be pointed at real durable storage through, without
-      # any caller needing to change.
-      - name: Upload database backup artifact
-        if: always()
+      # ── Durable canonical snapshot ───────────────────────────────────────
+      # One SQLite-backup-API snapshot is uploaded, never the historical
+      # backup directory. GitHub artifacts provide run-level retention; the
+      # latest completed artifact is the cold-start durability fallback. A
+      # failed run may still contain valid committed scheduler/collector state;
+      # this snapshot is evidence state, not a success verdict for the run.
+      - name: Upload canonical database artifact
+        if: ${{ always() && steps.persistence_authority.outputs.ready == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: bia-database-backup
-          path: backend/data/backups/
+          name: bia-database-canonical
+          path: backend/data/backups/bia-latest.db
           retention-days: 90
           if-no-files-found: warn
 
