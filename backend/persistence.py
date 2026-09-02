@@ -82,6 +82,42 @@ def _legacy_snapshots() -> list[Path]:
     return sorted(BACKUP_DIR.glob("bia-*.db"), reverse=True)
 
 
+def migrate_legacy_snapshot(legacy_directory: Path) -> Path:
+    """Create the canonical snapshot from the newest valid legacy artifact DB.
+
+    The workflow calls this only when retained artifact history contains no
+    canonical ``bia-latest.db``. Invalid candidates are never installed; if
+    no valid legacy SQLite database remains, the caller must fail rather than
+    treating a cache copy as durable authority.
+    """
+    candidates = sorted(
+        (
+            path
+            for path in legacy_directory.rglob("bia-*.db")
+            if path.name != CANONICAL_SNAPSHOT_NAME
+        ),
+        key=lambda path: (path.name, str(path)),
+        reverse=True,
+    )
+    if not candidates:
+        raise FileNotFoundError(f"No legacy SQLite snapshots found in {legacy_directory}")
+
+    invalid_candidates: list[Path] = []
+    for candidate in candidates:
+        try:
+            _validate_sqlite(candidate)
+        except (OSError, sqlite3.Error):
+            invalid_candidates.append(candidate)
+            logger.warning("Ignoring invalid legacy SQLite snapshot: %s", candidate)
+            continue
+        snapshot = _snapshot_sqlite(candidate, canonical_snapshot_path(), replace=True)
+        logger.info("migrate_legacy_snapshot(): migrated %s -> %s", candidate, snapshot)
+        return snapshot
+
+    names = ", ".join(candidate.name for candidate in invalid_candidates)
+    raise sqlite3.DatabaseError(f"No valid legacy SQLite snapshots found in {legacy_directory}: {names}")
+
+
 def _prune_local_sync_backups(backup_dir: Path) -> None:
     """Retain only known tool-created local-sync backups, newest first."""
     backups = sorted(backup_dir.glob("bia-before-ci-sync-*.db"), reverse=True)

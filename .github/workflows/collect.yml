@@ -51,18 +51,21 @@ jobs:
             bia-database-${{ runner.os }}-
 
       # ── Restore the canonical durable snapshot ──────────────────────────
-      # Cache is an optimization only. The most recent completed run that
-      # published a canonical artifact is authoritative, including a run that
-      # failed after committing scheduler/collector state. A retrieval failure
-      # for an existing artifact stops this run; only a genuine no-artifact
-      # first-run/migration case may use cache or initialize fresh.
+      # Cache is an optimization only. A canonical-format artifact is
+      # authoritative, including one from a run that failed after committing
+      # scheduler/collector state. Before the first canonical artifact exists,
+      # all retained legacy artifacts are staged for one safe migration. A
+      # retrieval failure for an existing artifact stops this run; only a
+      # genuine no-artifact first-run case may use cache or initialize fresh.
       - name: Restore canonical database artifact
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -o pipefail
-          FOUND_ARTIFACT=false
-          RUN_IDS="$(gh run list --workflow=collect.yml --limit=20 --json databaseId,status --jq '.[] | select(.status == "completed") | .databaseId')" || {
+          ARTIFACT_DIR="$(mktemp -d)"
+          FOUND_LEGACY_ARTIFACT=false
+          FOUND_CANONICAL_ARTIFACT=false
+          RUN_IDS="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/workflows/collect.yml/runs?status=completed&per_page=100" --jq '.workflow_runs[] | .id')" || {
             echo "Unable to list completed workflow runs; refusing cache fallback." >&2
             exit 1
           }
@@ -76,17 +79,35 @@ jobs:
               continue
             fi
 
-            echo "Restoring canonical database artifact from completed run $RUN_ID"
-            if ! gh run download "$RUN_ID" -n bia-database-backup -D backend/data/backups/; then
+            RUN_ARTIFACT_DIR="$ARTIFACT_DIR/$RUN_ID"
+            mkdir -p "$RUN_ARTIFACT_DIR"
+            echo "Inspecting database artifact from completed run $RUN_ID"
+            if ! gh run download "$RUN_ID" -n bia-database-backup -D "$RUN_ARTIFACT_DIR"; then
               echo "Canonical artifact retrieval failed; refusing cache fallback." >&2
               exit 1
             fi
-            FOUND_ARTIFACT=true
-            break
+
+            CANONICAL_SNAPSHOT="$(find "$RUN_ARTIFACT_DIR" -type f -name bia-latest.db -print -quit)"
+            if [ -n "$CANONICAL_SNAPSHOT" ]; then
+              mkdir -p backend/data/backups
+              cp "$CANONICAL_SNAPSHOT" backend/data/backups/bia-latest.db
+              FOUND_CANONICAL_ARTIFACT=true
+              break
+            fi
+
+            if find "$RUN_ARTIFACT_DIR" -type f -name 'bia-*.db' ! -name bia-latest.db -print -quit | grep -q .; then
+              FOUND_LEGACY_ARTIFACT=true
+            fi
           done <<< "$RUN_IDS"
 
-          if [ "$FOUND_ARTIFACT" = false ]; then
-            echo "No prior canonical artifact found -- first run or pre-canonical migration; cache/fresh start is allowed"
+          if [ "$FOUND_CANONICAL_ARTIFACT" = true ]; then
+            echo "BIA_SNAPSHOT_FORMAT=canonical" >> "$GITHUB_ENV"
+          elif [ "$FOUND_LEGACY_ARTIFACT" = true ]; then
+            echo "BIA_SNAPSHOT_FORMAT=legacy" >> "$GITHUB_ENV"
+            echo "BIA_LEGACY_SNAPSHOT_DIR=$ARTIFACT_DIR" >> "$GITHUB_ENV"
+            echo "No canonical artifact found; migrating the newest valid retained legacy snapshot"
+          else
+            echo "No prior database artifact found -- first run; cache/fresh start is allowed"
           fi
 
       - name: Set up Python 3.11
@@ -99,8 +120,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
 
+      - name: Migrate selected legacy database snapshot
+        if: ${{ env.BIA_SNAPSHOT_FORMAT == 'legacy' }}
+        run: python -c "import os, sys; from pathlib import Path; sys.path.insert(0, 'backend'); import persistence; persistence.migrate_legacy_snapshot(Path(os.environ['BIA_LEGACY_SNAPSHOT_DIR']))"
+
       - name: Install validated canonical database snapshot
-        if: ${{ hashFiles('backend/data/backups/bia-latest.db') != '' }}
+        if: ${{ env.BIA_SNAPSHOT_FORMAT != '' }}
         run: python -c "import sys; sys.path.insert(0, 'backend'); import persistence; persistence.restore_canonical_snapshot()"
 
       # A failure before this point must not republish a cache copy as a new

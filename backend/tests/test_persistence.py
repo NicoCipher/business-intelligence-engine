@@ -148,6 +148,67 @@ def test_absent_canonical_snapshot_allows_first_run_without_overwriting_cache(sn
     assert _read_value(destination) == "cache copy"
 
 
+def test_legacy_snapshot_migration_restores_first_post_migration_run(snapshot_paths):
+    destination, backup_dir = snapshot_paths
+    legacy = backup_dir / "staged" / "bia-20260101T000000Z.db"
+    _write_value(legacy, "legacy evidence")
+
+    canonical = persistence.migrate_legacy_snapshot(backup_dir / "staged")
+
+    assert canonical == persistence.canonical_snapshot_path()
+    assert persistence.restore_canonical_snapshot(destination) is True
+    assert _read_value(destination) == "legacy evidence"
+
+
+def test_legacy_migration_replaces_stale_cache_with_legacy_authority(snapshot_paths):
+    destination, backup_dir = snapshot_paths
+    _write_value(destination, "stale cache")
+    legacy = backup_dir / "staged" / "bia-20260101T000000Z.db"
+    _write_value(legacy, "legacy authority")
+
+    persistence.migrate_legacy_snapshot(backup_dir / "staged")
+    persistence.restore_canonical_snapshot(destination)
+
+    assert _read_value(destination) == "legacy authority"
+
+
+def test_legacy_migration_selects_newest_valid_snapshot(snapshot_paths):
+    _, backup_dir = snapshot_paths
+    staged = backup_dir / "staged"
+    _write_value(staged / "bia-20260101T000000Z.db", "older valid evidence")
+    invalid_newer = staged / "bia-20260201T000000Z.db"
+    invalid_newer.write_text("not sqlite")
+
+    canonical = persistence.migrate_legacy_snapshot(staged)
+
+    assert _read_value(canonical) == "older valid evidence"
+
+
+def test_invalid_legacy_migration_preserves_cache_and_does_not_create_canonical(snapshot_paths):
+    destination, backup_dir = snapshot_paths
+    _write_value(destination, "cache copy")
+    legacy = backup_dir / "staged" / "bia-20260101T000000Z.db"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("not sqlite")
+
+    with pytest.raises(sqlite3.DatabaseError, match="No valid legacy SQLite snapshots"):
+        persistence.migrate_legacy_snapshot(backup_dir / "staged")
+
+    assert _read_value(destination) == "cache copy"
+    assert not persistence.canonical_snapshot_path().exists()
+
+
+def test_existing_canonical_snapshot_takes_precedence_over_legacy(snapshot_paths):
+    destination, backup_dir = snapshot_paths
+    _write_value(backup_dir / "staged" / "bia-20260101T000000Z.db", "legacy evidence")
+    _write_value(persistence.canonical_snapshot_path(), "canonical evidence")
+    _write_value(destination, "stale cache")
+
+    persistence.restore_canonical_snapshot(destination)
+
+    assert _read_value(destination) == "canonical evidence"
+
+
 def test_workflow_serializes_canonical_authority_and_rejects_retrieval_fallback():
     workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "collect.yml").read_text()
 
@@ -156,12 +217,19 @@ def test_workflow_serializes_canonical_authority_and_rejects_retrieval_fallback(
     assert "cancel-in-progress: false" in workflow
     assert "path: backend/data/backups/bia-latest.db" in workflow
     assert "Install validated canonical database snapshot" in workflow
+    assert "Migrate selected legacy database snapshot" in workflow
+    assert "persistence.migrate_legacy_snapshot" in workflow
     assert "persistence.restore_canonical_snapshot()" in workflow
     assert "Mark persistence authority ready" in workflow
     assert "if: ${{ always() && steps.persistence_authority.outputs.ready == 'true' }}" in workflow
     assert "Unable to list completed workflow runs; refusing cache fallback." in workflow
     assert "Unable to inspect canonical artifacts; refusing cache fallback." in workflow
     assert "Canonical artifact retrieval failed; refusing cache fallback." in workflow
-    assert "No prior canonical artifact found -- first run or pre-canonical migration; cache/fresh start is allowed" in workflow
+    assert "No prior database artifact found -- first run; cache/fresh start is allowed" in workflow
+    assert "BIA_SNAPSHOT_FORMAT=legacy" in workflow
+    assert "BIA_SNAPSHOT_FORMAT=canonical" in workflow
+    assert "--paginate" in workflow
+    assert "actions/workflows/collect.yml/runs?status=completed&per_page=100" in workflow
+    assert "--limit=20" not in workflow
     assert "continue-on-error" not in workflow
     assert "path: backend/data/backups/\n" not in workflow

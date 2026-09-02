@@ -17,13 +17,18 @@ copies are not used.
 
 Hourly and manual workflow executions share one queued concurrency group, so
 only one run can restore and publish the canonical authority at a time. The
-workflow restores the newest completed artifact that contains the canonical
-snapshot. If present, its validated SQLite backup replaces the disposable
-cache copy. A failure while listing, inspecting, or downloading an existing
-artifact fails the run rather than treating the cache as authority. Only when
-there is genuinely no prior canonical artifact (first run or pre-canonical
-migration) may BIA use a cache copy or initialize fresh. An invalid downloaded
-snapshot is validated before it can replace the cache/database.
+workflow searches all retained completed workflow history, not a fixed recent
+run window. A canonical `bia-latest.db` artifact takes precedence wherever it
+appears in that history and, once present, ends legacy migration. On the first
+canonical rollout only, legacy `bia-*.db` artifacts are staged and the newest
+valid SQLite snapshot is migrated through the same SQLite backup and validation
+machinery into `bia-latest.db` before replacing the disposable cache copy.
+A failure while listing, inspecting, or downloading an existing artifact fails
+the run rather than treating the cache as authority. Invalid legacy candidates
+are skipped only when an older valid legacy snapshot remains; if none validates,
+migration fails before a cache copy can be installed. Only when there is
+genuinely no prior database artifact may BIA use a cache copy or initialize
+fresh.
 
 `collect.py` snapshots committed state in `finally`, because a collector or
 scheduler transition may have committed before a later pipeline stage fails.
