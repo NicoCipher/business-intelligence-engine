@@ -87,6 +87,17 @@ class StackExchangeQuery(NamedTuple):
     tags: list[str]
 
 
+class GreenhouseBoard(NamedTuple):
+    """A configured Greenhouse public job board.
+
+    company     — Human-readable canonical company identifier/name (e.g. "Stripe", "Vercel").
+    board_token — Public Greenhouse board token used in the URL/API
+                  (e.g. "stripe" for boards-api.greenhouse.io/v1/boards/stripe/jobs).
+    """
+    company:     str
+    board_token: str
+
+
 @dataclass
 class DomainSources:
     """
@@ -119,6 +130,12 @@ class DomainSources:
                               for broad coverage (see StackExchangeQuery docs).
                      Empty list → collector is skipped for this domain.
 
+    greenhouse_boards — GreenhouseBoard entries for the Greenhouse Jobs collector.
+                     Each entry is a (company, board_token) pair:
+                       company     — canonical company name
+                       board_token — public Greenhouse board token
+                     Empty list → collector is skipped for this domain.
+
     Shared collectors (Hacker News) run at the platform level and produce
     signals that every active domain processes. They are not configured here.
     """
@@ -127,6 +144,7 @@ class DomainSources:
     github_queries:       list[str]                = field(default_factory=list)
     trends_keywords:      list[str]                = field(default_factory=list)
     stackexchange_queries: list[StackExchangeQuery] = field(default_factory=list)
+    greenhouse_boards:    list[GreenhouseBoard]    = field(default_factory=list)
 
 
 # ── Keywords ──────────────────────────────────────────────────────────────
