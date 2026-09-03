@@ -999,6 +999,7 @@ the same way — use once, then revoke.
 - **NIC-19 External Model Shadow Experiment (active semantic task):**
   Evaluating LLM condition state extraction against the frozen NIC-17 dataset and comparing metrics against the frozen NIC-18 rules-v1 baseline. The planned semantic milestone sequence is:
   `NIC-19 → NIC-20 → NIC-5 → NIC-6 → NIC-7 → NIC-8 → NIC-9`.
+  The provider model identifier was corrected operationally from `gemini-2.5-flash-lite` to `gemini-3.1-flash-lite` after the former returned HTTP 404 and the authenticated models list confirmed the latter supports `generateContent`; this is provider-availability compatibility only, not semantic tuning.
 - **Alert delivery and watchlists/alert_rules consumption** (item 22a) — still undesigned and unimplemented, schema-only, no delivery channel by design.
 - **A dedicated `/changes` Console browsing page** (item 21) — backend contract exists; full dedicated browse/filter page remains open.
 - **`explainer/*`'s narrative layer** (item 17's remaining half) and **RFC-001 implementation** (item 13) — unchanged.

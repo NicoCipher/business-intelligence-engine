@@ -42,7 +42,7 @@ def _response(label, evidence_span, *, usage=None):
 
 class TestFrozenExperimentContract:
     def test_model_prompt_and_generation_configuration_are_explicit(self):
-        assert MODEL_ID == "gemini-2.5-flash-lite"
+        assert MODEL_ID == "gemini-3.1-flash-lite"
         assert PROMPT_VERSION == "nic-19-gemini-2.5-flash-lite-v1"
         assert GENERATION_CONFIG == {
             "temperature": 0.0,
