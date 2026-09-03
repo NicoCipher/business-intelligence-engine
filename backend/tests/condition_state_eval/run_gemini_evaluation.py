@@ -15,7 +15,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -174,6 +174,7 @@ def run(
     cases: list[EvidenceCase] = CASES,
     interpreter: Any = interpret,
     sleep: Any = time.sleep,
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, Any]:
     scored_cases = [case for case in cases if case.scored]
     diagnostic_cases = [case for case in cases if not case.scored]
@@ -190,6 +191,8 @@ def run(
             scored_outcomes.append(score(case, result))
         else:
             diagnostic_records.append(record)
+        if progress is not None:
+            progress(index + 1, len(all_cases), case.case_id)
         if index < len(all_cases) - 1:
             sleep(RATE_LIMIT_PROTOCOL["inter_request_delay_seconds"])
 
@@ -220,7 +223,13 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
-    report = run(args.run_id)
+    report = run(
+        args.run_id,
+        progress=lambda completed, total, case_id: print(
+            json.dumps({"completed_cases": completed, "total_cases": total, "case_id": case_id}),
+            flush=True,
+        ),
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"run_id": args.run_id, "metrics": report["metrics"], "output": str(args.output)}, indent=2))
