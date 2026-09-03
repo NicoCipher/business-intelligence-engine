@@ -1,0 +1,3727 @@
+{
+  "completed_at": "2026-09-03T10:13:21.517681+00:00",
+  "diagnostic_results": [
+    {
+      "case_id": "CS-CORE-007",
+      "case_set": "core",
+      "category": "reported_attributed",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": null,
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 512.8887329999969,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    },
+    {
+      "case_id": "CS-CORE-008",
+      "case_set": "core",
+      "category": "reported_attributed",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": null,
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 513.7277779999963,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    },
+    {
+      "case_id": "CS-ADV-004",
+      "case_set": "adversarial",
+      "category": "questions",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": null,
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 495.9093179999954,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    }
+  ],
+  "generation_configuration": {
+    "maxOutputTokens": 256,
+    "responseMimeType": "application/json",
+    "temperature": 0.0,
+    "topP": 1.0
+  },
+  "interpreter_id": "gemini-condition-state-shadow",
+  "interpreter_version": "1.0.0",
+  "latency_statistics_ms": {
+    "count": 44,
+    "max_ms": 2663.4551769999994,
+    "mean_ms": 1272.7946726136358,
+    "min_ms": 481.5019300000003,
+    "p50_ms": 1446.183977,
+    "p95_ms": 2051.5694289999997
+  },
+  "metrics": {
+    "abstained_null": 0,
+    "accuracy": 0.8333333333333334,
+    "correct": 25,
+    "correct_abstention": 0,
+    "critically_wrong": 0,
+    "effective_unknown_or_null_rate": 0.4,
+    "explicit_unknown_prediction_rate": 0.4,
+    "operational_failure_count": 11,
+    "per_label_precision_recall": {
+      "active": {
+        "actual_count": 9,
+        "precision": 0.6923076923076923,
+        "predicted_count": 13,
+        "recall": 1.0
+      },
+      "resolved": {
+        "actual_count": 4,
+        "precision": 0.8,
+        "predicted_count": 5,
+        "recall": 1.0
+      },
+      "unknown": {
+        "actual_count": 17,
+        "precision": 1.0,
+        "predicted_count": 12,
+        "recall": 0.7058823529411765
+      }
+    },
+    "scored_cases": 41,
+    "wrong": 5
+  },
+  "model": "gemini-3.1-flash-lite",
+  "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+  "provider": "Google Gemini Developer API",
+  "response_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "evidence_span": {
+        "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "label": {
+        "description": "NIC-15 condition-state label, or null for abstention.",
+        "enum": [
+          "active",
+          "resolved",
+          "unknown",
+          null
+        ],
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "rationale": {
+        "description": "Concise explanation grounded only in evidence_span.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "label",
+      "evidence_span",
+      "rationale"
+    ],
+    "type": "object"
+  },
+  "retry_policy": "none",
+  "run_id": "RUN-2",
+  "scored_results": [
+    {
+      "case_id": "CS-CORE-001",
+      "case_set": "core",
+      "category": "negation",
+      "evidence_span": "The bug is not fixed yet.",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "active",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 252,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 50,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"The bug is not fixed yet.\",\n  \"rationale\": \"The text explicitly states that the bug is not fixed, indicating it is still occurring.\"\n}",
+      "request_latency_ms": 2051.5694289999997,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 50,
+        "promptTokenCount": 252,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 252
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 302
+      },
+      "total_tokens": 302
+    },
+    {
+      "case_id": "CS-CORE-002",
+      "case_set": "core",
+      "category": "negation",
+      "evidence_span": "This issue was never resolved.",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "active",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 250,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 49,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"This issue was never resolved.\",\n  \"rationale\": \"The text explicitly states that the issue has not been resolved, indicating it remains active.\"\n}",
+      "request_latency_ms": 1613.4004590000002,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 49,
+        "promptTokenCount": 250,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 250
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 299
+      },
+      "total_tokens": 299
+    },
+    {
+      "case_id": "CS-CORE-003",
+      "case_set": "core",
+      "category": "historical_statements",
+      "evidence_span": "that's long behind us now",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "resolved",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 270,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 54,
+      "predicted_label": "resolved",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"resolved\",\n  \"evidence_span\": \"that's long behind us now\",\n  \"rationale\": \"The phrase 'long behind us now' explicitly indicates that the struggle with invoicing is no longer occurring.\"\n}",
+      "request_latency_ms": 1446.183977,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 54,
+        "promptTokenCount": 270,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 270
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 324
+      },
+      "total_tokens": 324
+    },
+    {
+      "case_id": "CS-CORE-004",
+      "case_set": "core",
+      "category": "historical_statements",
+      "evidence_span": "used to crash constantly",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 268,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "wrong",
+      "output_tokens": 54,
+      "predicted_label": "resolved",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"resolved\",\n  \"evidence_span\": \"used to crash constantly\",\n  \"rationale\": \"The phrase 'used to' indicates that the crashing behavior occurred in the past and is no longer the current state.\"\n}",
+      "request_latency_ms": 1356.2895089999997,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 54,
+        "promptTokenCount": 268,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 268
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 322
+      },
+      "total_tokens": 322
+    },
+    {
+      "case_id": "CS-CORE-005",
+      "case_set": "core",
+      "category": "recurring_conditions",
+      "evidence_span": "The export bug keeps coming back every few weeks.",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "active",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 258,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 53,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"The export bug keeps coming back every few weeks.\",\n  \"rationale\": \"The phrase 'keeps coming back' indicates that the condition is recurring and currently persists.\"\n}",
+      "request_latency_ms": 2663.4551769999994,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 53,
+        "promptTokenCount": 258,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 258
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 311
+      },
+      "total_tokens": 311
+    },
+    {
+      "case_id": "CS-CORE-006",
+      "case_set": "core",
+      "category": "recurring_conditions",
+      "evidence_span": "it came back again last week",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "active",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 264,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 51,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"it came back again last week\",\n  \"rationale\": \"The text explicitly states that the issue recurred last week, indicating it is currently active.\"\n}",
+      "request_latency_ms": 1730.3023619999997,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 51,
+        "promptTokenCount": 264,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 264
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 315
+      },
+      "total_tokens": 315
+    },
+    {
+      "case_id": "CS-CORE-009",
+      "case_set": "core",
+      "category": "conflicting_clauses",
+      "evidence_span": "I'm still getting the same error",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 272,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "wrong",
+      "output_tokens": 52,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"I'm still getting the same error\",\n  \"rationale\": \"The user explicitly states that they are currently experiencing the error, indicating the condition persists.\"\n}",
+      "request_latency_ms": 1930.811275,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 52,
+        "promptTokenCount": 272,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 272
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 324
+      },
+      "total_tokens": 324
+    },
+    {
+      "case_id": "CS-CORE-010",
+      "case_set": "core",
+      "category": "conflicting_clauses",
+      "evidence_span": "nothing has actually changed on my end",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 272,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "wrong",
+      "output_tokens": 57,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"nothing has actually changed on my end\",\n  \"rationale\": \"The user explicitly states that the condition has not changed, implying it remains in its previous state despite reports of resolution.\"\n}",
+      "request_latency_ms": 2566.052105999999,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 57,
+        "promptTokenCount": 272,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 272
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 329
+      },
+      "total_tokens": 329
+    },
+    {
+      "case_id": "CS-CORE-011",
+      "case_set": "core",
+      "category": "partial_resolution",
+      "evidence_span": "still happens occasionally",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "active",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 260,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 45,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"still happens occasionally\",\n  \"rationale\": \"The text explicitly states that the crash still occurs, indicating an active condition.\"\n}",
+      "request_latency_ms": 1529.3704239999997,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 45,
+        "promptTokenCount": 260,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 260
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 305
+      },
+      "total_tokens": 305
+    },
+    {
+      "case_id": "CS-CORE-012",
+      "case_set": "core",
+      "category": "partial_resolution",
+      "evidence_span": "a couple of edge cases remain",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 266,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "wrong",
+      "output_tokens": 49,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"a couple of edge cases remain\",\n  \"rationale\": \"The text explicitly states that edge cases remain, indicating the condition is still occurring.\"\n}",
+      "request_latency_ms": 1111.190864000001,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 49,
+        "promptTokenCount": 266,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 266
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 315
+      },
+      "total_tokens": 315
+    },
+    {
+      "case_id": "CS-CORE-013a",
+      "case_set": "core",
+      "category": "multiple_conditions",
+      "evidence_span": "The homepage loads fine now",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "resolved",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 257,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 53,
+      "predicted_label": "resolved",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"resolved\",\n  \"evidence_span\": \"The homepage loads fine now\",\n  \"rationale\": \"The text explicitly states that the homepage loads fine now, indicating the previous issue with the homepage is resolved.\"\n}",
+      "request_latency_ms": 1668.510912000002,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 53,
+        "promptTokenCount": 257,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 257
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 310
+      },
+      "total_tokens": 310
+    },
+    {
+      "case_id": "CS-CORE-013b",
+      "case_set": "core",
+      "category": "multiple_conditions",
+      "evidence_span": "the search feature is still broken",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "active",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 258,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 50,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"the search feature is still broken\",\n  \"rationale\": \"The text explicitly states that the search feature is still broken, indicating an ongoing condition.\"\n}",
+      "request_latency_ms": 1596.294266000001,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 50,
+        "promptTokenCount": 258,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 258
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 308
+      },
+      "total_tokens": 308
+    },
+    {
+      "case_id": "CS-CORE-014a",
+      "case_set": "core",
+      "category": "multiple_conditions",
+      "evidence_span": "We fixed invoicing",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "resolved",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 251,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 40,
+      "predicted_label": "resolved",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"resolved\",\n  \"evidence_span\": \"We fixed invoicing\",\n  \"rationale\": \"The text explicitly states that invoicing has been fixed.\"\n}",
+      "request_latency_ms": 1669.7859289999997,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 40,
+        "promptTokenCount": 251,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 251
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 291
+      },
+      "total_tokens": 291
+    },
+    {
+      "case_id": "CS-CORE-014b",
+      "case_set": "core",
+      "category": "multiple_conditions",
+      "evidence_span": "onboarding is still painful",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "active",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 253,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 49,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"onboarding is still painful\",\n  \"rationale\": \"The word 'still' indicates that the condition of onboarding being painful is currently ongoing.\"\n}",
+      "request_latency_ms": 1333.6139569999973,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 49,
+        "promptTokenCount": 253,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 253
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 302
+      },
+      "total_tokens": 302
+    },
+    {
+      "case_id": "CS-CORE-015",
+      "case_set": "core",
+      "category": "hypothetical",
+      "evidence_span": "If this bug isn't fixed soon",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 268,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 58,
+      "predicted_label": "unknown",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"unknown\",\n  \"evidence_span\": \"If this bug isn't fixed soon\",\n  \"rationale\": \"The condition is presented as a hypothetical scenario dependent on a future event, leaving the current state of the bug indeterminate.\"\n}",
+      "request_latency_ms": 1675.3300269999975,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 58,
+        "promptTokenCount": 268,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 268
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 326
+      },
+      "total_tokens": 326
+    },
+    {
+      "case_id": "CS-CORE-016",
+      "case_set": "core",
+      "category": "hypothetical",
+      "evidence_span": "Imagine if the onboarding flow were this confusing for new users.",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 262,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 54,
+      "predicted_label": "unknown",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"unknown\",\n  \"evidence_span\": \"Imagine if the onboarding flow were this confusing for new users.\",\n  \"rationale\": \"The statement is hypothetical and does not confirm the current state of the onboarding flow.\"\n}",
+      "request_latency_ms": 1289.5110279999997,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 54,
+        "promptTokenCount": 262,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 262
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 316
+      },
+      "total_tokens": 316
+    },
+    {
+      "case_id": "CS-CORE-017",
+      "case_set": "core",
+      "category": "questions",
+      "evidence_span": "Is the invoicing bug fixed yet?",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 252,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 55,
+      "predicted_label": "unknown",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"unknown\",\n  \"evidence_span\": \"Is the invoicing bug fixed yet?\",\n  \"rationale\": \"The text is an interrogative sentence asking about the status of the bug, which leaves the condition state indeterminate.\"\n}",
+      "request_latency_ms": 1533.3082100000013,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 55,
+        "promptTokenCount": 252,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 252
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 307
+      },
+      "total_tokens": 307
+    },
+    {
+      "case_id": "CS-CORE-018",
+      "case_set": "core",
+      "category": "questions",
+      "evidence_span": "Has anyone found a workaround for the export issue?",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 258,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 65,
+      "predicted_label": "unknown",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"unknown\",\n  \"evidence_span\": \"Has anyone found a workaround for the export issue?\",\n  \"rationale\": \"The text is an interrogative sentence asking about the status of a workaround, which does not confirm whether the export issue is currently active or resolved.\"\n}",
+      "request_latency_ms": 1739.5979409999995,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 65,
+        "promptTokenCount": 258,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 258
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 323
+      },
+      "total_tokens": 323
+    },
+    {
+      "case_id": "CS-CORE-019",
+      "case_set": "core",
+      "category": "hedging",
+      "evidence_span": "I think the issue might be resolved, not totally sure.",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 262,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 54,
+      "predicted_label": "unknown",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"unknown\",\n  \"evidence_span\": \"I think the issue might be resolved, not totally sure.\",\n  \"rationale\": \"The speaker expresses uncertainty about whether the issue is resolved, making the state indeterminate.\"\n}",
+      "request_latency_ms": 1415.0914389999975,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 54,
+        "promptTokenCount": 262,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 262
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 316
+      },
+      "total_tokens": 316
+    },
+    {
+      "case_id": "CS-CORE-020",
+      "case_set": "core",
+      "category": "hedging",
+      "evidence_span": "It seemed to be working fine when I checked earlier.",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 260,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 63,
+      "predicted_label": "unknown",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"unknown\",\n  \"evidence_span\": \"It seemed to be working fine when I checked earlier.\",\n  \"rationale\": \"The statement describes a past observation ('seemed to be working fine') and does not explicitly confirm the current state of the condition.\"\n}",
+      "request_latency_ms": 1285.1924099999933,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 63,
+        "promptTokenCount": 260,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 260
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 323
+      },
+      "total_tokens": 323
+    },
+    {
+      "case_id": "CS-CORE-021",
+      "case_set": "core",
+      "category": "ambiguous_wording",
+      "evidence_span": "The situation with onboarding has changed.",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 252,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 54,
+      "predicted_label": "unknown",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"unknown\",\n  \"evidence_span\": \"The situation with onboarding has changed.\",\n  \"rationale\": \"The statement indicates a change occurred but does not specify whether the condition of onboarding is currently active or resolved.\"\n}",
+      "request_latency_ms": 1474.949741000003,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 54,
+        "promptTokenCount": 252,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 252
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 306
+      },
+      "total_tokens": 306
+    },
+    {
+      "case_id": "CS-CORE-022",
+      "case_set": "core",
+      "category": "ambiguous_wording",
+      "evidence_span": "Things are different now with the billing system.",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 256,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 67,
+      "predicted_label": "unknown",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"unknown\",\n  \"evidence_span\": \"Things are different now with the billing system.\",\n  \"rationale\": \"The statement indicates a change in the billing system but does not explicitly state whether a specific condition (such as a malfunction or error) is currently active or resolved.\"\n}",
+      "request_latency_ms": 1468.8901990000004,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 67,
+        "promptTokenCount": 256,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 256
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 323
+      },
+      "total_tokens": 323
+    },
+    {
+      "case_id": "CS-CORE-023",
+      "case_set": "core",
+      "category": "no_condition",
+      "evidence_span": "planning to redesign",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 260,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 48,
+      "predicted_label": "unknown",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"unknown\",\n  \"evidence_span\": \"planning to redesign\",\n  \"rationale\": \"The statement describes a future plan, which makes the current state of the redesign indeterminate.\"\n}",
+      "request_latency_ms": 1773.9071709999976,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 48,
+        "promptTokenCount": 260,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 260
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 308
+      },
+      "total_tokens": 308
+    },
+    {
+      "case_id": "CS-CORE-024",
+      "case_set": "core",
+      "category": "no_condition",
+      "evidence_span": "Our team grew by three engineers this month.",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 256,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 53,
+      "predicted_label": "unknown",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"unknown\",\n  \"evidence_span\": \"Our team grew by three engineers this month.\",\n  \"rationale\": \"The text describes a change in team size but does not mention a condition or health state.\"\n}",
+      "request_latency_ms": 1418.324417000001,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 53,
+        "promptTokenCount": 256,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 256
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 309
+      },
+      "total_tokens": 309
+    },
+    {
+      "case_id": "CS-CORE-025",
+      "case_set": "core",
+      "category": "informal_language",
+      "evidence_span": "is still a mess",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "active",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 256,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 52,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"is still a mess\",\n  \"rationale\": \"The phrase 'is still a mess' explicitly indicates that the condition of the invoicing being a mess persists.\"\n}",
+      "request_latency_ms": 1505.7536489999989,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 52,
+        "promptTokenCount": 256,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 256
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 308
+      },
+      "total_tokens": 308
+    },
+    {
+      "case_id": "CS-CORE-026",
+      "case_set": "core",
+      "category": "informal_language",
+      "evidence_span": "finally got this sorted, invoicing works now!!",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "resolved",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 256,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 52,
+      "predicted_label": "resolved",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"resolved\",\n  \"evidence_span\": \"finally got this sorted, invoicing works now!!\",\n  \"rationale\": \"The text explicitly states that the invoicing issue has been sorted and is now working.\"\n}",
+      "request_latency_ms": 1629.0729099999978,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 52,
+        "promptTokenCount": 256,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 256
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 308
+      },
+      "total_tokens": 308
+    },
+    {
+      "case_id": "CS-CORE-027",
+      "case_set": "core",
+      "category": "misleading_keywords",
+      "evidence_span": "We signed a fixed-term contract with the new vendor.",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 262,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 64,
+      "predicted_label": "unknown",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"unknown\",\n  \"evidence_span\": \"We signed a fixed-term contract with the new vendor.\",\n  \"rationale\": \"The text describes the action of signing a contract but does not state the current condition or status of the contract or the vendor relationship.\"\n}",
+      "request_latency_ms": 1705.1989640000045,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 64,
+        "promptTokenCount": 262,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 262
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 326
+      },
+      "total_tokens": 326
+    },
+    {
+      "case_id": "CS-CORE-028",
+      "case_set": "core",
+      "category": "misleading_keywords",
+      "evidence_span": "still within target",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 260,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "wrong",
+      "output_tokens": 50,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"still within target\",\n  \"rationale\": \"The word 'still' indicates that the condition of the churn rate being within target is currently ongoing.\"\n}",
+      "request_latency_ms": 1068.9386199999972,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 50,
+        "promptTokenCount": 260,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 260
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 310
+      },
+      "total_tokens": 310
+    },
+    {
+      "case_id": "CS-CORE-N1",
+      "case_set": "core",
+      "category": "seed",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "resolved",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "outcome": "error",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 521.7972959999954,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    },
+    {
+      "case_id": "CS-CORE-N2",
+      "case_set": "core",
+      "category": "seed",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "active",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "outcome": "error",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 811.7214580000009,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    },
+    {
+      "case_id": "CS-ADV-001",
+      "case_set": "adversarial",
+      "category": "conflicting_clauses",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "outcome": "error",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 490.81862199999904,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    },
+    {
+      "case_id": "CS-ADV-002",
+      "case_set": "adversarial",
+      "category": "negation",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "resolved",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "outcome": "error",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 535.2572150000015,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    },
+    {
+      "case_id": "CS-ADV-003",
+      "case_set": "adversarial",
+      "category": "hedging",
+      "evidence_span": "it broke again the next day",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "active",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 266,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 49,
+      "predicted_label": "active",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"active\",\n  \"evidence_span\": \"it broke again the next day\",\n  \"rationale\": \"The text explicitly states that the condition broke again, indicating it is currently active.\"\n}",
+      "request_latency_ms": 1599.991107000001,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 49,
+        "promptTokenCount": 266,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 266
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 315
+      },
+      "total_tokens": 315
+    },
+    {
+      "case_id": "CS-ADV-005",
+      "case_set": "adversarial",
+      "category": "misleading_keywords",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "outcome": "error",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 813.4278779999988,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    },
+    {
+      "case_id": "CS-ADV-006",
+      "case_set": "adversarial",
+      "category": "partial_resolution",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "outcome": "error",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 506.32643300000524,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    },
+    {
+      "case_id": "CS-ADV-007",
+      "case_set": "adversarial",
+      "category": "misleading_keywords",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "outcome": "error",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 510.0757740000006,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    },
+    {
+      "case_id": "CS-ADV-008",
+      "case_set": "adversarial",
+      "category": "misleading_keywords",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "outcome": "error",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 481.5019300000003,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    },
+    {
+      "case_id": "CS-ADV-009",
+      "case_set": "adversarial",
+      "category": "misleading_keywords",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "outcome": "error",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 499.1830409999949,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    },
+    {
+      "case_id": "CS-ADV-010",
+      "case_set": "adversarial",
+      "category": "ambiguous_wording",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "outcome": "error",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 496.766209999997,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    },
+    {
+      "case_id": "CS-ADV-011",
+      "case_set": "adversarial",
+      "category": "hedging",
+      "evidence_span": "Maybe it's resolved now, hard to tell without more testing.",
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "unknown",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": 266,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": null,
+      "outcome": "correct",
+      "output_tokens": 61,
+      "predicted_label": "unknown",
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": "{\n  \"label\": \"unknown\",\n  \"evidence_span\": \"Maybe it's resolved now, hard to tell without more testing.\",\n  \"rationale\": \"The text explicitly states it is hard to tell if the condition is resolved, making the current state indeterminate.\"\n}",
+      "request_latency_ms": 1459.9005849999999,
+      "retry_count": 0,
+      "token_usage": {
+        "candidatesTokenCount": 61,
+        "promptTokenCount": 266,
+        "promptTokensDetails": [
+          {
+            "modality": "TEXT",
+            "tokenCount": 266
+          }
+        ],
+        "serviceTier": "standard",
+        "totalTokenCount": 327
+      },
+      "total_tokens": 327
+    },
+    {
+      "case_id": "CS-ADV-012",
+      "case_set": "adversarial",
+      "category": "recurring_conditions",
+      "evidence_span": null,
+      "execution_parameters": {
+        "api_version": "v1beta",
+        "generation_config": {
+          "maxOutputTokens": 256,
+          "responseMimeType": "application/json",
+          "temperature": 0.0,
+          "topP": 1.0
+        },
+        "model": "gemini-3.1-flash-lite",
+        "provider": "Google Gemini Developer API",
+        "request_timeout_seconds": 30.0,
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_span": {
+              "description": "Exact contiguous citation from TARGET_SPAN, or null only for abstention.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "NIC-15 condition-state label, or null for abstention.",
+              "enum": [
+                "active",
+                "resolved",
+                "unknown",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rationale": {
+              "description": "Concise explanation grounded only in evidence_span.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "evidence_span",
+            "rationale"
+          ],
+          "type": "object"
+        },
+        "transport": "direct_https"
+      },
+      "expected_label": "active",
+      "generation_configuration": {
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "temperature": 0.0,
+        "topP": 1.0
+      },
+      "input_tokens": null,
+      "model": "gemini-3.1-flash-lite",
+      "model_identity": "Google Gemini Developer API/gemini-3.1-flash-lite",
+      "operational_error": "Gemini API HTTP 429: Too Many Requests",
+      "outcome": "error",
+      "output_tokens": null,
+      "predicted_label": null,
+      "prompt_version": "nic-19-gemini-2.5-flash-lite-v1",
+      "provider": "Google Gemini Developer API",
+      "rationale_raw_structured_output": null,
+      "request_latency_ms": 503.77484500000236,
+      "retry_count": 0,
+      "token_usage": null,
+      "total_tokens": null
+    }
+  ],
+  "token_totals": {
+    "input_tokens": 7803,
+    "output_tokens": 1605,
+    "total_tokens": 9408
+  }
+}
