@@ -246,10 +246,10 @@ rather than schema requirements.
 
 ## Documentation and architecture reconciliation
 
-- `docs/HANDOFF.md` is stale: it still calls NIC-19 active and names
-  `6e1c684` as authoritative main, while the accepted NIC-19 merge is
-  `d865ae8`. This review records the discrepancy but does not rewrite the
-  handoff outside NIC-20's review scope.
+- `docs/HANDOFF.md` was reconciled in PR #14 to record the accepted NIC-19
+  merge at `d865ae8` and the bounded NIC-20-to-NIC-5 handoff. This review
+  remains the canonical evidence record; HANDOFF remains the concise
+  continuation/status document.
 - RFC-002 is still marked **Proposed** and states that Investigation consumes
   `Problem` plus connected `Knowledge`, never raw Signal text. A future
   `InterpretedObservation` must therefore be reasoned as Processing/Knowledge
