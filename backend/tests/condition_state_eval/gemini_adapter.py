@@ -22,10 +22,10 @@ from tests.condition_state_eval.dataset import ConditionState
 from tests.condition_state_eval.result import InterpreterCase, InterpreterResult, now_iso
 
 INTERPRETER_ID = "gemini-condition-state-shadow"
-INTERPRETER_VERSION = "2.0.0"
-PROMPT_VERSION = "nic-19-gemini-2.5-flash-lite-accepted-v1"
+INTERPRETER_VERSION = "3.0.0"
+PROMPT_VERSION = "nic-19-gemini-3.1-flash-lite-accepted-v1"
 PROVIDER = "Google Gemini Developer API"
-MODEL_ID = "gemini-2.5-flash-lite"
+MODEL_ID = "gemini-3.1-flash-lite"
 API_VERSION = "v1beta"
 REQUEST_TIMEOUT_SECONDS = 30.0
 ENDPOINT = (
