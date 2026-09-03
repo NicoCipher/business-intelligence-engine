@@ -1,4 +1,4 @@
-# BIA Project Handoff (updated through `6e1c684`: NIC-18 frozen rules baseline on top of NIC-13 canonical persistence, collectors expansion, and NIC-14 correlation safety)
+# BIA Project Handoff (updated through `d865ae8f8f7ccffea78fcb7c22021876d5ff0118`: merged NIC-19 accepted experiment on top of NIC-18, NIC-13, and NIC-14)
 
 Supersedes the schema-v7-era handoff. Full architecture detail now lives
 in `docs/ARCHITECTURE.md` (current state) and `docs/SCHEMA.md` (full
@@ -310,6 +310,9 @@ against real hosted CI logs, not a local run.
 **NIC-17 & NIC-18 Condition State Semantics:**
 - **NIC-17 Evaluation Corpus:** 44-case Condition State evaluation dataset (`backend/tests/condition_state_eval/dataset.py`) using the NIC-15 EvidenceCase contract (32 Core, 12 Adversarial; 41 scored, 3 diagnostic) with literal target spans.
 - **NIC-18 Frozen Rules Baseline:** Deterministic `rules-v1` reference baseline interpreter (`backend/tests/condition_state_eval/rules_interpreter.py`), metric evaluation harness (`evaluate.py`), and runner (`run_rules_baseline.py`), freezing deterministic reference performance prior to model evaluation.
+
+**NIC-19 Condition State External-Model Experiment:**
+- Completed and merged to `main` at `d865ae8f8f7ccffea78fcb7c22021876d5ff0118`. The accepted Gemini shadow-evaluation artifacts remain experimental evidence, not a production interpreter selection.
 
 ## Part 1: Current System State
 
@@ -907,11 +910,13 @@ six-layer model this list still describes.
     both Change Detection milestones — building it requires its own
     design proposal, not an extension of the read-side's `GET /changes`
     contract.
-23. **Semantic evaluation progression (active track):**
+23. **Semantic evaluation progression:**
     The established semantic sequence is:
     `NIC-19 → NIC-20 → NIC-5 → NIC-6 → NIC-7 → NIC-8 → NIC-9`.
-    The active task is **NIC-19: External Model Shadow Experiment**, running against the frozen NIC-17 dataset
-    and comparing against the NIC-18 rules-v1 baseline.
+    NIC-19 is complete. NIC-20's evidence review is complete in PR #14 and recommends
+    **GO for NIC-5 permanent `InterpretedObservation` design only**. NIC-5 is next;
+    no production interpreter has been selected. The unresolved evidence questions
+    identified by the review remain open and must not be pre-decided in the design.
 
 **Frontend note (from the RFC review, worth restating):** the
 originally-planned "backend done → build Next.js frontend" ordering was
@@ -992,14 +997,11 @@ anything, confirm no stale token is still live at
 https://github.com/settings/tokens**, and treat any newly-provided token
 the same way — use once, then revoke.
 
-**Current state:** authoritative `main` is `6e1c684` (NIC-18 frozen rules baseline). Working tree is clean; local `main` and `origin/main` are in sync; nothing is pending push. The backend suite passes in the project environment. Two Google Trends exception-mapping tests are conditionally skipped when pytrends is unavailable outside the project environment. Frontend: `npm run lint`/`typecheck` clean, `npm test` (Vitest) passing, production `npm run build` succeeds, `npm run check:performance` within budget. Hosted CI collection workflow is operational on canonical snapshot continuity (verified via manual run 33685932034). The next scheduled collection run should exercise steady-state restoration from bia-database-canonical; this is observational follow-up and does not block NIC-13 completion.
+**Current state:** authoritative `main` is `d865ae8f8f7ccffea78fcb7c22021876d5ff0118` (merged NIC-19 accepted experiment). NIC-20's documentation-only evidence review is pending in PR #14; it does not change production semantics. The backend suite passes in the project environment. Two Google Trends exception-mapping tests are conditionally skipped when pytrends is unavailable outside the project environment. Frontend: `npm run lint`/`typecheck` clean, `npm test` (Vitest) passing, production `npm run build` succeeds, `npm run check:performance` within budget. Hosted CI collection workflow is operational on canonical snapshot continuity (verified via manual run 33685932034). The next scheduled collection run should exercise steady-state restoration from bia-database-canonical; this is observational follow-up and does not block NIC-13 completion.
 
 **Open items, current as of this revision (see Part 4 for full detail on each):**
 
-- **NIC-19 External Model Shadow Experiment (active semantic task):**
-  Evaluating LLM condition state extraction against the frozen NIC-17 dataset and comparing metrics against the frozen NIC-18 rules-v1 baseline. The planned semantic milestone sequence is:
-  `NIC-19 → NIC-20 → NIC-5 → NIC-6 → NIC-7 → NIC-8 → NIC-9`.
-  The provider model identifier was corrected operationally from `gemini-2.5-flash-lite` to `gemini-3.1-flash-lite` after the former returned HTTP 404 and the authenticated models list confirmed the latter supports `generateContent`; this is provider-availability compatibility only, not semantic tuning.
+- **NIC-20 review / NIC-5 handoff:** the [canonical NIC-20 evidence review](experiments/nic-20/CONDITION_STATE_EVIDENCE_REVIEW.md) is complete in PR #14 and recommends GO for permanent `InterpretedObservation` **design only**. NIC-5 is next, but future work must first read the authoritative NIC-5 issue in Linear. No production interpreter has been selected; unresolved questions about attribution and question diagnostics, abstention, condition segmentation, temporal/recurrence normalization, cross-source contradiction/source authority, and absent holdout evidence remain open.
 - **Alert delivery and watchlists/alert_rules consumption** (item 22a) — still undesigned and unimplemented, schema-only, no delivery channel by design.
 - **A dedicated `/changes` Console browsing page** (item 21) — backend contract exists; full dedicated browse/filter page remains open.
 - **`explainer/*`'s narrative layer** (item 17's remaining half) and **RFC-001 implementation** (item 13) — unchanged.
