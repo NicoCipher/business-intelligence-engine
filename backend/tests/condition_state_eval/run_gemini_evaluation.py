@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,24 @@ from tests.condition_state_eval.gemini_adapter import (  # noqa: E402
 from tests.condition_state_eval.result import InterpreterCase, InterpreterResult  # noqa: E402
 
 
+RATE_LIMIT_PROTOCOL = {
+    "version": "nic-19-fixed-rate-limit-v1",
+    "serialized_requests": True,
+    "inter_request_delay_seconds": 8.0,
+    "retryable_http_statuses": [429],
+    "max_attempts_per_case": 4,
+    "fallback_retry_delay_seconds": 60.0,
+}
+
+
+def _retry_delay(error: str | None) -> float | None:
+    """Use only a documented rate-limit response for a retry decision."""
+    if error is None or not error.startswith("Gemini API HTTP 429:"):
+        return None
+    match = re.search(r"retry_after_seconds=([0-9]+(?:\.[0-9]+)?)", error)
+    return float(match.group(1)) if match else RATE_LIMIT_PROTOCOL["fallback_retry_delay_seconds"]
+
+
 def _label_value(label: ConditionState | None) -> str | None:
     return label.value if label is not None else None
 
@@ -42,7 +62,12 @@ def _token_count(result: InterpreterResult, field: str) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def _result_record(case: EvidenceCase, result: InterpreterResult) -> dict[str, Any]:
+def _result_record(
+    case: EvidenceCase,
+    result: InterpreterResult,
+    *,
+    attempts: list[dict[str, Any]],
+) -> dict[str, Any]:
     return {
         "case_id": case.case_id,
         "category": case.category,
@@ -63,7 +88,8 @@ def _result_record(case: EvidenceCase, result: InterpreterResult) -> dict[str, A
         "prompt_version": result.prompt_version,
         "generation_configuration": result.execution_parameters["generation_config"],
         "execution_parameters": result.execution_parameters,
-        "retry_count": 0,
+        "retry_count": len(attempts) - 1,
+        "operational_attempts": attempts,
     }
 
 
@@ -117,22 +143,55 @@ def _metrics(scored_records: list[dict[str, Any]], scored_outcomes: list[Any]) -
     }
 
 
-def run(run_id: str) -> dict[str, Any]:
-    scored_cases = [case for case in CASES if case.scored]
-    diagnostic_cases = [case for case in CASES if not case.scored]
+def _interpret_with_protocol(
+    case: EvidenceCase,
+    *,
+    interpreter: Any,
+    sleep: Any,
+) -> tuple[InterpreterResult, list[dict[str, Any]]]:
+    """Apply fixed pacing and bounded provider-directed 429 retries."""
+    attempts: list[dict[str, Any]] = []
+    for attempt_number in range(1, RATE_LIMIT_PROTOCOL["max_attempts_per_case"] + 1):
+        result = interpreter(InterpreterCase(case.case_id, case.source_text, case.target_span))
+        delay = _retry_delay(result.error)
+        attempts.append(
+            {
+                "attempt_number": attempt_number,
+                "operational_error": result.error,
+                "request_latency_ms": result.latency_ms,
+                "retry_delay_seconds": delay if delay is not None and attempt_number < RATE_LIMIT_PROTOCOL["max_attempts_per_case"] else None,
+            }
+        )
+        if delay is None or attempt_number == RATE_LIMIT_PROTOCOL["max_attempts_per_case"]:
+            return result, attempts
+        sleep(delay)
+    raise AssertionError("bounded retry loop did not return")
+
+
+def run(
+    run_id: str,
+    *,
+    cases: list[EvidenceCase] = CASES,
+    interpreter: Any = interpret,
+    sleep: Any = time.sleep,
+) -> dict[str, Any]:
+    scored_cases = [case for case in cases if case.scored]
+    diagnostic_cases = [case for case in cases if not case.scored]
     scored_records: list[dict[str, Any]] = []
     scored_outcomes = []
     diagnostic_records: list[dict[str, Any]] = []
 
-    for case in scored_cases:
-        result = interpret(InterpreterCase(case.case_id, case.source_text, case.target_span))
-        record = _result_record(case, result)
-        scored_records.append(record)
-        scored_outcomes.append(score(case, result))
-
-    for case in diagnostic_cases:
-        result = interpret(InterpreterCase(case.case_id, case.source_text, case.target_span))
-        diagnostic_records.append(_result_record(case, result))
+    all_cases = scored_cases + diagnostic_cases
+    for index, case in enumerate(all_cases):
+        result, attempts = _interpret_with_protocol(case, interpreter=interpreter, sleep=sleep)
+        record = _result_record(case, result, attempts=attempts)
+        if case.scored:
+            scored_records.append(record)
+            scored_outcomes.append(score(case, result))
+        else:
+            diagnostic_records.append(record)
+        if index < len(all_cases) - 1:
+            sleep(RATE_LIMIT_PROTOCOL["inter_request_delay_seconds"])
 
     all_records = scored_records + diagnostic_records
     return {
@@ -145,7 +204,8 @@ def run(run_id: str) -> dict[str, Any]:
         "prompt_version": PROMPT_VERSION,
         "generation_configuration": GENERATION_CONFIG,
         "response_schema": RESPONSE_SCHEMA,
-        "retry_policy": "none",
+        "rate_limit_protocol": RATE_LIMIT_PROTOCOL,
+        "complete_semantic_evaluation": all(record["operational_error"] is None for record in all_records),
         "metrics": _metrics(scored_records, scored_outcomes),
         "latency_statistics_ms": _latency_statistics(all_records),
         "token_totals": _token_totals(all_records),

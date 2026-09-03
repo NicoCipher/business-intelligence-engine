@@ -14,16 +14,18 @@ import time
 import urllib.error
 import urllib.request
 from copy import deepcopy
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Callable, Mapping
 
 from tests.condition_state_eval.dataset import ConditionState
 from tests.condition_state_eval.result import InterpreterCase, InterpreterResult, now_iso
 
 INTERPRETER_ID = "gemini-condition-state-shadow"
-INTERPRETER_VERSION = "1.0.0"
-PROMPT_VERSION = "nic-19-gemini-2.5-flash-lite-v1"
+INTERPRETER_VERSION = "2.0.0"
+PROMPT_VERSION = "nic-19-gemini-2.5-flash-lite-accepted-v1"
 PROVIDER = "Google Gemini Developer API"
-MODEL_ID = "gemini-3.1-flash-lite"
+MODEL_ID = "gemini-2.5-flash-lite"
 API_VERSION = "v1beta"
 REQUEST_TIMEOUT_SECONDS = 30.0
 ENDPOINT = (
@@ -89,6 +91,26 @@ class GeminiRequestError(RuntimeError):
     """A transport or API error, deliberately distinct from semantic unknown."""
 
 
+def _retry_after_seconds(headers: Mapping[str, str] | None) -> float | None:
+    """Return the server-specified retry delay, when it is safely parseable."""
+    if headers is None:
+        return None
+    value = headers.get("Retry-After")
+    if value is None:
+        return None
+    try:
+        delay = float(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
+    return max(delay, 0.0)
+
+
 def _case_prompt(case: InterpreterCase) -> str:
     return (
         "SOURCE_TEXT:\n"
@@ -117,7 +139,11 @@ def _post_json(url: str, body: bytes, headers: Mapping[str, str], timeout: float
     except urllib.error.HTTPError as exc:
         # Never include response/request bodies here: an error must not expose a
         # credential or become an accidental raw-output persistence channel.
-        raise GeminiRequestError(f"Gemini API HTTP {exc.code}: {exc.reason}") from exc
+        message = f"Gemini API HTTP {exc.code}: {exc.reason}"
+        retry_after = _retry_after_seconds(exc.headers)
+        if retry_after is not None:
+            message += f"; retry_after_seconds={retry_after}"
+        raise GeminiRequestError(message) from exc
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise GeminiRequestError(f"Gemini API request failed: {exc.__class__.__name__}") from exc
 
