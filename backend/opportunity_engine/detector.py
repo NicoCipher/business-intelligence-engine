@@ -292,9 +292,8 @@ class PatternDetector:
                     signals=cluster,
                     reason="no_originating_business_signal",
                     summary=(
-                        "This cluster contains no source eligible to originate a new "
-                        "Opportunity (currently: Greenhouse job postings are excluded) "
-                        "— temporary containment pending NIC-5."
+                        "This cluster contains no evidence from a source currently permitted "
+                        "to originate a new Opportunity."
                     ),
                 ))
                 continue
