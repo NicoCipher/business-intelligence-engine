@@ -286,6 +286,19 @@ class PatternDetector:
         week_key = f"{now.isocalendar().year}-W{now.isocalendar().week:02d}"
 
         for cluster in clusters:
+            originating = self._originating_signals(cluster)
+            if not originating:
+                rejected.append(RejectedCluster(
+                    signals=cluster,
+                    reason="no_originating_business_signal",
+                    summary=(
+                        "This cluster contains no source eligible to originate a new "
+                        "Opportunity (currently: Greenhouse job postings are excluded) "
+                        "— temporary containment pending NIC-5."
+                    ),
+                ))
+                continue
+
             if len(cluster) < MIN_CLUSTER_SIZE:
                 rejected.append(RejectedCluster(
                     signals=cluster,
@@ -310,8 +323,7 @@ class PatternDetector:
                 ))
                 continue
 
-            originating = self._originating_signals(cluster)
-            has_originating_signal = bool(originating) and self._has_business_signal(originating)
+            has_originating_signal = self._has_business_signal(originating)
 
             if not has_originating_signal:
                 if len(originating) == len(cluster):

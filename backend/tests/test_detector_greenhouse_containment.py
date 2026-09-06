@@ -147,6 +147,25 @@ class TestNonGreenhouseBehaviorUnchanged:
 
 
 class TestGreenhouseReportingContainment:
+    @pytest.mark.parametrize("count", [1, 3, 5])
+    def test_zero_eligible_signals_precede_size_and_source_rejections(
+        self, detector, greenhouse_job_cluster, count,
+    ):
+        cluster = greenhouse_job_cluster[:count]
+        result = detector.diagnose(cluster)
+
+        assert result.accepted == []
+        assert len(result.rejected) == 1
+        assert result.rejected[0].reason == "no_originating_business_signal"
+        assert result.rejected[0].reason not in {"too_small", "single_source"}
+        assert detector.detect(cluster) == []
+
+        previous = [{
+            "title": cluster[0].title,
+            "recurrence": {"weeks_seen": 2},
+        }]
+        assert build_watch_list(result.rejected, previous_watch_list=previous) == []
+
     @pytest.mark.parametrize("include_nonqualifying_signal", [False, True])
     @pytest.mark.parametrize("previous_weeks", [0, 1, 2, 5])
     def test_rejected_cluster_never_enters_watch_list(
