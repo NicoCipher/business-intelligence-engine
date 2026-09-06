@@ -17,6 +17,7 @@ _REJECTION_LABELS = {
     "too_small": "insufficient mention volume to qualify as a pattern",
     "single_source": "corroboration from only one source, not yet cross-validated",
     "below_threshold": "evidence quality fell short of the investment-grade bar once scored",
+    "no_originating_business_signal": "no qualifying originating business evidence",
 }
 
 
@@ -131,7 +132,13 @@ def build_watch_list(
     domain_config = DomainRegistry.get_or_default(domain)
     domain_keywords = domain_config.keywords if domain_config else None
 
-    business_candidates = [r for r in rejected if _is_business_signal(r, domain_keywords)]
+    # Preserve the detector's origination rejection before re-reading raw text
+    # or considering recurrence; job-posting vocabulary must not reverse it.
+    business_candidates = [
+        r for r in rejected
+        if r.reason != "no_originating_business_signal"
+        and _is_business_signal(r, domain_keywords)
+    ]
     if not business_candidates:
         return []
 
