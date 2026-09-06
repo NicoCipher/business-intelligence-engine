@@ -158,6 +158,10 @@ class TestGreenhouseReportingContainment:
         assert len(result.rejected) == 1
         assert result.rejected[0].reason == "no_originating_business_signal"
         assert result.rejected[0].reason not in {"too_small", "single_source"}
+        assert result.rejected[0].summary == (
+            "This cluster contains no evidence from a source currently permitted "
+            "to originate a new Opportunity."
+        )
         assert detector.detect(cluster) == []
 
         previous = [{
