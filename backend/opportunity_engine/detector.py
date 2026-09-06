@@ -64,6 +64,19 @@ from config import MIN_CLUSTER_SIZE, MIN_COMPOSITE_TO_PERSIST
 logger = logging.getLogger(__name__)
 
 
+# TEMPORARY CONTAINMENT (not permanent architecture): Greenhouse job postings
+# are routinely dense in the exact vocabulary _has_business_signal() treats
+# as a demand/willingness-to-pay proxy ("looking for" a hire, "enterprise",
+# "b2b", salary figures), which let job-only clusters originate Opportunities
+# with no real customer evidence — a production false positive, not a
+# hypothetical one. Until then, "greenhouse_jobs" cannot by itself satisfy
+# the origination gate below. OpportunityScorer still scores the full
+# cluster unchanged, so Greenhouse text can still influence a qualifying
+# cluster's score — that remains unresolved. Permanent interpretation of
+# what evidence types can prove is tracked separately under NIC-5.
+_ORIGINATION_EXCLUDED_SOURCES = frozenset(["greenhouse_jobs"])
+
+
 # ── Diagnostics ───────────────────────────────────────────────────────────
 
 @dataclass
@@ -76,7 +89,8 @@ class RejectedCluster:
     opportunity_engine/explainer.py.
     """
     signals: list[Signal]
-    reason: str            # "too_small" | "single_source" | "below_threshold"
+    reason: str            # "too_small" | "single_source" | "no_business_signal" |
+                            # "no_originating_business_signal" | "below_threshold"
     summary: str            # one human-readable sentence explaining the rejection
     scores: OpportunityScores | None = None   # populated only if scoring ran
 
@@ -296,16 +310,34 @@ class PatternDetector:
                 ))
                 continue
 
-            if not self._has_business_signal(cluster):
-                rejected.append(RejectedCluster(
-                    signals=cluster,
-                    reason="no_business_signal",
-                    summary=(
-                        "No demand-seeking, complaint, or willingness-to-pay language "
-                        "found anywhere in this cluster — reads as news or general "
-                        "discussion rather than evidence of an unmet need."
-                    ),
-                ))
+            originating = self._originating_signals(cluster)
+            has_originating_signal = bool(originating) and self._has_business_signal(originating)
+
+            if not has_originating_signal:
+                if len(originating) == len(cluster):
+                    # No excluded-source signal is present — identical to
+                    # the pre-existing rejection.
+                    rejected.append(RejectedCluster(
+                        signals=cluster,
+                        reason="no_business_signal",
+                        summary=(
+                            "No demand-seeking, complaint, or willingness-to-pay language "
+                            "found anywhere in this cluster — reads as news or general "
+                            "discussion rather than evidence of an unmet need."
+                        ),
+                    ))
+                else:
+                    rejected.append(RejectedCluster(
+                        signals=cluster,
+                        reason="no_originating_business_signal",
+                        summary=(
+                            "This cluster's only qualifying-looking evidence comes from a "
+                            "source excluded from originating a new Opportunity (currently: "
+                            "Greenhouse job postings) — temporary containment pending NIC-5. "
+                            "It may still corroborate an Opportunity other evidence "
+                            "qualifies, but cannot originate one alone."
+                        ),
+                    ))
                 continue
 
             scores = self._scorer.score(cluster)
@@ -530,6 +562,21 @@ class PatternDetector:
         vocabulary = keywords.include | keywords.boost
         return any(kw in blob for kw in vocabulary)
 
+    def _originating_signals(self, cluster: list[Signal]) -> list[Signal]:
+        """The subset of a cluster allowed to originate a new Opportunity
+        (see _ORIGINATION_EXCLUDED_SOURCES). Everything else in the
+        cluster is unaffected by this filter."""
+        return [s for s in cluster if s.source not in _ORIGINATION_EXCLUDED_SOURCES]
+
+    def _has_originating_business_signal(self, cluster: list[Signal]) -> bool:
+        """Origination gate (temporary containment, see
+        _ORIGINATION_EXCLUDED_SOURCES): _has_business_signal(), evaluated
+        only against non-excluded-source signals. Equivalent to
+        _has_business_signal(cluster) when no excluded-source signal is
+        present."""
+        originating = self._originating_signals(cluster)
+        return bool(originating) and self._has_business_signal(originating)
+
     def _evaluate_cluster(self, cluster: list[Signal], domain: str) -> Opportunity | None:
         """
         Evaluate one cluster and produce an Opportunity if it qualifies.
@@ -539,9 +586,11 @@ class PatternDetector:
           2. Minimum source diversity (at least 2 distinct sources preferred;
              single-source clusters allowed if size ≥ 5 — high frequency alone
              is a valid signal)
-          3. Business-signal presence (_has_business_signal) — rejects pure
-             news/announcement clusters regardless of how well they'd
-             otherwise score
+          3. Business-signal origination presence (_has_originating_business_signal)
+             — rejects pure news/announcement clusters, and rejects clusters
+             that only qualify because of Greenhouse job-posting text
+             (temporary containment, see _ORIGINATION_EXCLUDED_SOURCES). The
+             full cluster still goes on to scoring below unchanged.
           4. Minimum composite score (config.MIN_COMPOSITE_TO_PERSIST)
 
         Returns None if the cluster doesn't qualify.
@@ -555,7 +604,7 @@ class PatternDetector:
         if len(sources) == 1 and len(cluster) < 5:
             return None
 
-        if not self._has_business_signal(cluster):
+        if not self._has_originating_business_signal(cluster):
             return None
 
         scores = self._scorer.score(cluster)
