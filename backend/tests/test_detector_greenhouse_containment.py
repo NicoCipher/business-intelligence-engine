@@ -13,6 +13,7 @@ Run with:
 import pytest
 
 from opportunity_engine.detector import PatternDetector
+from opportunity_engine.explainer import build_watch_list, explain_zero_opportunities
 
 
 # Near-duplicate Greenhouse job-posting template reused across five
@@ -143,3 +144,59 @@ class TestNonGreenhouseBehaviorUnchanged:
         diagnosed = detector.diagnose(demand_signals, domain="business").accepted
         assert len(detected) == len(diagnosed)
         assert [o.title for o in detected] == [o.title for o in diagnosed]
+
+
+class TestGreenhouseReportingContainment:
+    @pytest.mark.parametrize("include_nonqualifying_signal", [False, True])
+    @pytest.mark.parametrize("previous_weeks", [0, 1, 2, 5])
+    def test_rejected_cluster_never_enters_watch_list(
+        self, detector, greenhouse_job_cluster, make_signal,
+        include_nonqualifying_signal, previous_weeks,
+    ):
+        cluster = list(greenhouse_job_cluster)
+        if include_nonqualifying_signal:
+            cluster.append(make_signal(
+                title="Acme Corp clients integrate commercial product features",
+                content=_NO_EVIDENCE_CONTENT,
+                source="hn",
+            ))
+        result = detector.diagnose(cluster)
+        assert result.accepted == []
+        assert len(result.rejected) == 1
+        rejected = result.rejected[0]
+        assert rejected.reason == "no_originating_business_signal"
+        assert {s.id for s in rejected.signals} == {s.id for s in cluster}
+        previous = [
+            {"title": s.title, "recurrence": {"weeks_seen": previous_weeks}}
+            for s in cluster
+        ] if previous_weeks else []
+
+        assert build_watch_list(result.rejected, previous_watch_list=previous) == []
+        explanation = explain_zero_opportunities(
+            result.rejected, total_signals=len(cluster), previous_watch_list=previous,
+        )
+        assert explanation["candidates"] == []
+        assert "no qualifying originating business evidence" in explanation["reason"]
+        assert "no_originating_business_signal" not in explanation["reason"]
+
+    @pytest.mark.parametrize("count, reason", [(1, "too_small"), (3, "single_source")])
+    @pytest.mark.parametrize("previous_weeks, action", [(0, "Monitor"), (2, "Research")])
+    def test_eligible_rejections_still_enter_watch_list(
+        self, detector, greenhouse_job_cluster, make_signal,
+        count, reason, previous_weeks, action,
+    ):
+        title = "Looking for automated compliance tracking software for business teams"
+        eligible = detector.diagnose([make_signal(title=title) for _ in range(count)])
+        assert len(eligible.rejected) == 1
+        assert eligible.rejected[0].reason == reason
+        excluded = detector.diagnose(greenhouse_job_cluster).rejected
+        previous = [{"title": title, "recurrence": {"weeks_seen": previous_weeks}}] if previous_weeks else []
+
+        watch_list = build_watch_list(excluded + eligible.rejected, previous_watch_list=previous)
+        assert len(watch_list) == 1
+        assert watch_list[0]["title"] == title
+        assert watch_list[0]["signal_count"] == count
+        assert watch_list[0]["recommended_action"]["label"] == action
+        assert watch_list[0]["recurrence"] == {
+            "weeks_seen": previous_weeks + 1, "recurring": bool(previous_weeks),
+        }
