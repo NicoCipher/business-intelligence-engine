@@ -258,15 +258,33 @@ Separate from the semantic core, every retained production attempt needs:
 - attempted_at, plus produced_at when distinct
 - outcome: currently produced or operational_failure; this vocabulary is not
   declared permanently closed
-- optional resulting observation_id when a semantic Observation was produced
+- resulting_observation_id, required exactly when outcome is produced
 
 This lets audit or retry tooling answer what source condition a failed attempt
-operated on without relying on an Observation that does not exist. Operational
-failure remains a run outcome, not an Observation, and transient error prose
-does not enter InterpretedObservation semantic fields. If successful abstention
-is later approved, run provenance must add an explicit successful_no_observation
-outcome and retain the same attempted input. Until then, V1 does not map
-abstention to operational_failure, unknown, or no record.
+operated on without relying on an Observation that does not exist.
+
+### Run outcome/reference invariant
+
+For the current V1 run concept, one retained interpreter attempt has at most
+one resulting Observation:
+
+- **outcome = produced:** the run retains exactly one resulting_observation_id,
+  which identifies the exact semantic Observation the producer created.
+- **outcome = operational_failure:** the run retains no
+  resulting_observation_id and creates no semantic Observation.
+
+Operational failure remains a run outcome, not an Observation, and transient
+error prose does not enter InterpretedObservation semantic fields. If
+successful abstention is later approved, run provenance must add an explicit
+successful_no_observation outcome that retains the attempted input and no
+resulting_observation_id; it remains distinct from operational_failure and
+unknown. Until then, V1 does not map abstention to operational_failure, unknown,
+or no record.
+
+This cardinality does not limit a Signal to one Observation: multiple
+Observations may arise from separate target attempts. A future interpreter
+invocation that can emit several Observations requires a separate run/batch
+execution design; NIC-5 does not generalize to that shape.
 
 Provider model IDs, prompt text/version, raw responses, endpoint/API version,
 latency, tokens, cost, retries, and generation settings are not Observation
