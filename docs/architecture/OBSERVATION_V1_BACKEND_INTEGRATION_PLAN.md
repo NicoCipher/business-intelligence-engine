@@ -7,7 +7,7 @@ Status: **NIC-6 design only**. This is an implementation plan, not DDL, runtime 
 | Object | Decision | Reason |
 | --- | --- | --- |
 | Immutable InterpretedObservation records | Persisted | Signal provenance, correction lineage, historical replay, audit, NIC-7 tests, and NIC-9 measurement need durable records. |
-| Target-level interpreter/run provenance | Persisted | Operational failures create no Observation but must retain the attempted Signal/citation for audit and retry. |
+| Target-level interpreter/run provenance | Persisted | Operational failures create no Observation but must retain the attempted Signal/citation/semantic contract for audit and retry. |
 
 Transient-only storage loses replay and lineage; persisting only semantic results loses failures. Persistence grants no consumer authority: Correlation, Problems, Opportunities, scoring, reports, Findings, APIs, and frontend remain non-consumers.
 
@@ -19,17 +19,17 @@ SQLite CHECKs enforce enums, non-empty/positive values, state-citation all-or-no
 
 No uniqueness key claims canonical semantic target identity. Exact-result reuse is a transactionally serialized application lookup over the full approved payload: Signal ID, both citation components including nullness, state, semantic-contract version, and supersession link. It never equates alternate boundaries, normalized text, topics, entities, or inferred meaning.
 
-Conceptual structure `observation_runs` is append-only. Fields are `run_id` primary key; `attempted_signal_id` not-null FK; attempted condition citation in the approved shape; `producer_kind` CHECK human/rule/model; name/revision when defined by the approved profile; `attempted_at`; conditional `produced_at`; outcome CHECK produced/operational_failure; and conditional `resulting_observation_id` FK. It has indexes for attempted Signal/time, producer/revision, and result ID.
+Conceptual structure `observation_runs` is append-only. Fields are `run_id` primary key; `attempted_signal_id` not-null FK; attempted condition citation in the approved shape; required non-empty `attempted_semantic_contract_version`; `producer_kind` CHECK human/rule/model; name/revision when defined by the approved profile; `attempted_at`; conditional `produced_at`; outcome CHECK produced/operational_failure; and conditional `resulting_observation_id` FK. It has indexes for attempted Signal/time, producer/revision, and result ID. The attempted contract is the contract selected for this target-level attempt before execution; it is retained explicitly, not inferred from producer kind/name/revision, registry configuration, or the newest available contract.
 
-For `produced`, SQLite requires exactly one result ID and `produced_at`; for `operational_failure`, both are null. One retained attempt has at most one result reference. A produced run yielded or confirmed that result; it does not prove the attempt created the immutable record. No creator-run field, dedup flag, opaque semantic JSON, new outcome, or batch/multi-output design is added.
+For `produced`, SQLite requires exactly one result ID and `produced_at`; for `operational_failure`, both are null. One retained attempt has at most one result reference. A produced run yielded or confirmed that result; it does not prove the attempt created the immutable record. A database INSERT-time trigger (or equivalent database constraint logic) for `produced` additionally requires the referenced Observation to exist and to match exactly: `signal_id == attempted_signal_id`, every condition-citation component (`source_part`, `literal_text`, and occurrence ordinal) == the attempted condition citation, and `semantic_contract_version == attempted_semantic_contract_version`. It aborts a mismatched insert, so direct SQL cannot create a false run/result association. An operational failure retains its attempted Signal, full condition citation, and attempted contract but has no result reference or Observation lookup. No creator-run field, dedup flag, opaque semantic JSON, new outcome, reverse Observation-to-run FK, or batch/multi-output design is added.
 
-When a new Observation is retained, its initial produced run is inserted in the **same SQLite transaction**. Failure to insert that run rolls back the Observation insert, so no newly created record is detached from its required initial provenance. Exact-result reuse does not create an Observation; it inserts only a new produced run referencing the existing exact result.
+When a new Observation is retained, its initial produced run is inserted in the **same SQLite transaction**, after the Observation row exists for the produced-run correspondence check. Failure of that check or the run insert rolls back the Observation insert, so no newly created record is detached from its required initial provenance. Exact-result reuse does not create an Observation; it inserts only a new produced run referencing the existing exact result.
 
 ### Enforcement responsibility split
 
 | SQLite enforces | Application enforces |
 | --- | --- |
-| FK integrity; enum/CHECK/null-cardinality rules; produced/failure result cardinality; append-only UPDATE/DELETE rejection; single-successor uniqueness | Citation resolution; overlapping occurrence verification; support containment; cycle detection; exact-result reuse transaction logic; interpreter approval; semantic-contract compatibility |
+| FK integrity; enum/CHECK/null-cardinality rules; produced/failure result cardinality; append-only UPDATE/DELETE rejection; single-successor uniqueness; produced-run exact target correspondence; produced-run semantic-contract correspondence | Citation resolution; overlapping occurrence verification; support containment; cycle detection; exact-result reuse transaction logic; interpreter approval; registry/config selection; semantic-contract compatibility before execution |
 
 ## 3. Canonical persisted-Signal identity
 
@@ -93,7 +93,7 @@ No automatic historic-Signal backfill is selected because it requires deferred t
 | Citation | title/content part; exact case; non-empty; overlap ordinal; support containment. |
 | State | active/resolved support; optional unknown support; triad only. |
 | Records | direct-SQL UPDATE/DELETE rejection; one Signal/multiple supplied targets; cross-target/Signal correction; duplicate successor rejection, multiple NULL roots, and cycle validation. |
-| Runs | failure has no Observation/result; produced has exactly one; result confirmation is not authorship; initial Observation/run atomicity and run-insert rollback; no deferred no-result emission. |
+| Runs | failure retains attempted semantic contract and has no Observation/result; produced has exactly one and its contract matches the referenced Observation; result confirmation is not authorship; valid exact correspondence is accepted; mismatched attempted Signal, citation source part, literal text, occurrence ordinal, or attempted contract are rejected; initial Observation/run atomicity rolls back if run insertion or correspondence validation fails; producer revision alone is insufficient contract provenance; no deferred no-result emission. |
 | Identity | duplicate collection maps canonical Signal ID; temporary ID rejected; dry run retains nothing. |
 | Isolation | one failure continues other attempts, extraction, and raw-Signal stages; sibling independence. |
 | Rerun | retry; exact reuse; changed correction/contract; no alternate-boundary equivalence. |
