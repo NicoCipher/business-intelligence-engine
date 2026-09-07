@@ -504,7 +504,7 @@ These are contract examples, not code or source-policy decisions.
 
 ## Part 12 — Decision
 
-OBSERVATION V1 CONTRACT READY FOR APPROVAL
+OBSERVATION V1 CONTRACT READY FOR FINAL APPROVAL
 
 This amended proposal is ready for final independent architectural review:
 each retained field has a bounded evidenced purpose, citations use only the
