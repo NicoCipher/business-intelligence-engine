@@ -15,13 +15,21 @@ Transient-only storage loses replay and lineage; persisting only semantic result
 
 Conceptual structure `interpreted_observations` is append-only. Fields are `observation_id` (primary key); `signal_id` (not-null FK to `signals(id)`, restrict delete); condition citation (`source_part` CHECK title/content, exact case-preserving non-empty `literal_text`, positive overlap-inclusive ordinal); optional state citation of the same shape; `condition_state` CHECK active/resolved/unknown; non-empty `semantic_contract_version`; nullable `supersedes_observation_id` self-FK (not self); and `recorded_at` audit timestamp. Every field is immutable.
 
-SQLite CHECKs enforce enums, non-empty/positive values, state-citation all-or-none, active/resolved support, same source part, foreign keys, and no self-link. Application validation against preserved `Signal.title`/`content` enforces literal occurrence, overlapping ordinal, and state-support containment. `Signal.full_text` is never citation provenance. Index Signal ID, supersession ID, and literal-citation lookup.
+SQLite CHECKs enforce enums, non-empty/positive values, state-citation all-or-none, active/resolved support, same source part, foreign keys, and no self-link. A `UNIQUE` constraint/index on non-null `supersedes_observation_id` permits multiple NULL roots while allowing one predecessor at most one direct successor. SQLite `BEFORE UPDATE` and `BEFORE DELETE` triggers abort writes on both conceptual tables, making their append-only requirement enforceable outside normal application paths. Application validation against preserved `Signal.title`/`content` enforces literal occurrence, overlapping ordinal, and state-support containment. `Signal.full_text` is never citation provenance. Index Signal ID, supersession ID, and literal-citation lookup.
 
 No uniqueness key claims canonical semantic target identity. Exact-result reuse is a transactionally serialized application lookup over the full approved payload: Signal ID, both citation components including nullness, state, semantic-contract version, and supersession link. It never equates alternate boundaries, normalized text, topics, entities, or inferred meaning.
 
 Conceptual structure `observation_runs` is append-only. Fields are `run_id` primary key; `attempted_signal_id` not-null FK; attempted condition citation in the approved shape; `producer_kind` CHECK human/rule/model; name/revision when defined by the approved profile; `attempted_at`; conditional `produced_at`; outcome CHECK produced/operational_failure; and conditional `resulting_observation_id` FK. It has indexes for attempted Signal/time, producer/revision, and result ID.
 
 For `produced`, SQLite requires exactly one result ID and `produced_at`; for `operational_failure`, both are null. One retained attempt has at most one result reference. A produced run yielded or confirmed that result; it does not prove the attempt created the immutable record. No creator-run field, dedup flag, opaque semantic JSON, new outcome, or batch/multi-output design is added.
+
+When a new Observation is retained, its initial produced run is inserted in the **same SQLite transaction**. Failure to insert that run rolls back the Observation insert, so no newly created record is detached from its required initial provenance. Exact-result reuse does not create an Observation; it inserts only a new produced run referencing the existing exact result.
+
+### Enforcement responsibility split
+
+| SQLite enforces | Application enforces |
+| --- | --- |
+| FK integrity; enum/CHECK/null-cardinality rules; produced/failure result cardinality; append-only UPDATE/DELETE rejection; single-successor uniqueness | Citation resolution; overlapping occurrence verification; support containment; cycle detection; exact-result reuse transaction logic; interpreter approval; semantic-contract compatibility |
 
 ## 3. Canonical persisted-Signal identity
 
@@ -70,7 +78,7 @@ A later configuration/registry allow-list selects an explicitly approved produce
 | Changed state, support, occurrence, boundary, Signal, or contract | New immutable correction, superseding prior record when applicable. |
 | Historical backfill | Only supplied target attempts; never mutates Signals, Problems, Opportunities, scores, or reports. |
 
-Readers traverse `supersedes_observation_id`: predecessor is historical and the terminal record current for that lineage. Validation rejects self-links, cycles, and more than one direct successor. Cross-Signal/target correction remains allowed. Fan-out is rejected pending a later decision. Exact reuse does not resolve semantic equivalence across valid alternative boundaries.
+Readers traverse `supersedes_observation_id`: predecessor is historical and the terminal record current for that lineage. SQLite rejects a second direct successor through the non-null unique constraint; application validation rejects self-links and cycles. Cross-Signal/target correction remains allowed. Exact reuse does not resolve semantic equivalence across valid alternative boundaries.
 
 ## 8. Migration and backfill
 
@@ -84,8 +92,8 @@ No automatic historic-Signal backfill is selected because it requires deferred t
 | --- | --- |
 | Citation | title/content part; exact case; non-empty; overlap ordinal; support containment. |
 | State | active/resolved support; optional unknown support; triad only. |
-| Records | immutability; one Signal/multiple supplied targets; cross-target/Signal correction; cycle/fan-out rejection. |
-| Runs | failure has no Observation/result; produced has exactly one; result confirmation is not authorship; no deferred no-result emission. |
+| Records | direct-SQL UPDATE/DELETE rejection; one Signal/multiple supplied targets; cross-target/Signal correction; duplicate successor rejection, multiple NULL roots, and cycle validation. |
+| Runs | failure has no Observation/result; produced has exactly one; result confirmation is not authorship; initial Observation/run atomicity and run-insert rollback; no deferred no-result emission. |
 | Identity | duplicate collection maps canonical Signal ID; temporary ID rejected; dry run retains nothing. |
 | Isolation | one failure continues other attempts, extraction, and raw-Signal stages; sibling independence. |
 | Rerun | retry; exact reuse; changed correction/contract; no alternate-boundary equivalence. |
