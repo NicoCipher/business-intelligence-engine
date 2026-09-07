@@ -67,7 +67,7 @@ present as fields are identified rather than invented retroactively.
 | prompt_version | Gemini prompt revision | NIC-19 only | REJECT | — | Not usable by human/rule production. |
 | model_identity | Provider/model string | NIC-19 only | REJECT | — | No production interpreter is selected; it is not semantic content. |
 | provider/API/endpoint/response schema/generation settings | Gemini transport configuration | Frozen for experiment reproducibility | REJECT | — | Fields are provider-specific execution configuration. |
-| run_timestamp | Attempt time | NIC-15 result metadata | TRANSFORM | produced_at in run provenance | Audit time must not be confused with source-event time. |
+| run_timestamp | Attempt time | NIC-15 result metadata | TRANSFORM | attempted_at (and produced_at if distinct) in run provenance | Audit time must not be confused with source-event time. |
 | latency_ms | Request duration | Reported per accepted NIC-19 record | REJECT | — | Performance telemetry is not meaning. |
 | token_usage | Provider usage metadata | Present for Gemini and absent for rules | REJECT | — | Provider billing telemetry would make an LLM-shaped contract. |
 | cost_usd | Provider cost estimate | Unavailable in accepted results | REJECT | — | Cost is neither returned reliably nor semantic. |
@@ -103,8 +103,8 @@ to anticipate future types.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | observation_id | Yes | Stable logical record identifier; no database key mechanics selected. | Contract creation | System | Yes | Identity/audit | Historical correction must be traceable. |
 | signal_id | Yes | Identifier of the one immutable Signal from which the record derives. | Signal store | Copied by producer | Yes | Semantic provenance | NIC-15/17 grounding and current Signal architecture. |
-| condition_citation | Yes | Exactly one contiguous literal occurrence identifying the condition target: source_part (title or content), exact literal_text, and positive occurrence ordinal within that source part. | Preserved immutable Signal title/content | Human/rule/model supplies; validation verifies | Yes | Semantic provenance / target | NIC-17 target_span and multi-condition cases; CS-CORE-003 demonstrates that target differs from support. |
-| state_evidence_citation | Required for active/resolved; optional for unknown | Exactly one contiguous literal occurrence in the same source_part and within condition_citation's range. It may equal the target. | Preserved immutable Signal title/content | Human/rule/model supplies; validation verifies | Yes | Semantic provenance / support | NIC-15 evidence_span is one exact substring of target_span; NIC-19 validates literal support. |
+| condition_citation | Yes | Exactly one contiguous literal occurrence identifying the condition target: source_part (title or content), exact case-preserving, non-empty literal_text, and positive occurrence ordinal within that source part. | Preserved immutable Signal title/content | Human/rule/model supplies; validation verifies | Yes | Semantic provenance / target | NIC-17 target_span and multi-condition cases; CS-CORE-003 demonstrates that target differs from support. |
+| state_evidence_citation | Required for active/resolved; optional for unknown | Exactly one contiguous literal occurrence in the same source_part and within condition_citation's range. It may equal the target; when present, its literal_text is exact, case-preserving, and non-empty. | Preserved immutable Signal title/content | Human/rule/model supplies; validation verifies | Yes | Semantic provenance / support | NIC-15 evidence_span is one exact substring of target_span; NIC-19 validates literal support. |
 | condition_state | Yes | Producer's bounded reading of the condition_citation under V1. Values: active, resolved, unknown. | Interpretation of target and support | Human/rule/model | Yes | Semantic | All scored NIC-17 cases and NIC-20 conclusion. |
 | semantic_contract_version | Yes | BIA meaning contract used for the state. Initially condition-state/v1; never a prompt/model/API version. | Approved BIA contract | System selects | Yes | Semantic provenance | Future semantic changes must remain auditable. |
 | supersedes_observation_id | Only for correction | Earlier retained interpretation record that this record corrects or replaces. It may differ in Signal, target, support, state, or semantic-contract version; the earlier record remains readable. | Approved correction decision | Approved producer/workflow | Yes | Lineage | Invariant 14 and target-misidentification correction. |
@@ -122,7 +122,8 @@ A human, rule, or model may produce a record. Active and resolved require a
 valid condition_citation and state_evidence_citation. Unknown requires a valid
 condition_citation; its supporting citation is optional, matching NIC-15's
 experimental contract. Unknown is semantic, not a failed request. A failure to
-execute creates only an operational run outcome, never an Observation.
+execute creates only an operational run outcome with its attempted input, never
+an Observation.
 
 ### Unknown, operational failure, and successful abstention
 
@@ -142,6 +143,14 @@ must never be a citation target. V1 deliberately permits exactly one contiguous
 citation in exactly one source part. Multi-fragment citations and a condition
 target spanning title plus content are deferred because NIC-15/17 did not test
 them.
+
+### Citation literal invariant
+
+Before occurrence resolution, condition_citation.literal_text must be exact,
+case-preserving, and non-empty. Whenever state_evidence_citation exists, its
+literal_text has the same requirements. An empty string is never a citation
+literal. This preserves NIC-15's non-empty evidence requirement for active and
+resolved results while retaining optional support for unknown.
 
 ### Citation occurrence resolution
 
@@ -236,18 +245,24 @@ It answers what was interpreted and under which BIA semantic definition.
 
 ### B. Interpreter/run provenance
 
-Separate from the semantic core, a retained production attempt needs:
+Separate from the semantic core, every retained production attempt needs:
 
+- attempted_signal_id
+- attempted_condition_citation, using the V1 citation shape
 - producer_kind: human, rule, or model
 - producer name and revision when applicable
-- produced_at
+- attempted_at, plus produced_at when distinct
 - outcome: currently produced or operational_failure; this vocabulary is not
   declared permanently closed
-- reference to the observation when one was produced
+- optional resulting observation_id when a semantic Observation was produced
 
-If successful abstention is later approved, run provenance must add an explicit
-successful_no_observation outcome. Until then, V1 does not map abstention to
-operational_failure, unknown, or no record.
+This lets audit or retry tooling answer what source condition a failed attempt
+operated on without relying on an Observation that does not exist. Operational
+failure remains a run outcome, not an Observation, and transient error prose
+does not enter InterpretedObservation semantic fields. If successful abstention
+is later approved, run provenance must add an explicit successful_no_observation
+outcome and retain the same attempted input. Until then, V1 does not map
+abstention to operational_failure, unknown, or no record.
 
 Provider model IDs, prompt text/version, raw responses, endpoint/API version,
 latency, tokens, cost, retries, and generation settings are not Observation
