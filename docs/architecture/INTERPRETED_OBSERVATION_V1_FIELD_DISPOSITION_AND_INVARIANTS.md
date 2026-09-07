@@ -143,6 +143,15 @@ citation in exactly one source part. Multi-fragment citations and a condition
 target spanning title plus content are deferred because NIC-15/17 did not test
 them.
 
+### Citation occurrence resolution
+
+For both condition_citation and state_evidence_citation, the occurrence ordinal
+is resolved by enumerating every character start position in the selected,
+preserved source_part at which literal_text matches exactly. Overlapping matches
+are included and ordered by ascending character start position; occurrence is
+the one-based ordinal in that ordered list. This rule resolves an ordinal from
+preserved source text without making character offsets V1 fields.
+
 ---
 
 ## Part 4 — Identity
@@ -293,13 +302,15 @@ creates authority.
 | Source example | Signal says / stores | Observation may interpret | Observation must **not** assert |
 | --- | --- | --- | --- |
 | Reddit complaint | Immutable post text, source/URL/collection facts | A cited complaint condition is active, resolved, or unknown | Representative customer demand, a Problem, or a qualified Opportunity |
-| Hacker News question | Question text and source facts | Unknown for a cited question where no state is explicitly asserted | The presupposition is a fact or the audience represents a market |
+| Hacker News question | Question text and source facts | A reviewed yes/no question may retain unknown under the frozen Condition State contract (CS-CORE-017/018); this is not a rule for all questions | The presupposition is a fact or the audience represents a market |
 | Greenhouse job posting | Employer role, salary, location, source facts | A narrow cited condition only if supported | Customer pain, willingness to pay, market gap, or a special source rule |
 | SEC filing | Filing text and issuer/filing facts | A cited condition-state statement | Legal truth beyond filing, materiality, or investment advice |
 | RSS/product announcement | Published announcement and feed facts | A cited status condition or unknown | Adoption, unmet demand, competitor conclusion, or effectiveness |
 
 Signal owns raw evidence and collection facts. Observation owns bounded
 interpretation and citation. Entity extraction remains independent Processing.
+WH-question presupposition semantics (CS-ADV-004) remain unresolved, and
+successful abstention/no-record behavior remains deferred.
 
 ---
 
@@ -337,7 +348,8 @@ and judgment remain later Investigation/Analysis work.
 | C4 | DEFERRED DOWNSTREAM | Homonym separation remains Correlation; shared polarity is not shared topic. |
 | P3 | DEFERRED DOWNSTREAM | Actor/context in Problem identity remains open; no entity/subject field is smuggled in. |
 | CS-CORE-013a/b and 014a/b | SUPPORTED | One Signal can create multiple records with distinct condition targets, support, and states. |
-| CS-CORE-003/004 historical cases | HANDLED AS UNKNOWN | 004 does not establish current state; no normalized time field is invented. |
+| CS-CORE-003 historical case | HANDLED AS RESOLVED | Its cited “that's long behind us now” support establishes resolved; no normalized time field is invented. |
+| CS-CORE-004 historical case | HANDLED AS UNKNOWN | It does not establish current state; no normalized time field is invented. |
 | CS-CORE-005/006 and CS-ADV-012 recurrence | SUPPORTED | Current state can be active where cited language supports it; recurrence counts/transitions are deferred. |
 | CS-CORE-007/008 and CS-ADV-004 attribution/questions | DEFERRED | No claimant/presupposition state or successful-abstention/no-record policy is introduced for diagnostics. |
 | Expected-unknown cases and ten Gemini errors | SUPPORTED | Unknown is required; model agreement/rationale cannot override it. |
@@ -477,7 +489,7 @@ These are contract examples, not code or source-policy decisions.
 
 ## Part 12 — Decision
 
-OBSERVATION V1 CONTRACT READY FOR FINAL REVIEW
+OBSERVATION V1 CONTRACT READY FOR APPROVAL
 
 This amended proposal is ready for final independent architectural review:
 each retained field has a bounded evidenced purpose, citations use only the
