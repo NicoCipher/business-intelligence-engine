@@ -165,64 +165,68 @@ preserved source text without making character offsets V1 fields.
 
 ## Part 4 — Identity
 
-### A. Observation target identity
+### A. Observation record identity
 
-The stable target is **which condition occurrence in which Signal is being
-interpreted**:
+observation_id names one immutable, retained interpretation record. NIC-5 does
+not choose UUID, hash, or database-primary-key mechanics.
 
-(signal_id, canonical condition_citation)
+### B. Cited interpretation target
 
-condition_state is deliberately not part of this target identity. Neither is
-semantic_contract_version: a changed meaning contract can reinterpret the same
-target without creating a new target. Because V1 condition_citation is one
-source part, one contiguous literal occurrence, and one occurrence ordinal,
-the same target cannot acquire multiple identities through alternate fragment
-decomposition.
+Each record's cited interpretation target is **which literal condition
+occurrence in which Signal that record interpreted**:
 
-### B. Interpretation record identity
+(signal_id, condition_citation)
 
-An interpretation record is one retained, immutable historical reading of that
-target. observation_id names that record; NIC-5 does not choose UUID, hash, or
-database-primary-key mechanics. Each record contains its target reference,
-state_evidence_citation, condition_state, semantic_contract_version, and any
-supersedes_observation_id.
+This is auditable semantic provenance, not a globally canonical identity of an
+underlying semantic condition. V1's one-source-part, one-contiguous-literal,
+overlap-resolved citation shape makes this exact literal target reproducible for
+the record; it does not determine whether differently bounded, valid citations
+refer to the same underlying condition.
 
-### C. Interpretation value
+### C. Semantic target equivalence is deferred
 
-condition_state is the value asserted by an interpretation record, not the
-identity of the condition. A correction from active to unknown therefore
-supersedes an earlier record about the same target rather than redefining the
-target itself.
+NIC-17 supplied pre-segmented target spans and did not evaluate boundary or
+equivalence decisions. V1 therefore does not choose a canonical condition
+identity, normalized string, hash, topic key, entity key, or boundary heuristic.
+For example, both “checkout flow is still failing” and “checkout flow is still
+failing for returning customers” can be exact auditable V1 targets in the same
+Signal without V1 declaring them either the same canonical condition or two
+different canonical conditions.
 
-### D. Semantic and execution version boundaries
+### D. Interpretation value
 
-semantic_contract_version belongs to an interpretation record, not stable
-target identity, because it describes the BIA meaning definition used for that
-reading. interpreter_revision belongs only to run provenance; a new rule/model
-revision does not make a new semantic target.
+condition_state is the value asserted by an interpretation record, not part of
+the cited interpretation target and not a semantic-condition identity.
 
-### E. Same target, corrections, and reruns
+### E. Semantic and execution version boundaries
 
-Two records may point to the same target when they preserve a correction or a
-later approved semantic interpretation. A same-target correction can change
-active to unknown. A target correction can replace an earlier record whose
-Signal, condition target, or state-support citation was misidentified. In both
-forms, the later record links to the earlier one through
-supersedes_observation_id; equal signal_id, target, support, state, and
-semantic-contract version are not required.
+semantic_contract_version belongs to an interpretation record, not the cited
+literal target provenance, because it describes the BIA meaning definition used
+for that reading. interpreter_revision belongs only to run provenance; a new
+rule/model revision does not establish semantic target equivalence.
+
+### F. Corrections, reruns, and deduplication
+
+A successor may supersede an earlier retained interpretation because its state,
+support, target boundaries, occurrence, Signal, or semantic contract was wrong
+or changed. Correction lineage through supersedes_observation_id does not depend
+on proving stable semantic target equivalence; equal signal_id, citation,
+support, state, and semantic-contract version are not required.
 
 Neither record edits the Signal nor deletes the historical reading. A record
 explicitly superseded by a retained successor is historical rather than the
 current retained interpretation; consumers must traverse lineage to determine
 that status. Fan-out/conflicting-successor handling and storage mechanics are
-not designed here. A duplicate execution of the same process is a run
-deduplication concern, not automatically a new semantic record.
+not designed here. Exact same attempted input may be recognized operationally
+as the same literal target. V1 does not resolve deduplication or equivalence
+across differently bounded, semantically equivalent targets; that is deferred
+with segmentation/canonicalization and must not be silently invented by NIC-6.
 
-### F. Execution/run identity
+### G. Execution/run identity
 
 Run identity answers which producer attempt created or checked a record, when,
-and with what operational outcome. It remains separate from target identity,
-interpretation-record identity, and interpretation value.
+and with what operational outcome. It remains separate from cited-target
+provenance, interpretation-record identity, and interpretation value.
 
 ---
 
@@ -401,8 +405,9 @@ pronouns or re-reading the full Signal for that purpose.
 | CS-ADV-008 | “The DNS record resolved to the wrong IP again.” | Model error: “The DNS record resolved to the wrong IP again.” | Absent; optional for unknown | unknown | Yes, when retained | Condition/domain applicability |
 | CS-ADV-009 | “Our margins remain healthy despite rising costs.” | Model error: “Our margins remain healthy” | Absent; optional for unknown | unknown | Yes, when retained | Positive-state/relevance semantics |
 
-**Contract gap check:** none. Every unsolved concern is explicit and excluded
-rather than hidden as an optional field.
+**Contract gap check:** every known unresolved concern, including semantic
+target equivalence, is explicit and excluded rather than hidden as an optional
+field.
 
 ---
 
@@ -411,6 +416,7 @@ rather than hidden as an optional field.
 | Deferred question | Why unresolved | Evidence needed | Likely later owner |
 | --- | --- | --- | --- |
 | Automatic segmentation / producer target supply | NIC-17 supplied target spans | Discovery/overlap/no-safe-target evaluation | NIC-6/NIC-7 Processing |
+| Semantic target equivalence / canonical target boundaries | NIC-17 supplied target spans and did not evaluate alternate valid boundaries | Segmentation/equivalence corpus with multiple valid target spans, nested clauses, overlapping conditions, pronoun/context requirements, and consumer requirements | Later Processing/Correlation design, not Observation V1 semantic core |
 | Multi-fragment citations / targets spanning title plus content | NIC-15/17 tested one contiguous target_span | Citation-shape evaluation with cross-component targets | Later profile / Processing design |
 | Null abstention lifecycle | Allowed but absent in accepted runs | Labeled abstention and operational-policy cases | Interpreter/evaluation design |
 | Successful abstention versus no retained record | NIC-20 leaves null/abstention lifecycle open | Cases and policy that distinguish successful abstention from unknown and from operational failure | Interpreter/evaluation design |
@@ -504,12 +510,12 @@ These are contract examples, not code or source-policy decisions.
 
 ## Part 12 — Decision
 
-OBSERVATION V1 CONTRACT READY FOR FINAL APPROVAL
+OBSERVATION V1 CONTRACT READY FOR FINAL REVIEW
 
 This amended proposal is ready for final independent architectural review:
 each retained field has a bounded evidenced purpose, citations use only the
-tested canonical single-span shape, target identity is separate from state
-support and interpretation value, and unresolved semantics are explicit
+tested canonical single-span shape, cited-target provenance is separate from
+state support and interpretation value, and unresolved semantics are explicit
 deferred constraints. Approval would permit NIC-6 storage/integration design
 only—not implementation, production model selection, or downstream semantic
 changes.
