@@ -53,12 +53,12 @@ present as fields are identified rather than invented retroactively.
 | --- | --- | --- | --- | --- | --- |
 | case_id | Evaluation-record ID | Required to score frozen corpus | REJECT | — | Test identity is not source evidence; adopting it couples production to a benchmark. |
 | source_text | Whole evaluator input | NIC-17 fixture input | TRANSFORM | signal_id reference | Signal already owns canonical raw evidence; copying text risks divergence. |
-| target_span / condition text | Human-selected literal condition being interpreted | CS-CORE-013a/b and 014a/b; distinct from evidence_span in CS-CORE-003 | TRANSFORM | required condition_citation | Preserve what condition the record is about without requiring downstream prose interpretation. |
+| target_span / condition text | One literal contiguous condition occurrence being interpreted | CS-CORE-013a/b and 014a/b; distinct from evidence_span in CS-CORE-003 | TRANSFORM | required condition_citation | Preserve what condition the record is about without requiring downstream prose interpretation. |
 | expected_label | Gold answer withheld from interpreter | NIC-17 scoring control | REJECT | — | Answer keys are not production semantics. |
 | scored, case_set, category, notes, critical_inversion_probe | Corpus/scoring organization | Core, adversarial, diagnostic harness | REJECT | — | Benchmark policy must not enter runtime data. |
 | label | active, resolved, unknown; Gemini also allowed null | 41 scored cases; 24 expected unknown | ADOPT | condition_state | Triad is sufficient for the tested pre-segmented task. |
 | null / abstention | Model declined a label | Allowed, but neither accepted run emitted it | DEFER | — | Its semantic lifecycle is untested; do not invent a fourth state. |
-| evidence_span | Interpreter-selected literal support for the state | CS-CORE-003 accepted support is shorter than target_span; required for active/resolved and optional for unknown in NIC-15 | TRANSFORM | state_evidence_citation | State support is distinct from the condition target. |
+| evidence_span | One exact contiguous target_span substring selected as state support | CS-CORE-003 accepted support is shorter than target_span; required for active/resolved and optional for unknown in NIC-15 | TRANSFORM | state_evidence_citation | State support is distinct from, but contained by, the condition target. |
 | matched_cue | Rules-only matched token | NIC-18 implementation detail | REJECT | — | Rule vocabulary is not semantic meaning. |
 | rationale | Model explanation prose | Gemini structured response | REJECT | — | Persuasive model prose is neither stable evidence nor BIA claim. |
 | raw_output | Exact provider JSON | Preserved only in experiment artifacts | REJECT | — | Provider schema must not become durable semantic data. |
@@ -103,11 +103,11 @@ to anticipate future types.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | observation_id | Yes | Stable logical record identifier; no database key mechanics selected. | Contract creation | System | Yes | Identity/audit | Historical correction must be traceable. |
 | signal_id | Yes | Identifier of the one immutable Signal from which the record derives. | Signal store | Copied by producer | Yes | Semantic provenance | NIC-15/17 grounding and current Signal architecture. |
-| condition_citation | Yes | The literal condition occurrence this record is about. It is an ordered nonempty list of fragments; each names the preserved Signal part (title or content), exact literal text, and positive occurrence ordinal in that part. | Preserved immutable Signal title/content | Human/rule/model supplies; validation verifies | Yes | Semantic provenance / target | NIC-17 target_span and multi-condition cases; CS-CORE-003 demonstrates that target differs from support. |
-| state_evidence_citation | Required for active/resolved; optional for unknown | Literal fragment list supporting the state reading, using the same fragment form as condition_citation. It may overlap or equal the target citation. | Preserved immutable Signal title/content | Human/rule/model supplies; validation verifies | Yes | Semantic provenance / support | NIC-15 requires evidence_span for active/resolved and permits it for unknown; NIC-19 validates literal support. |
+| condition_citation | Yes | Exactly one contiguous literal occurrence identifying the condition target: source_part (title or content), exact literal_text, and positive occurrence ordinal within that source part. | Preserved immutable Signal title/content | Human/rule/model supplies; validation verifies | Yes | Semantic provenance / target | NIC-17 target_span and multi-condition cases; CS-CORE-003 demonstrates that target differs from support. |
+| state_evidence_citation | Required for active/resolved; optional for unknown | Exactly one contiguous literal occurrence in the same source_part and within condition_citation's range. It may equal the target. | Preserved immutable Signal title/content | Human/rule/model supplies; validation verifies | Yes | Semantic provenance / support | NIC-15 evidence_span is one exact substring of target_span; NIC-19 validates literal support. |
 | condition_state | Yes | Producer's bounded reading of the condition_citation under V1. Values: active, resolved, unknown. | Interpretation of target and support | Human/rule/model | Yes | Semantic | All scored NIC-17 cases and NIC-20 conclusion. |
 | semantic_contract_version | Yes | BIA meaning contract used for the state. Initially condition-state/v1; never a prompt/model/API version. | Approved BIA contract | System selects | Yes | Semantic provenance | Future semantic changes must remain auditable. |
-| supersedes_observation_id | Only for correction | Earlier observation on same cited evidence that this record corrects or replaces. Earlier record remains readable. | Approved correction decision | Approved producer/workflow | Yes | Lineage | Invariant 14 and append-only history. |
+| supersedes_observation_id | Only for correction | Earlier retained interpretation record that this record corrects or replaces. It may differ in Signal, target, support, state, or semantic-contract version; the earlier record remains readable. | Approved correction decision | Approved producer/workflow | Yes | Lineage | Invariant 14 and target-misidentification correction. |
 
 ### Explicit non-fields
 
@@ -138,9 +138,10 @@ execute creates only an operational run outcome, never an Observation.
 Citations resolve only against preserved immutable source text. For the current
 Signal shape, title and content are separately named source parts; the lowercased
 and concatenated Signal.full_text analysis view is not literal provenance and
-must never be a citation target. The fragment list allows a future producer to
-preserve an ordered citation spanning those separate parts without flattening
-or normalizing source text.
+must never be a citation target. V1 deliberately permits exactly one contiguous
+citation in exactly one source part. Multi-fragment citations and a condition
+target spanning title plus content are deferred because NIC-15/17 did not test
+them.
 
 ---
 
@@ -151,11 +152,14 @@ or normalizing source text.
 The stable target is **which condition occurrence in which Signal is being
 interpreted**:
 
-(signal_id, condition_citation)
+(signal_id, canonical condition_citation)
 
 condition_state is deliberately not part of this target identity. Neither is
 semantic_contract_version: a changed meaning contract can reinterpret the same
-target without creating a new target.
+target without creating a new target. Because V1 condition_citation is one
+source part, one contiguous literal occurrence, and one occurrence ordinal,
+the same target cannot acquire multiple identities through alternate fragment
+decomposition.
 
 ### B. Interpretation record identity
 
@@ -182,9 +186,18 @@ revision does not make a new semantic target.
 ### E. Same target, corrections, and reruns
 
 Two records may point to the same target when they preserve a correction or a
-later approved semantic interpretation. The later record links to the earlier
-one through supersedes_observation_id; neither edits the Signal nor deletes the
-historical reading. A duplicate execution of the same process is a run
+later approved semantic interpretation. A same-target correction can change
+active to unknown. A target correction can replace an earlier record whose
+Signal, condition target, or state-support citation was misidentified. In both
+forms, the later record links to the earlier one through
+supersedes_observation_id; equal signal_id, target, support, state, and
+semantic-contract version are not required.
+
+Neither record edits the Signal nor deletes the historical reading. A record
+explicitly superseded by a retained successor is historical rather than the
+current retained interpretation; consumers must traverse lineage to determine
+that status. Fan-out/conflicting-successor handling and storage mechanics are
+not designed here. A duplicate execution of the same process is a run
 deduplication concern, not automatically a new semantic record.
 
 ### F. Execution/run identity
@@ -219,8 +232,13 @@ Separate from the semantic core, a retained production attempt needs:
 - producer_kind: human, rule, or model
 - producer name and revision when applicable
 - produced_at
-- outcome: produced or operational failure
+- outcome: currently produced or operational_failure; this vocabulary is not
+  declared permanently closed
 - reference to the observation when one was produced
+
+If successful abstention is later approved, run provenance must add an explicit
+successful_no_observation outcome. Until then, V1 does not map abstention to
+operational_failure, unknown, or no record.
 
 Provider model IDs, prompt text/version, raw responses, endpoint/API version,
 latency, tokens, cost, retries, and generation settings are not Observation
@@ -328,32 +346,33 @@ and judgment remain later Investigation/Analysis work.
 
 ### Required target-versus-support recheck
 
-This table uses the frozen target_span and accepted Run 1 support where a
-model response exists. The state column is the contract/corpus state, not an
-endorsement of a model over-assertion. It demonstrates that a downstream
-consumer can identify the target condition without resolving pronouns or
-re-reading the full Signal for that purpose.
+This table separates execution provenance from semantic provenance. Accepted
+Gemini evidence is retained only as the evidence the experimental model used;
+it is not automatically V1 state support. The V1 state column is the
+contract/corpus state, not an endorsement of a model over-assertion. The target
+column lets a downstream consumer identify the condition without resolving
+pronouns or re-reading the full Signal for that purpose.
 
-| Case | Condition target citation | State-support citation | Condition state | Retained record? | Deferred remainder |
-| --- | --- | --- | --- | --- | --- |
-| CS-CORE-003 | “Last year we struggled with invoicing, but that's long behind us now.” | “that's long behind us now” | resolved | Yes | Normalized time/transition model |
-| CS-CORE-004 | “Back in 2019 the checkout flow used to crash constantly.” | “used to crash constantly” | unknown | Yes | Historical-current temporal normalization |
-| CS-CORE-013a | “The homepage loads fine now” | Same as target | resolved | Yes | Automatic target discovery |
-| CS-CORE-013b | “the search feature is still broken” | Same as target | active | Yes | Automatic target discovery |
-| CS-CORE-014a | “We fixed invoicing” | Same as target | resolved | Yes | Automatic target discovery |
-| CS-CORE-014b | “onboarding is still painful” | Same as target | active | Yes | Automatic target discovery |
-| CS-CORE-017 | “Is the invoicing bug fixed yet?” | “Is the invoicing bug fixed yet?” | unknown | Yes | Successful-abstention/no-record policy |
-| CS-CORE-018 | “Has anyone found a workaround for the export issue?” | Same as target | unknown | Yes | Successful-abstention/no-record policy |
-| CS-ADV-004 | “Why does checkout still fail after the last deploy?” | Accepted model support: “checkout still fail” | Not settled; diagnostic | Not decided | Question presupposition and successful-abstention/no-record policy |
-| CS-CORE-009 | “Support says it's fixed, but I'm still getting the same error.” | Model's erroneous support: “I'm still getting the same error” | unknown | Yes, when a producer retains the semantic result | Conflict policy beyond one cited source; erroneous model record requires correction lineage |
-| CS-CORE-010 | “I keep hearing it's resolved, but nothing has actually changed on my end.” | Model's erroneous support: “nothing has actually changed on my end” | unknown | Yes, when retained | Attribution/conflict policy and correction lineage |
-| CS-CORE-012 | “It's mostly fixed, just a couple of edge cases remain.” | Model's erroneous support: “a couple of edge cases remain” | unknown | Yes, when retained | Partial-resolution normalization |
-| CS-CORE-028 | “The report says our churn rate is still within target.” | Model's erroneous support: “still within target” | unknown | Yes, when retained | Domain/relevance semantics |
-| CS-ADV-001 | “It's not resolved, despite what the release notes claim.” | Model's erroneous support: “It's not resolved” | unknown | Yes, when retained | Attribution/conflict policy |
-| CS-ADV-006 | “This isn't a permanent fix, but it's holding for now.” | Model's erroneous support: “it's holding for now” | unknown | Yes, when retained | Partial-resolution semantics |
-| CS-ADV-007 | “The equation was finally solved after three attempts.” | Model's erroneous support: “The equation was finally solved” | unknown | Yes, when retained | Condition/domain applicability |
-| CS-ADV-008 | “The DNS record resolved to the wrong IP again.” | Model's erroneous support: “The DNS record resolved to the wrong IP again.” | unknown | Yes, when retained | Condition/domain applicability |
-| CS-ADV-009 | “Our margins remain healthy despite rising costs.” | Model's erroneous support: “Our margins remain healthy” | unknown | Yes, when retained | Positive-state/relevance semantics |
+| Case | Frozen condition target | Accepted model evidence_span, if relevant | V1 state_evidence_citation | V1 condition_state | Retained record? | Deferred remainder |
+| --- | --- | --- | --- | --- | --- | --- |
+| CS-CORE-003 | “Last year we struggled with invoicing, but that's long behind us now.” | “that's long behind us now” | “that's long behind us now” | resolved | Yes | Normalized time/transition model |
+| CS-CORE-004 | “Back in 2019 the checkout flow used to crash constantly.” | Model error: “used to crash constantly” | Absent; optional for unknown | unknown | Yes, when retained | Historical-current temporal normalization |
+| CS-CORE-013a | “The homepage loads fine now” | Same as target | Same as target | resolved | Yes | Automatic target discovery |
+| CS-CORE-013b | “the search feature is still broken” | Same as target | Same as target | active | Yes | Automatic target discovery |
+| CS-CORE-014a | “We fixed invoicing” | Same as target | Same as target | resolved | Yes | Automatic target discovery |
+| CS-CORE-014b | “onboarding is still painful” | Same as target | Same as target | active | Yes | Automatic target discovery |
+| CS-CORE-017 | “Is the invoicing bug fixed yet?” | Same as target | Same as target; optional for unknown | unknown | Yes, when retained | Successful-abstention/no-record policy |
+| CS-CORE-018 | “Has anyone found a workaround for the export issue?” | Same as target | Same as target; optional for unknown | unknown | Yes, when retained | Successful-abstention/no-record policy |
+| CS-ADV-004 | “Why does checkout still fail after the last deploy?” | “checkout still fail” | Absent; diagnostic state is not settled | Not settled; diagnostic | Not decided | Question presupposition and successful-abstention/no-record policy |
+| CS-CORE-009 | “Support says it's fixed, but I'm still getting the same error.” | Model error: “I'm still getting the same error” | Absent; optional for unknown | unknown | Yes, when retained | Conflict policy and correction lineage |
+| CS-CORE-010 | “I keep hearing it's resolved, but nothing has actually changed on my end.” | Model error: “nothing has actually changed on my end” | Absent; optional for unknown | unknown | Yes, when retained | Attribution/conflict policy and correction lineage |
+| CS-CORE-012 | “It's mostly fixed, just a couple of edge cases remain.” | Model error: “a couple of edge cases remain” | Absent; optional for unknown | unknown | Yes, when retained | Partial-resolution normalization |
+| CS-CORE-028 | “The report says our churn rate is still within target.” | Model error: “still within target” | Absent; optional for unknown | unknown | Yes, when retained | Domain/relevance semantics |
+| CS-ADV-001 | “It's not resolved, despite what the release notes claim.” | Model error: “It's not resolved” | Absent; optional for unknown | unknown | Yes, when retained | Attribution/conflict policy |
+| CS-ADV-006 | “This isn't a permanent fix, but it's holding for now.” | Model error: “it's holding for now” | Absent; optional for unknown | unknown | Yes, when retained | Partial-resolution semantics |
+| CS-ADV-007 | “The equation was finally solved after three attempts.” | Model error: “The equation was finally solved” | Absent; optional for unknown | unknown | Yes, when retained | Condition/domain applicability |
+| CS-ADV-008 | “The DNS record resolved to the wrong IP again.” | Model error: “The DNS record resolved to the wrong IP again.” | Absent; optional for unknown | unknown | Yes, when retained | Condition/domain applicability |
+| CS-ADV-009 | “Our margins remain healthy despite rising costs.” | Model error: “Our margins remain healthy” | Absent; optional for unknown | unknown | Yes, when retained | Positive-state/relevance semantics |
 
 **Contract gap check:** none. Every unsolved concern is explicit and excluded
 rather than hidden as an optional field.
@@ -365,6 +384,7 @@ rather than hidden as an optional field.
 | Deferred question | Why unresolved | Evidence needed | Likely later owner |
 | --- | --- | --- | --- |
 | Automatic segmentation / producer target supply | NIC-17 supplied target spans | Discovery/overlap/no-safe-target evaluation | NIC-6/NIC-7 Processing |
+| Multi-fragment citations / targets spanning title plus content | NIC-15/17 tested one contiguous target_span | Citation-shape evaluation with cross-component targets | Later profile / Processing design |
 | Null abstention lifecycle | Allowed but absent in accepted runs | Labeled abstention and operational-policy cases | Interpreter/evaluation design |
 | Successful abstention versus no retained record | NIC-20 leaves null/abstention lifecycle open | Cases and policy that distinguish successful abstention from unknown and from operational failure | Interpreter/evaluation design |
 | Attribution/claimant | Diagnostic cases lack gold labels | Reviewed attributed-source corpus and authority policy | Processing/evidence policy |
@@ -457,14 +477,15 @@ These are contract examples, not code or source-policy decisions.
 
 ## Part 12 — Decision
 
-OBSERVATION V1 CONTRACT READY FOR RE-REVIEW
+OBSERVATION V1 CONTRACT READY FOR FINAL REVIEW
 
-This amended proposal is ready for fresh independent architectural review:
-each retained field has a bounded evidenced purpose, target identity is
-separate from state support and interpretation value, and unresolved semantics
-are explicit deferred constraints. Approval would permit NIC-6
-storage/integration design only—not implementation, production model selection,
-or downstream semantic changes.
+This amended proposal is ready for final independent architectural review:
+each retained field has a bounded evidenced purpose, citations use only the
+tested canonical single-span shape, target identity is separate from state
+support and interpretation value, and unresolved semantics are explicit
+deferred constraints. Approval would permit NIC-6 storage/integration design
+only—not implementation, production model selection, or downstream semantic
+changes.
 
 ## Review checklist
 
