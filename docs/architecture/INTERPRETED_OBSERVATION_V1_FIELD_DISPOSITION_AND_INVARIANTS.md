@@ -224,9 +224,10 @@ with segmentation/canonicalization and must not be silently invented by NIC-6.
 
 ### G. Execution/run identity
 
-Run identity answers which producer attempt created or checked a record, when,
-and with what operational outcome. It remains separate from cited-target
-provenance, interpretation-record identity, and interpretation value.
+Run identity answers which producer attempt yielded or checked a semantic
+result, when, and with what operational outcome. It remains separate from
+cited-target provenance, interpretation-record identity, and interpretation
+value.
 
 ---
 
@@ -255,7 +256,9 @@ Separate from the semantic core, every retained production attempt needs:
 - attempted_condition_citation, using the V1 citation shape
 - producer_kind: human, rule, or model
 - producer name and revision when applicable
-- attempted_at, plus produced_at when distinct
+- attempted_at, plus produced_at when distinct; produced_at means when this
+  attempt yielded or confirmed its semantic result, not the first persistence
+  time of the referenced Observation
 - outcome: currently produced or operational_failure; this vocabulary is not
   declared permanently closed
 - resulting_observation_id, required exactly when outcome is produced
@@ -266,12 +269,23 @@ operated on without relying on an Observation that does not exist.
 ### Run outcome/reference invariant
 
 For the current V1 run concept, one retained interpreter attempt has at most
-one resulting Observation:
+one resulting Observation reference:
 
 - **outcome = produced:** the run retains exactly one resulting_observation_id,
-  which identifies the exact semantic Observation the producer created.
+  which identifies the exact semantic Observation the attempt yielded or
+  confirmed. The referenced Observation may be newly retained from this attempt
+  or an already retained exact-result Observation reused or recognized by later
+  operational deduplication or rerun handling.
 - **outcome = operational_failure:** the run retains no
   resulting_observation_id and creates no semantic Observation.
+
+The run-to-Observation reference records which semantic Observation the attempt
+resulted in or confirmed. It does not by itself assert that the attempt created
+that immutable Observation record. NIC-5 adds no creator_run_id, creation kind,
+deduplication flag, storage field, or new outcome. If NIC-6 needs to distinguish
+physical record creation from later reuse or checks, that is an execution/storage
+design question that must preserve this semantic contract without inventing new
+semantic meaning.
 
 Operational failure remains a run outcome, not an Observation, and transient
 error prose does not enter InterpretedObservation semantic fields. If
