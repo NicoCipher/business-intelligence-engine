@@ -1,0 +1,332 @@
+"""Structural and boundary tests for the reviewed Observation V1 corpus.
+
+NIC-7 intentionally does not import an interpreter, create schema objects, or
+wire the pipeline. These tests lock the production contract fixtures and the
+future enforcement matrix before implementation begins in later issues.
+"""
+
+from dataclasses import fields
+
+from tests.condition_state_eval.dataset import CASES as NIC_17_CASES
+from tests.observation_v1_contract.corpus import (
+    BOUNDARY_CASES,
+    CONTRACT_CASES,
+    SEMANTIC_CONTRACT_VERSION,
+    STORAGE_CONTRACT_CASES,
+    BoundaryCase,
+    CitationExpectation,
+    Classification,
+    ConditionState,
+    EnforcementLayer,
+    ObservationExpectation,
+    RunExpectation,
+    RunOutcome,
+    SourcePart,
+    StorageExpectation,
+    resolve_citation,
+    validate_contract_cases,
+)
+from tests.semantic_eval.corpus import CORPUS as BASELINE_CORPUS
+from tests.semantic_eval.corpus import PRESERVE_CASE_IDS
+
+_CASES = {case.case_id: case for case in CONTRACT_CASES}
+_BOUNDARIES = {case.case_id: case for case in BOUNDARY_CASES}
+_STORAGE = {case.case_id: case for case in STORAGE_CONTRACT_CASES}
+
+
+def test_contract_corpus_has_no_structural_errors():
+    assert validate_contract_cases(CONTRACT_CASES) == []
+
+
+def test_case_ids_are_unique_across_contract_sections():
+    ids = [case.case_id for case in (*CONTRACT_CASES, *BOUNDARY_CASES)]
+    assert len(ids) == len(set(ids))
+
+
+def test_semantic_core_contains_only_approved_fields():
+    assert {field.name for field in fields(ObservationExpectation)} == {
+        "condition_citation",
+        "condition_state",
+        "state_evidence_citation",
+        "semantic_contract_version",
+    }
+    assert {field.name for field in fields(CitationExpectation)} == {
+        "source_part",
+        "literal_text",
+        "occurrence",
+    }
+
+
+def test_no_model_confidence_or_downstream_authority_enters_cases():
+    forbidden = {
+        "confidence",
+        "rationale_output",
+        "raw_output",
+        "topic_key",
+        "problem_id",
+        "opportunity_id",
+        "source_capability",
+    }
+    observation_fields = {field.name for field in fields(ObservationExpectation)}
+    assert forbidden.isdisjoint(observation_fields)
+
+
+def test_run_expectations_retain_attempted_input_contract_and_outcome():
+    assert {field.name for field in fields(RunExpectation)} == {
+        "attempted_signal_id",
+        "attempted_condition_citation",
+        "attempted_semantic_contract_version",
+        "outcome",
+        "resulting_observation_index",
+    }
+
+
+def test_overlap_inclusive_occurrence_is_canonical():
+    case = _CASES["OV1-CITATION-OVERLAP-ORDINAL"]
+    target = case.attempted_targets[0]
+    assert case.signal is not None
+    assert resolve_citation(
+        case.signal, CitationExpectation(SourcePart.TITLE, "aa", 1)
+    ) == (0, 2)
+    assert resolve_citation(case.signal, target) == (1, 3)
+    assert resolve_citation(
+        case.signal, CitationExpectation(SourcePart.TITLE, "aa", 3)
+    ) == (2, 4)
+
+
+def test_citation_matching_is_exact_case_preserving_and_source_part_scoped():
+    case = _CASES["OV1-CITATION-SOURCE-PART"]
+    assert case.signal is not None
+    target = case.attempted_targets[0]
+    assert resolve_citation(case.signal, target) == (
+        0,
+        len("Checkout status is unresolved"),
+    )
+    assert (
+        resolve_citation(
+            case.signal,
+            CitationExpectation(SourcePart.CONTENT, "checkout status"),
+        )
+        is None
+    )
+    assert resolve_citation(
+        case.signal,
+        CitationExpectation(SourcePart.TITLE, "Checkout status"),
+    ) == (0, len("Checkout status"))
+
+
+def test_active_and_resolved_require_in_target_support():
+    for case in CONTRACT_CASES:
+        for observation in case.expected_observations or ():
+            if observation.condition_state in {
+                ConditionState.ACTIVE,
+                ConditionState.RESOLVED,
+            }:
+                assert observation.state_evidence_citation is not None
+
+
+def test_unknown_support_remains_optional():
+    unknown = [
+        observation
+        for case in CONTRACT_CASES
+        for observation in (case.expected_observations or ())
+        if observation.condition_state is ConditionState.UNKNOWN
+    ]
+    assert unknown
+    assert any(observation.state_evidence_citation is None for observation in unknown)
+    assert any(
+        observation.state_evidence_citation is not None for observation in unknown
+    )
+
+
+def test_one_signal_may_have_multiple_observations_from_separate_attempts():
+    case = _CASES["OV1-MULTIPLE-TARGETS"]
+    assert len(case.attempted_targets) == 2
+    assert len(case.expected_observations or ()) == 2
+    assert len(case.expected_runs or ()) == 2
+    assert {
+        observation.condition_state for observation in case.expected_observations or ()
+    } == {ConditionState.ACTIVE, ConditionState.RESOLVED}
+
+
+def test_zero_target_and_operational_failure_are_distinct():
+    no_target = _CASES["OV1-NO-SUPPLIED-TARGET"]
+    assert no_target.attempted_targets == ()
+    assert no_target.expected_observations == ()
+    assert no_target.expected_runs == ()
+
+    failure = _CASES["OV1-OPERATIONAL-FAILURE"]
+    assert failure.expected_observations == ()
+    assert failure.expected_runs is not None
+    assert failure.expected_runs[0].outcome is RunOutcome.OPERATIONAL_FAILURE
+    assert failure.expected_runs[0].resulting_observation_index is None
+    assert failure.signal is not None
+    assert failure.expected_runs[0].attempted_signal_id == failure.signal.signal_id
+    assert (
+        failure.expected_runs[0].attempted_semantic_contract_version
+        == SEMANTIC_CONTRACT_VERSION
+    )
+
+
+def test_successful_abstention_remains_unresolved_not_unknown_or_failure():
+    case = _CASES["OV1-SUCCESSFUL-NO-OBSERVATION"]
+    assert case.classification is Classification.UNRESOLVED
+    assert case.expected_observations is None
+    assert case.expected_runs is None
+
+
+def test_question_attribution_and_target_equivalence_remain_unresolved():
+    ids = {
+        "OV1-WH-QUESTION",
+        "OV1-ATTRIBUTED-CLAIM",
+        "OV1-ALTERNATE-TARGET-EQUIVALENCE",
+    }
+    for case_id in ids:
+        case = _CASES[case_id]
+        assert case.classification is Classification.UNRESOLVED
+        assert case.deferred_owner
+        assert case.expected_observations is None
+
+
+def test_lexical_false_positive_controls_are_unknown():
+    ids = {
+        "OV1-LEXICAL-FIXED-RATE",
+        "OV1-LEXICAL-DNS-RESOLVED",
+        "OV1-LEXICAL-STILL-WITHIN-TARGET",
+    }
+    for case_id in ids:
+        observations = _CASES[case_id].expected_observations
+        assert observations is not None and len(observations) == 1
+        assert observations[0].condition_state is ConditionState.UNKNOWN
+
+
+def test_narrow_greenhouse_state_grants_no_capability_field():
+    case = _CASES["OV1-SOURCE-AUTHORITY-BOUNDARY"]
+    assert case.signal is not None and case.signal.source == "greenhouse_jobs"
+    assert case.expected_observations is not None
+    assert case.expected_observations[0].condition_state is ConditionState.ACTIVE
+    assert "source_capability" not in {
+        field.name for field in fields(ObservationExpectation)
+    }
+
+
+def test_boundary_categories_preserve_existing_ownership():
+    expected: dict[str, tuple[Classification, str]] = {
+        "OV1-BOUNDARY-C2": (Classification.LIMITATION, "Correlation"),
+        "OV1-BOUNDARY-C4": (Classification.LIMITATION, "Correlation"),
+        "OV1-BOUNDARY-CONFIDENCE": (Classification.LIMITATION, "Analysis"),
+        "OV1-BOUNDARY-CONTESTED": (
+            Classification.INEXPRESSIBLE,
+            "Correlation/Analysis",
+        ),
+        "OV1-BOUNDARY-DEMAND-AUTHORITY": (
+            Classification.INEXPRESSIBLE,
+            "Evidence policy",
+        ),
+        "OV1-BOUNDARY-P3": (Classification.UNRESOLVED, "Problem identity"),
+    }
+    assert {
+        case_id: (case.classification, case.owner)
+        for case_id, case in _BOUNDARIES.items()
+    } == expected
+
+
+def test_boundary_case_shape_cannot_carry_observation_answers():
+    assert {field.name for field in fields(BoundaryCase)} == {
+        "case_id",
+        "classification",
+        "evidence_refs",
+        "owner",
+        "rationale",
+    }
+
+
+def test_storage_matrix_covers_nic6_direct_sql_requirements():
+    required = {
+        "STORAGE-OBS-NULL-ID",
+        "STORAGE-RUN-NULL-ID",
+        "STORAGE-OBS-REPEATED-NULL",
+        "STORAGE-RUN-REPEATED-NULL",
+        "STORAGE-OBS-UPDATE",
+        "STORAGE-OBS-DELETE",
+        "STORAGE-RUN-UPDATE",
+        "STORAGE-RUN-DELETE",
+        "STORAGE-OBS-SAME-ID-INSERT",
+        "STORAGE-RUN-SAME-ID-INSERT",
+        "STORAGE-OBS-INSERT-OR-REPLACE",
+        "STORAGE-OBS-REPLACE-INTO",
+        "STORAGE-RUN-INSERT-OR-REPLACE",
+        "STORAGE-RUN-REPLACE-INTO",
+        "STORAGE-OBS-FRESH-ID",
+        "STORAGE-RUN-FRESH-ID",
+        "STORAGE-SIGNAL-TEXT-UPDATE",
+        "STORAGE-SIGNAL-REPLACE-OBS",
+        "STORAGE-SIGNAL-REPLACE-FAILURE",
+    }
+    assert required <= _STORAGE.keys()
+    for case_id in required:
+        assert _STORAGE[case_id].enforcement is EnforcementLayer.SQLITE
+
+
+def test_rejected_mutations_preserve_original_rows():
+    replacement_ids = {
+        "STORAGE-OBS-INSERT-OR-REPLACE",
+        "STORAGE-OBS-REPLACE-INTO",
+        "STORAGE-RUN-INSERT-OR-REPLACE",
+        "STORAGE-RUN-REPLACE-INTO",
+    }
+    for case_id in replacement_ids:
+        case = _STORAGE[case_id]
+        assert case.expectation is StorageExpectation.REJECT
+        assert case.preserves_original is True
+
+
+def test_storage_matrix_covers_lineage_correspondence_and_atomicity():
+    required_expectations = {
+        "STORAGE-DUPLICATE-SUCCESSOR": StorageExpectation.REJECT,
+        "STORAGE-MULTIPLE-ROOTS": StorageExpectation.ALLOW,
+        "STORAGE-SELF-SUPERSESSION": StorageExpectation.REJECT,
+        "STORAGE-CYCLE": StorageExpectation.REJECT,
+        "STORAGE-PRODUCED-SIGNAL-MISMATCH": StorageExpectation.REJECT,
+        "STORAGE-PRODUCED-PART-MISMATCH": StorageExpectation.REJECT,
+        "STORAGE-PRODUCED-LITERAL-MISMATCH": StorageExpectation.REJECT,
+        "STORAGE-PRODUCED-OCCURRENCE-MISMATCH": StorageExpectation.REJECT,
+        "STORAGE-PRODUCED-CONTRACT-MISMATCH": StorageExpectation.REJECT,
+        "STORAGE-PRODUCED-EXACT-MATCH": StorageExpectation.ALLOW,
+        "STORAGE-FAILURE-NO-RESULT": StorageExpectation.ALLOW,
+        "STORAGE-FAILURE-WITH-RESULT": StorageExpectation.REJECT,
+        "STORAGE-PRODUCED-NO-RESULT": StorageExpectation.REJECT,
+        "STORAGE-ATOMIC-ROLLBACK": StorageExpectation.ROLLBACK,
+    }
+    assert {
+        case_id: _STORAGE[case_id].expectation for case_id in required_expectations
+    } == required_expectations
+
+
+def test_frozen_semantic_baseline_remains_unchanged():
+    assert len(BASELINE_CORPUS) == 12
+    assert {case.id for case in BASELINE_CORPUS} == {
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "P1",
+        "P2",
+        "P3",
+        "N1_N2",
+        "S1",
+        "S2",
+        "S3",
+        "CONFIDENCE_PAIR",
+    }
+    assert PRESERVE_CASE_IDS == frozenset({"C1", "C3", "P1", "P2", "S3"})
+
+
+def test_frozen_nic17_corpus_remains_unchanged():
+    assert len(NIC_17_CASES) == 44
+    assert sum(case.scored for case in NIC_17_CASES) == 41
+    assert {case.case_id for case in NIC_17_CASES if not case.scored} == {
+        "CS-CORE-007",
+        "CS-CORE-008",
+        "CS-ADV-004",
+    }
