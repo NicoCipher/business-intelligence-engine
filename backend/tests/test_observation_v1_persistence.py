@@ -154,6 +154,31 @@ def test_observation_structural_constraints(db, overrides):
         _insert_observation(conn, **overrides)
 
 
+@pytest.mark.parametrize("non_integer_ordinal", (1.5, 0.5, 2.25))
+@pytest.mark.parametrize(
+    "field",
+    ("condition_occurrence_ordinal", "state_evidence_occurrence_ordinal"),
+)
+def test_observation_ordinals_reject_non_integer_real_values(db, field, non_integer_ordinal):
+    with database.get_connection() as conn, pytest.raises(sqlite3.IntegrityError):
+        _insert_observation(conn, **{field: non_integer_ordinal})
+
+
+def test_observation_ordinals_store_positive_integers(db):
+    with database.get_connection() as conn:
+        _insert_observation(
+            conn,
+            condition_occurrence_ordinal=2,
+            state_evidence_occurrence_ordinal=3,
+        )
+        row = conn.execute(
+            """SELECT typeof(condition_occurrence_ordinal),
+                      typeof(state_evidence_occurrence_ordinal)
+               FROM interpreted_observations WHERE observation_id = 'observation-1'"""
+        ).fetchone()
+    assert tuple(row) == ("integer", "integer")
+
+
 def test_runs_are_append_only_and_enforce_outcome_cardinality(db):
     with database.get_connection() as conn:
         _insert_observation(conn)
@@ -200,6 +225,25 @@ def test_produced_run_must_match_its_observation_exactly(db, overrides):
         _insert_observation(conn)
         with pytest.raises(sqlite3.IntegrityError):
             _insert_run(conn, **overrides)
+
+
+@pytest.mark.parametrize("non_integer_ordinal", (1.5, 0.5, 2.25))
+def test_attempted_run_ordinal_rejects_non_integer_real_values(db, non_integer_ordinal):
+    with database.get_connection() as conn:
+        _insert_observation(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_run(conn, attempted_condition_occurrence_ordinal=non_integer_ordinal)
+
+
+def test_attempted_run_ordinal_stores_a_positive_integer(db):
+    with database.get_connection() as conn:
+        _insert_observation(conn)
+        _insert_run(conn, attempted_condition_occurrence_ordinal=1)
+        row = conn.execute(
+            """SELECT typeof(attempted_condition_occurrence_ordinal)
+               FROM observation_runs WHERE run_id = 'run-1'"""
+        ).fetchone()
+    assert row[0] == "integer"
 
 
 def test_citation_bearing_signals_are_protected_without_freezing_unrelated_rows(db):

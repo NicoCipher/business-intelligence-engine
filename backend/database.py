@@ -523,7 +523,8 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
         condition_literal_text TEXT NOT NULL
             CHECK (condition_literal_text <> ''),
         condition_occurrence_ordinal INTEGER NOT NULL
-            CHECK (condition_occurrence_ordinal > 0),
+            CHECK (typeof(condition_occurrence_ordinal) = 'integer'
+                   AND condition_occurrence_ordinal > 0),
         state_evidence_source_part TEXT
             CHECK (state_evidence_source_part IN ('title', 'content')),
         state_evidence_literal_text TEXT,
@@ -544,6 +545,7 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
              AND state_evidence_literal_text IS NOT NULL
              AND state_evidence_literal_text <> ''
              AND state_evidence_occurrence_ordinal IS NOT NULL
+             AND typeof(state_evidence_occurrence_ordinal) = 'integer'
              AND state_evidence_occurrence_ordinal > 0)
         ),
         CHECK (
@@ -570,7 +572,8 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
         attempted_condition_literal_text TEXT NOT NULL
             CHECK (attempted_condition_literal_text <> ''),
         attempted_condition_occurrence_ordinal INTEGER NOT NULL
-            CHECK (attempted_condition_occurrence_ordinal > 0),
+            CHECK (typeof(attempted_condition_occurrence_ordinal) = 'integer'
+                   AND attempted_condition_occurrence_ordinal > 0),
         attempted_semantic_contract_version TEXT NOT NULL
             CHECK (attempted_semantic_contract_version <> ''),
         producer_kind TEXT NOT NULL CHECK (producer_kind IN ('human', 'rule', 'model')),
