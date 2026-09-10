@@ -211,6 +211,38 @@ def test_observation_citation_literals_store_non_empty_text_or_complete_null_sup
         ).fetchone()[0] is None
 
 
+@pytest.mark.parametrize(
+    "field",
+    (
+        "observation_id",
+        "signal_id",
+        "condition_source_part",
+        "condition_literal_text",
+        "state_evidence_source_part",
+        "state_evidence_literal_text",
+        "condition_state",
+        "semantic_contract_version",
+        "supersedes_observation_id",
+        "recorded_at",
+    ),
+)
+def test_observation_model_text_fields_reject_blob_values(db, field):
+    with database.get_connection() as conn, pytest.raises(sqlite3.IntegrityError):
+        _insert_observation(conn, **{field: sqlite3.Binary(b"AB")})
+
+
+def test_observation_optional_text_fields_accept_approved_nulls(db):
+    with database.get_connection() as conn:
+        _insert_observation(
+            conn,
+            condition_state="unknown",
+            state_evidence_source_part=None,
+            state_evidence_literal_text=None,
+            state_evidence_occurrence_ordinal=None,
+            supersedes_observation_id=None,
+        )
+
+
 def test_runs_are_append_only_and_enforce_outcome_cardinality(db):
     with database.get_connection() as conn:
         _insert_observation(conn)
@@ -289,6 +321,43 @@ def test_attempted_run_citation_literal_rejects_a_blob_value(db):
             """SELECT typeof(attempted_condition_literal_text) FROM observation_runs
                WHERE run_id = 'run-1'"""
         ).fetchone()[0] == "text"
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "run_id",
+        "attempted_signal_id",
+        "attempted_condition_source_part",
+        "attempted_condition_literal_text",
+        "attempted_semantic_contract_version",
+        "producer_kind",
+        "producer_name",
+        "producer_revision",
+        "attempted_at",
+        "outcome",
+        "produced_at",
+        "resulting_observation_id",
+    ),
+)
+def test_run_model_text_fields_reject_blob_values(db, field):
+    with database.get_connection() as conn:
+        _insert_observation(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_run(conn, **{field: sqlite3.Binary(b"AB")})
+
+
+def test_run_optional_text_fields_accept_approved_nulls(db):
+    with database.get_connection() as conn:
+        _insert_run(
+            conn,
+            "failure-with-optional-nulls",
+            producer_name=None,
+            producer_revision=None,
+            outcome="operational_failure",
+            produced_at=None,
+            resulting_observation_id=None,
+        )
 
 
 def test_citation_bearing_signals_are_protected_without_freezing_unrelated_rows(db):

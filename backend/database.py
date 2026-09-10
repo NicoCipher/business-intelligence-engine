@@ -516,10 +516,14 @@ def _migrate_v2(conn) -> None:
 _OBSERVATION_V1_DDL_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS interpreted_observations (
-        observation_id TEXT NOT NULL PRIMARY KEY,
-        signal_id TEXT NOT NULL REFERENCES signals(id) ON DELETE RESTRICT,
+        observation_id TEXT NOT NULL PRIMARY KEY
+            CHECK (typeof(observation_id) = 'text'),
+        signal_id TEXT NOT NULL
+            CHECK (typeof(signal_id) = 'text')
+            REFERENCES signals(id) ON DELETE RESTRICT,
         condition_source_part TEXT NOT NULL
-            CHECK (condition_source_part IN ('title', 'content')),
+            CHECK (typeof(condition_source_part) = 'text'
+                   AND condition_source_part IN ('title', 'content')),
         condition_literal_text TEXT NOT NULL
             CHECK (typeof(condition_literal_text) = 'text'
                    AND condition_literal_text <> ''),
@@ -527,16 +531,24 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
             CHECK (typeof(condition_occurrence_ordinal) = 'integer'
                    AND condition_occurrence_ordinal > 0),
         state_evidence_source_part TEXT
-            CHECK (state_evidence_source_part IN ('title', 'content')),
+            CHECK (state_evidence_source_part IS NULL OR (
+                typeof(state_evidence_source_part) = 'text'
+                AND state_evidence_source_part IN ('title', 'content')
+            )),
         state_evidence_literal_text TEXT,
         state_evidence_occurrence_ordinal INTEGER,
         condition_state TEXT NOT NULL
-            CHECK (condition_state IN ('active', 'resolved', 'unknown')),
+            CHECK (typeof(condition_state) = 'text'
+                   AND condition_state IN ('active', 'resolved', 'unknown')),
         semantic_contract_version TEXT NOT NULL
-            CHECK (semantic_contract_version <> ''),
+            CHECK (typeof(semantic_contract_version) = 'text'
+                   AND semantic_contract_version <> ''),
         supersedes_observation_id TEXT
+            CHECK (supersedes_observation_id IS NULL
+                   OR typeof(supersedes_observation_id) = 'text')
             REFERENCES interpreted_observations(observation_id) ON DELETE RESTRICT,
-        recorded_at TEXT NOT NULL CHECK (recorded_at <> ''),
+        recorded_at TEXT NOT NULL
+            CHECK (typeof(recorded_at) = 'text' AND recorded_at <> ''),
         CHECK (
             (state_evidence_source_part IS NULL
              AND state_evidence_literal_text IS NULL
@@ -567,10 +579,13 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
     """,
     """
     CREATE TABLE IF NOT EXISTS observation_runs (
-        run_id TEXT NOT NULL PRIMARY KEY,
-        attempted_signal_id TEXT NOT NULL REFERENCES signals(id) ON DELETE RESTRICT,
+        run_id TEXT NOT NULL PRIMARY KEY CHECK (typeof(run_id) = 'text'),
+        attempted_signal_id TEXT NOT NULL
+            CHECK (typeof(attempted_signal_id) = 'text')
+            REFERENCES signals(id) ON DELETE RESTRICT,
         attempted_condition_source_part TEXT NOT NULL
-            CHECK (attempted_condition_source_part IN ('title', 'content')),
+            CHECK (typeof(attempted_condition_source_part) = 'text'
+                   AND attempted_condition_source_part IN ('title', 'content')),
         attempted_condition_literal_text TEXT NOT NULL
             CHECK (typeof(attempted_condition_literal_text) = 'text'
                    AND attempted_condition_literal_text <> ''),
@@ -578,14 +593,28 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
             CHECK (typeof(attempted_condition_occurrence_ordinal) = 'integer'
                    AND attempted_condition_occurrence_ordinal > 0),
         attempted_semantic_contract_version TEXT NOT NULL
-            CHECK (attempted_semantic_contract_version <> ''),
-        producer_kind TEXT NOT NULL CHECK (producer_kind IN ('human', 'rule', 'model')),
-        producer_name TEXT CHECK (producer_name IS NULL OR producer_name <> ''),
-        producer_revision TEXT CHECK (producer_revision IS NULL OR producer_revision <> ''),
-        attempted_at TEXT NOT NULL CHECK (attempted_at <> ''),
-        outcome TEXT NOT NULL CHECK (outcome IN ('produced', 'operational_failure')),
-        produced_at TEXT,
+            CHECK (typeof(attempted_semantic_contract_version) = 'text'
+                   AND attempted_semantic_contract_version <> ''),
+        producer_kind TEXT NOT NULL
+            CHECK (typeof(producer_kind) = 'text'
+                   AND producer_kind IN ('human', 'rule', 'model')),
+        producer_name TEXT CHECK (producer_name IS NULL OR (
+            typeof(producer_name) = 'text' AND producer_name <> ''
+        )),
+        producer_revision TEXT CHECK (producer_revision IS NULL OR (
+            typeof(producer_revision) = 'text' AND producer_revision <> ''
+        )),
+        attempted_at TEXT NOT NULL
+            CHECK (typeof(attempted_at) = 'text' AND attempted_at <> ''),
+        outcome TEXT NOT NULL
+            CHECK (typeof(outcome) = 'text'
+                   AND outcome IN ('produced', 'operational_failure')),
+        produced_at TEXT CHECK (produced_at IS NULL OR (
+            typeof(produced_at) = 'text' AND produced_at <> ''
+        )),
         resulting_observation_id TEXT
+            CHECK (resulting_observation_id IS NULL
+                   OR typeof(resulting_observation_id) = 'text')
             REFERENCES interpreted_observations(observation_id) ON DELETE RESTRICT,
         CHECK (
             (outcome = 'produced'
