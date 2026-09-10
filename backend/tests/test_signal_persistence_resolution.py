@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import database
 from collectors.base import (
     BaseCollector,
+    SignalDedupeKey,
+    SignalPersistenceResolution,
     SignalPersistenceStatus,
     persist_signals,
 )
@@ -60,6 +62,8 @@ def test_new_signal_returns_hydrated_sqlite_identity(fresh_db):
     assert result.failed_count == 0
     resolution = result.resolutions[0]
     assert resolution.status is SignalPersistenceStatus.INSERTED
+    assert resolution.input_index == 0
+    assert resolution.dedupe_key == SignalDedupeKey("hn", "one", "business")
     assert resolution.canonical_signal_id == "collector-temporary-id"
     assert resolution.persisted_signal is not incoming
     assert resolution.persisted_signal == incoming
@@ -91,7 +95,9 @@ def test_duplicate_returns_existing_identity_and_stored_evidence(fresh_db):
     assert result.existing_count == 1
     resolution = result.resolutions[0]
     assert resolution.status is SignalPersistenceStatus.EXISTING
+    assert resolution.input_index == 0
     assert resolution.input_signal_id == "collector-temporary-id"
+    assert resolution.dedupe_key == SignalDedupeKey("hn", "duplicate", "business")
     assert resolution.canonical_signal_id == "canonical-signal-id"
     assert resolution.canonical_signal_id != recollected.id
     assert resolution.persisted_signal is not recollected
@@ -121,6 +127,7 @@ def test_bulk_resolutions_are_ordered_and_do_not_cross_signal_ids(fresh_db):
         "temporary-duplicate-id",
         "third-id",
     ]
+    assert [r.input_index for r in result.resolutions] == [0, 1, 2]
     assert [r.status for r in result.resolutions] == [
         SignalPersistenceStatus.INSERTED,
         SignalPersistenceStatus.EXISTING,
@@ -165,6 +172,8 @@ def test_partial_failures_never_receive_a_canonical_mapping(fresh_db):
     assert result.persisted_count == 1
     assert result.resolutions[0].canonical_signal_id == "valid-id"
     failed = result.resolutions[1]
+    assert failed.input_index == 1
+    assert failed.dedupe_key == SignalDedupeKey(None, "invalid", "business")
     assert failed.status is SignalPersistenceStatus.FAILED
     assert failed.canonical_signal_id is None
     assert failed.persisted_signal is None
@@ -172,6 +181,129 @@ def test_partial_failures_never_receive_a_canonical_mapping(fresh_db):
 
     with database.get_connection() as conn:
         assert conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0] == 1
+
+
+def test_new_row_is_rolled_back_when_canonical_hydration_fails(fresh_db):
+    malformed = _signal("malformed-new", signal_id="malformed-input-id")
+    malformed.entity_ids = "not-a-list"  # type: ignore[assignment]
+
+    result = persist_signals([malformed])
+
+    assert result.inserted_count == 0
+    assert result.failed_count == 1
+    failed = result.resolutions[0]
+    assert failed.input_index == 0
+    assert failed.dedupe_key == SignalDedupeKey("hn", "malformed-new", "business")
+    assert failed.status is SignalPersistenceStatus.FAILED
+    assert failed.canonical_signal_id is None
+    assert failed.persisted_signal is None
+
+    with database.get_connection() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE source_id = 'malformed-new'"
+        ).fetchone()[0] == 0
+
+
+def test_existing_malformed_row_is_reported_without_mutation(fresh_db):
+    original = _signal("malformed-existing", signal_id="stored-malformed-id")
+    row = original.to_db_row()
+    row["entity_ids"] = '"not-a-list"'
+    with database.get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO signals
+              (id, source, source_id, url, title, content,
+               platform_score, comment_count, entity_ids, tags,
+               raw_metadata, collected_at, processed, domain)
+            VALUES
+              (:id, :source, :source_id, :url, :title, :content,
+               :platform_score, :comment_count, :entity_ids, :tags,
+               :raw_metadata, :collected_at, :processed, :domain)
+            """,
+            row,
+        )
+        conn.commit()
+
+    result = persist_signals([_signal("malformed-existing", signal_id="new-temp-id")])
+
+    assert result.inserted_count == 0
+    assert result.existing_count == 0
+    assert result.failed_count == 1
+    failed = result.resolutions[0]
+    assert failed.dedupe_key == SignalDedupeKey("hn", "malformed-existing", "business")
+    assert failed.status is SignalPersistenceStatus.FAILED
+    assert failed.canonical_signal_id is None
+    with database.get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, entity_ids FROM signals WHERE source_id = 'malformed-existing'"
+        ).fetchone()
+    assert tuple(row) == ("stored-malformed-id", '"not-a-list"')
+
+
+def test_same_batch_duplicate_uses_one_canonical_stored_signal(fresh_db):
+    first = _signal(
+        "same-batch",
+        signal_id="shared-temporary-id",
+        title="First title wins",
+        content="First content wins",
+    )
+    second = _signal(
+        "same-batch",
+        signal_id="shared-temporary-id",
+        title="Second title must not win",
+        content="Second content must not win",
+    )
+
+    result = persist_signals([first, second])
+
+    assert result.inserted_count == 1
+    assert result.existing_count == 1
+    assert [resolution.input_index for resolution in result.resolutions] == [0, 1]
+    assert [resolution.input_signal_id for resolution in result.resolutions] == [
+        "shared-temporary-id",
+        "shared-temporary-id",
+    ]
+    assert [resolution.dedupe_key for resolution in result.resolutions] == [
+        SignalDedupeKey("hn", "same-batch", "business"),
+        SignalDedupeKey("hn", "same-batch", "business"),
+    ]
+    assert [resolution.status for resolution in result.resolutions] == [
+        SignalPersistenceStatus.INSERTED,
+        SignalPersistenceStatus.EXISTING,
+    ]
+    assert [resolution.canonical_signal_id for resolution in result.resolutions] == [
+        "shared-temporary-id",
+        "shared-temporary-id",
+    ]
+    assert result.resolutions[1].persisted_signal.title == "First title wins"
+    assert result.resolutions[1].persisted_signal.content == "First content wins"
+    with database.get_connection() as conn:
+        row = conn.execute(
+            "SELECT title, content FROM signals WHERE source_id = 'same-batch'"
+        ).fetchone()
+    assert tuple(row) == ("First title wins", "First content wins")
+
+
+def test_resolution_rejects_invalid_status_and_canonical_signal_combinations():
+    canonical = _signal("invariant", signal_id="canonical-id")
+    dedupe_key = SignalDedupeKey("hn", "invariant", "business")
+
+    with pytest.raises(ValueError, match="failed persistence cannot carry"):
+        SignalPersistenceResolution(
+            input_index=0,
+            input_signal_id="temporary-id",
+            dedupe_key=dedupe_key,
+            status=SignalPersistenceStatus.FAILED,
+            persisted_signal=canonical,
+            failure_detail="failed",
+        )
+    with pytest.raises(ValueError, match="successful persistence requires"):
+        SignalPersistenceResolution(
+            input_index=0,
+            input_signal_id="temporary-id",
+            dedupe_key=dedupe_key,
+            status=SignalPersistenceStatus.INSERTED,
+        )
 
 
 def test_legacy_collector_count_contract_derives_from_resolution(fresh_db):

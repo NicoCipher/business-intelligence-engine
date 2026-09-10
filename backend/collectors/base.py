@@ -58,6 +58,15 @@ class SignalPersistenceStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class SignalDedupeKey:
+    """The exact SQLite uniqueness identity for a Signal persistence attempt."""
+
+    source: str
+    source_id: str
+    domain: str
+
+
+@dataclass(frozen=True)
 class SignalPersistenceResolution:
     """Canonical persistence result for one input Signal.
 
@@ -67,10 +76,38 @@ class SignalPersistenceResolution:
     immutable stored evidence.
     """
 
+    input_index: int
     input_signal_id: str
+    dedupe_key: SignalDedupeKey
     status: SignalPersistenceStatus
     persisted_signal: Signal | None = None
     failure_detail: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.input_index < 0:
+            raise ValueError("input_index cannot be negative")
+        if self.status is SignalPersistenceStatus.FAILED:
+            if self.persisted_signal is not None:
+                raise ValueError("failed persistence cannot carry a canonical Signal")
+            if not self.failure_detail:
+                raise ValueError("failed persistence requires failure detail")
+            return
+        if self.status not in {
+            SignalPersistenceStatus.INSERTED,
+            SignalPersistenceStatus.EXISTING,
+        }:
+            raise ValueError(f"unknown Signal persistence status: {self.status!r}")
+        if self.persisted_signal is None:
+            raise ValueError("successful persistence requires a canonical Signal")
+        if self.failure_detail is not None:
+            raise ValueError("successful persistence cannot carry failure detail")
+        persisted_key = SignalDedupeKey(
+            source=self.persisted_signal.source,
+            source_id=self.persisted_signal.source_id,
+            domain=self.persisted_signal.domain,
+        )
+        if persisted_key != self.dedupe_key:
+            raise ValueError("canonical Signal does not match the persistence dedupe key")
 
     @property
     def succeeded(self) -> bool:
@@ -89,6 +126,12 @@ class SignalPersistenceResult:
     """Ordered canonical resolutions for a bulk Signal persistence request."""
 
     resolutions: tuple[SignalPersistenceResolution, ...]
+
+    def __post_init__(self) -> None:
+        expected_indices = tuple(range(len(self.resolutions)))
+        actual_indices = tuple(resolution.input_index for resolution in self.resolutions)
+        if actual_indices != expected_indices:
+            raise ValueError("resolutions must retain input order and contiguous indices")
 
     @property
     def inserted_count(self) -> int:
@@ -312,6 +355,30 @@ def _hydrate_persisted_signal(row: sqlite3.Row) -> Signal:
     )
 
 
+def _dedupe_key_for_signal(signal: Signal) -> SignalDedupeKey:
+    """Capture the input's store identity before any persistence attempt."""
+    return SignalDedupeKey(
+        source=signal.source,
+        source_id=signal.source_id,
+        domain=signal.domain,
+    )
+
+
+def _failed_resolution(
+    input_index: int,
+    signal: Signal,
+    dedupe_key: SignalDedupeKey,
+    detail: str,
+) -> SignalPersistenceResolution:
+    return SignalPersistenceResolution(
+        input_index=input_index,
+        input_signal_id=signal.id,
+        dedupe_key=dedupe_key,
+        status=SignalPersistenceStatus.FAILED,
+        failure_detail=detail,
+    )
+
+
 def persist_signals(signals: list[Signal]) -> SignalPersistenceResult:
     """
     Write a batch of Signals and resolve every input to its canonical row.
@@ -328,8 +395,12 @@ def persist_signals(signals: list[Signal]) -> SignalPersistenceResult:
     logger = logging.getLogger("collector.persist")
     resolutions: list[SignalPersistenceResolution] = []
     with database.get_connection() as conn:
-        for sig in signals:
+        for input_index, sig in enumerate(signals):
+            dedupe_key = _dedupe_key_for_signal(sig)
+            savepoint_active = False
             try:
+                conn.execute("SAVEPOINT signal_persistence")
+                savepoint_active = True
                 row = sig.to_db_row()
                 cursor = conn.execute(
                     """
@@ -352,40 +423,53 @@ def persist_signals(signals: list[Signal]) -> SignalPersistenceResult:
                     FROM signals
                     WHERE source = ? AND source_id = ? AND domain = ?
                     """,
-                    (sig.source, sig.source_id, sig.domain),
+                    (
+                        dedupe_key.source,
+                        dedupe_key.source_id,
+                        dedupe_key.domain,
+                    ),
                 ).fetchone()
                 if canonical_row is None:
                     # INSERT OR IGNORE may suppress a rejected row (for
                     # example a constraint violation), so no ID can be
                     # truthfully inferred from the caller's temporary one.
+                    # A newly inserted row without a canonical re-read must
+                    # not escape this persistence attempt.
+                    conn.execute("ROLLBACK TO SAVEPOINT signal_persistence")
+                    conn.execute("RELEASE SAVEPOINT signal_persistence")
+                    savepoint_active = False
                     resolutions.append(
-                        SignalPersistenceResolution(
-                            input_signal_id=sig.id,
-                            status=SignalPersistenceStatus.FAILED,
-                            failure_detail="no canonical Signal row was established",
+                        _failed_resolution(
+                            input_index,
+                            sig,
+                            dedupe_key,
+                            "no canonical Signal row was established",
                         )
                     )
                     continue
 
-                resolutions.append(
-                    SignalPersistenceResolution(
-                        input_signal_id=sig.id,
-                        status=(
-                            SignalPersistenceStatus.INSERTED
-                            if cursor.rowcount > 0
-                            else SignalPersistenceStatus.EXISTING
-                        ),
-                        persisted_signal=_hydrate_persisted_signal(canonical_row),
-                    )
+                persisted_signal = _hydrate_persisted_signal(canonical_row)
+                resolution = SignalPersistenceResolution(
+                    input_index=input_index,
+                    input_signal_id=sig.id,
+                    dedupe_key=dedupe_key,
+                    status=(
+                        SignalPersistenceStatus.INSERTED
+                        if cursor.rowcount > 0
+                        else SignalPersistenceStatus.EXISTING
+                    ),
+                    persisted_signal=persisted_signal,
                 )
+                conn.execute("RELEASE SAVEPOINT signal_persistence")
+                savepoint_active = False
+                resolutions.append(resolution)
             except (sqlite3.Error, TypeError, ValueError) as e:
+                if savepoint_active:
+                    conn.execute("ROLLBACK TO SAVEPOINT signal_persistence")
+                    conn.execute("RELEASE SAVEPOINT signal_persistence")
                 logger.error(f"Failed to persist signal {sig.id}: {e}")
                 resolutions.append(
-                    SignalPersistenceResolution(
-                        input_signal_id=sig.id,
-                        status=SignalPersistenceStatus.FAILED,
-                        failure_detail=str(e),
-                    )
+                    _failed_resolution(input_index, sig, dedupe_key, str(e))
                 )
 
         conn.commit()
