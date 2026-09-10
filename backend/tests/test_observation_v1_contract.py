@@ -321,6 +321,27 @@ def test_retry_reuse_and_other_lineage_invariants_remain_valid():
     assert validate_contract_cases((distinct_targets,)) == []
 
 
+def test_changed_state_correction_creates_immutable_successor_not_reuse():
+    case = _CASES["OV1-CORRECTION-CHANGED-STATE-SUCCESSOR"]
+    assert case.expected_observations is not None
+    assert case.expected_runs is not None
+    predecessor, successor = case.expected_observations
+
+    assert validate_contract_cases((case,)) == []
+    assert predecessor.observation_id == "observation-correction-active"
+    assert predecessor.condition_state is ConditionState.ACTIVE
+    assert predecessor.supersedes_observation_id is None
+    assert successor.observation_id == "observation-correction-resolved"
+    assert successor.condition_state is ConditionState.RESOLVED
+    assert successor.supersedes_observation_id == predecessor.observation_id
+    assert predecessor != successor
+    assert {
+        run.resulting_observation_index
+        for run in case.expected_runs
+        if run.outcome is RunOutcome.PRODUCED
+    } == {0, 1}
+
+
 def test_zero_target_and_operational_failure_are_distinct():
     no_target = _CASES["OV1-NO-SUPPLIED-TARGET"]
     assert no_target.attempted_targets == ()

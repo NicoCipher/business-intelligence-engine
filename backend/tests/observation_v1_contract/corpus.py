@@ -636,6 +636,63 @@ CONTRACT_CASES: tuple[ContractCase, ...] = (
         ("NIC-5 produced outcome invariant", "NIC-6 exact-result reuse"),
     ),
     ContractCase(
+        "OV1-CORRECTION-CHANGED-STATE-SUCCESSOR",
+        Classification.PRESERVE,
+        SignalFixture(
+            "signal-correction-changed-state",
+            "Checkout remains unavailable, but we later confirmed the checkout issue was resolved.",
+        ),
+        (
+            CitationExpectation(
+                SourcePart.TITLE,
+                "Checkout remains unavailable, but we later confirmed the checkout issue was resolved",
+            ),
+        ),
+        (
+            _observation(
+                CitationExpectation(
+                    SourcePart.TITLE,
+                    "Checkout remains unavailable, but we later confirmed the checkout issue was resolved",
+                ),
+                ConditionState.ACTIVE,
+                CitationExpectation(SourcePart.TITLE, "remains unavailable"),
+                observation_id="observation-correction-active",
+            ),
+            _observation(
+                CitationExpectation(
+                    SourcePart.TITLE,
+                    "Checkout remains unavailable, but we later confirmed the checkout issue was resolved",
+                ),
+                ConditionState.RESOLVED,
+                CitationExpectation(SourcePart.TITLE, "was resolved"),
+                observation_id="observation-correction-resolved",
+                supersedes_observation_id="observation-correction-active",
+            ),
+        ),
+        (
+            _produced(
+                "signal-correction-changed-state",
+                CitationExpectation(
+                    SourcePart.TITLE,
+                    "Checkout remains unavailable, but we later confirmed the checkout issue was resolved",
+                ),
+                0,
+                run_id="run-correction-active",
+            ),
+            _produced(
+                "signal-correction-changed-state",
+                CitationExpectation(
+                    SourcePart.TITLE,
+                    "Checkout remains unavailable, but we later confirmed the checkout issue was resolved",
+                ),
+                1,
+                run_id="run-correction-resolved",
+            ),
+        ),
+        "A changed state is a new immutable successor, not exact-result reuse of its predecessor.",
+        ("NIC-5 correction lineage", "NIC-6 changed-state correction"),
+    ),
+    ContractCase(
         "OV1-MULTIPLE-TARGETS-WITH-RETRY",
         Classification.PRESERVE,
         SignalFixture(
