@@ -35,7 +35,7 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # Full DDL. CREATE IF NOT EXISTS makes this idempotent — safe to call on
 # every startup without worrying about duplicate table errors.
@@ -466,6 +466,13 @@ def initialize() -> None:
         if current_version < 10:
             _migrate_v10(conn)
 
+        if current_version < 11:
+            _migrate_v11(conn)
+            # v11 records its schema version inside its own savepoint so an
+            # injected or real failure cannot leave its tables behind while
+            # reporting a completed transition.
+            current_version = 11
+
         if current_version < SCHEMA_VERSION:
             conn.execute(
                 "INSERT OR REPLACE INTO schema_info (version, applied_at) VALUES (?, ?)",
@@ -498,6 +505,215 @@ def _migrate_v2(conn) -> None:
             )
             logger.info("Migration v2: added domain column to %s", table)
     conn.commit()
+
+
+# Observation V1 is intentionally kept out of _SCHEMA_DDL.  Existing schema
+# setup predates transactional migrations and executes its broad bootstrap DDL
+# before checking schema_info.  Keeping this transition self-contained lets a
+# v10 upgrade roll back *all* of its own tables, indexes, triggers, and version
+# marker if any part of the transition fails.  Fresh databases reach the same
+# definitions by running this ordered v11 migration during initialize().
+_OBSERVATION_V1_DDL_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS interpreted_observations (
+        observation_id TEXT NOT NULL PRIMARY KEY,
+        signal_id TEXT NOT NULL REFERENCES signals(id) ON DELETE RESTRICT,
+        condition_source_part TEXT NOT NULL
+            CHECK (condition_source_part IN ('title', 'content')),
+        condition_literal_text TEXT NOT NULL
+            CHECK (condition_literal_text <> ''),
+        condition_occurrence_ordinal INTEGER NOT NULL
+            CHECK (condition_occurrence_ordinal > 0),
+        state_evidence_source_part TEXT
+            CHECK (state_evidence_source_part IN ('title', 'content')),
+        state_evidence_literal_text TEXT,
+        state_evidence_occurrence_ordinal INTEGER,
+        condition_state TEXT NOT NULL
+            CHECK (condition_state IN ('active', 'resolved', 'unknown')),
+        semantic_contract_version TEXT NOT NULL
+            CHECK (semantic_contract_version <> ''),
+        supersedes_observation_id TEXT
+            REFERENCES interpreted_observations(observation_id) ON DELETE RESTRICT,
+        recorded_at TEXT NOT NULL CHECK (recorded_at <> ''),
+        CHECK (
+            (state_evidence_source_part IS NULL
+             AND state_evidence_literal_text IS NULL
+             AND state_evidence_occurrence_ordinal IS NULL)
+            OR
+            (state_evidence_source_part IS NOT NULL
+             AND state_evidence_literal_text IS NOT NULL
+             AND state_evidence_literal_text <> ''
+             AND state_evidence_occurrence_ordinal IS NOT NULL
+             AND state_evidence_occurrence_ordinal > 0)
+        ),
+        CHECK (
+            condition_state = 'unknown'
+            OR state_evidence_source_part IS NOT NULL
+        ),
+        CHECK (
+            state_evidence_source_part IS NULL
+            OR state_evidence_source_part = condition_source_part
+        ),
+        CHECK (
+            supersedes_observation_id IS NULL
+            OR supersedes_observation_id <> observation_id
+        ),
+        UNIQUE (supersedes_observation_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS observation_runs (
+        run_id TEXT NOT NULL PRIMARY KEY,
+        attempted_signal_id TEXT NOT NULL REFERENCES signals(id) ON DELETE RESTRICT,
+        attempted_condition_source_part TEXT NOT NULL
+            CHECK (attempted_condition_source_part IN ('title', 'content')),
+        attempted_condition_literal_text TEXT NOT NULL
+            CHECK (attempted_condition_literal_text <> ''),
+        attempted_condition_occurrence_ordinal INTEGER NOT NULL
+            CHECK (attempted_condition_occurrence_ordinal > 0),
+        attempted_semantic_contract_version TEXT NOT NULL
+            CHECK (attempted_semantic_contract_version <> ''),
+        producer_kind TEXT NOT NULL CHECK (producer_kind IN ('human', 'rule', 'model')),
+        producer_name TEXT CHECK (producer_name IS NULL OR producer_name <> ''),
+        producer_revision TEXT CHECK (producer_revision IS NULL OR producer_revision <> ''),
+        attempted_at TEXT NOT NULL CHECK (attempted_at <> ''),
+        outcome TEXT NOT NULL CHECK (outcome IN ('produced', 'operational_failure')),
+        produced_at TEXT,
+        resulting_observation_id TEXT
+            REFERENCES interpreted_observations(observation_id) ON DELETE RESTRICT,
+        CHECK (
+            (outcome = 'produced'
+             AND produced_at IS NOT NULL
+             AND produced_at <> ''
+             AND resulting_observation_id IS NOT NULL)
+            OR
+            (outcome = 'operational_failure'
+             AND produced_at IS NULL
+             AND resulting_observation_id IS NULL)
+        )
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_interpreted_observations_signal_id ON interpreted_observations(signal_id)",
+    "CREATE INDEX IF NOT EXISTS idx_interpreted_observations_supersedes ON interpreted_observations(supersedes_observation_id)",
+    """
+    CREATE INDEX IF NOT EXISTS idx_interpreted_observations_literal_lookup
+    ON interpreted_observations(signal_id, condition_source_part,
+                               condition_literal_text, condition_occurrence_ordinal)
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_observation_runs_attempted_signal_time ON observation_runs(attempted_signal_id, attempted_at)",
+    "CREATE INDEX IF NOT EXISTS idx_observation_runs_producer ON observation_runs(producer_kind, producer_name, producer_revision)",
+    "CREATE INDEX IF NOT EXISTS idx_observation_runs_result ON observation_runs(resulting_observation_id)",
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_interpreted_observations_no_duplicate_insert
+    BEFORE INSERT ON interpreted_observations
+    WHEN EXISTS (SELECT 1 FROM interpreted_observations WHERE observation_id = NEW.observation_id)
+    BEGIN
+        SELECT RAISE(ABORT, 'interpreted_observations are append-only');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_interpreted_observations_no_update
+    BEFORE UPDATE ON interpreted_observations
+    BEGIN
+        SELECT RAISE(ABORT, 'interpreted_observations are append-only');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_interpreted_observations_no_delete
+    BEFORE DELETE ON interpreted_observations
+    BEGIN
+        SELECT RAISE(ABORT, 'interpreted_observations are append-only');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_observation_runs_no_duplicate_insert
+    BEFORE INSERT ON observation_runs
+    WHEN EXISTS (SELECT 1 FROM observation_runs WHERE run_id = NEW.run_id)
+    BEGIN
+        SELECT RAISE(ABORT, 'observation_runs are append-only');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_observation_runs_no_update
+    BEFORE UPDATE ON observation_runs
+    BEGIN
+        SELECT RAISE(ABORT, 'observation_runs are append-only');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_observation_runs_no_delete
+    BEFORE DELETE ON observation_runs
+    BEGIN
+        SELECT RAISE(ABORT, 'observation_runs are append-only');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_observation_runs_produced_result_matches_attempt
+    BEFORE INSERT ON observation_runs
+    WHEN NEW.outcome = 'produced'
+    BEGIN
+        SELECT CASE WHEN NOT EXISTS (
+            SELECT 1
+            FROM interpreted_observations AS observation
+            WHERE observation.observation_id = NEW.resulting_observation_id
+              AND observation.signal_id = NEW.attempted_signal_id
+              AND observation.condition_source_part = NEW.attempted_condition_source_part
+              AND observation.condition_literal_text = NEW.attempted_condition_literal_text
+              AND observation.condition_occurrence_ordinal = NEW.attempted_condition_occurrence_ordinal
+              AND observation.semantic_contract_version = NEW.attempted_semantic_contract_version
+        ) THEN RAISE(ABORT, 'produced run must match its resulting observation') END;
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_signals_no_citation_bearing_title_update
+    BEFORE UPDATE OF title ON signals
+    WHEN EXISTS (
+        SELECT 1 FROM interpreted_observations WHERE signal_id = OLD.id
+        UNION ALL
+        SELECT 1 FROM observation_runs WHERE attempted_signal_id = OLD.id
+    )
+    BEGIN
+        SELECT RAISE(ABORT, 'citation-bearing signal text is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_signals_no_citation_bearing_content_update
+    BEFORE UPDATE OF content ON signals
+    WHEN EXISTS (
+        SELECT 1 FROM interpreted_observations WHERE signal_id = OLD.id
+        UNION ALL
+        SELECT 1 FROM observation_runs WHERE attempted_signal_id = OLD.id
+    )
+    BEGIN
+        SELECT RAISE(ABORT, 'citation-bearing signal text is immutable');
+    END
+    """,
+)
+
+
+def _migrate_v11(conn) -> None:
+    """Atomically add the Observation V1 persistence foundation.
+
+    The savepoint is deliberately local to v11.  Earlier migrations retain
+    their historical transaction behavior; a v11 failure rolls back this
+    transition and its schema marker without touching existing intelligence.
+    """
+    conn.execute("SAVEPOINT observation_v1_migration")
+    try:
+        for statement in _OBSERVATION_V1_DDL_STATEMENTS:
+            conn.execute(statement)
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_info (version, applied_at) VALUES (?, ?)",
+            (11, _now()),
+        )
+    except sqlite3.Error:
+        conn.execute("ROLLBACK TO SAVEPOINT observation_v1_migration")
+        conn.execute("RELEASE SAVEPOINT observation_v1_migration")
+        raise
+    else:
+        conn.execute("RELEASE SAVEPOINT observation_v1_migration")
+        conn.commit()
+        logger.info("Migration v11: added immutable Observation V1 persistence")
 
 
 def _migrate_v3(conn) -> None:

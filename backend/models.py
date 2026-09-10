@@ -18,8 +18,9 @@ Serialisation:
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field, InitVar
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Optional
 
 # SCORE_WEIGHTS/TIER_GOLD/TIER_SILVER are used only as OpportunityScores'
@@ -44,6 +45,236 @@ def _now() -> str:
 
 def _uuid() -> str:
     return str(uuid.uuid4())
+
+
+# ── Observation V1 ────────────────────────────────────────────────────────
+
+class CitationSourcePart(str, Enum):
+    """The immutable Signal text field from which a citation is drawn."""
+
+    TITLE = "title"
+    CONTENT = "content"
+
+
+class ObservationConditionState(str, Enum):
+    """The bounded Condition State V1 interpretation vocabulary."""
+
+    ACTIVE = "active"
+    RESOLVED = "resolved"
+    UNKNOWN = "unknown"
+
+
+class ObservationProducerKind(str, Enum):
+    """Producer category retained as run provenance, never semantic data."""
+
+    HUMAN = "human"
+    RULE = "rule"
+    MODEL = "model"
+
+
+class ObservationRunOutcome(str, Enum):
+    """The V1 distinction between a semantic result and execution failure."""
+
+    PRODUCED = "produced"
+    OPERATIONAL_FAILURE = "operational_failure"
+
+
+def _required_text(value: str, field_name: str) -> None:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field_name} must be a non-empty string")
+
+
+@dataclass(frozen=True)
+class ObservationCitation:
+    """One exact, contiguous literal target in a retained Signal text part.
+
+    Resolution of the literal and ordinal against the stored Signal is an
+    application concern intentionally deferred to BIA-58.  This value object
+    nevertheless protects the structural citation contract at the model edge.
+    """
+
+    source_part: CitationSourcePart
+    literal_text: str
+    occurrence_ordinal: int = 1
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source_part, CitationSourcePart):
+            raise TypeError("ObservationCitation.source_part must be a CitationSourcePart")
+        _required_text(self.literal_text, "ObservationCitation.literal_text")
+        if not isinstance(self.occurrence_ordinal, int) or self.occurrence_ordinal < 1:
+            raise ValueError("ObservationCitation.occurrence_ordinal must be positive")
+
+
+@dataclass(frozen=True)
+class InterpretedObservation:
+    """An immutable, retained Condition State V1 interpretation."""
+
+    observation_id: str
+    signal_id: str
+    condition_citation: ObservationCitation
+    condition_state: ObservationConditionState
+    semantic_contract_version: str
+    recorded_at: str
+    state_evidence_citation: ObservationCitation | None = None
+    supersedes_observation_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _required_text(self.observation_id, "InterpretedObservation.observation_id")
+        _required_text(self.signal_id, "InterpretedObservation.signal_id")
+        _required_text(
+            self.semantic_contract_version,
+            "InterpretedObservation.semantic_contract_version",
+        )
+        _required_text(self.recorded_at, "InterpretedObservation.recorded_at")
+        if not isinstance(self.condition_citation, ObservationCitation):
+            raise TypeError("InterpretedObservation.condition_citation must be an ObservationCitation")
+        if not isinstance(self.condition_state, ObservationConditionState):
+            raise TypeError("InterpretedObservation.condition_state must be an ObservationConditionState")
+        if self.state_evidence_citation is not None:
+            if not isinstance(self.state_evidence_citation, ObservationCitation):
+                raise TypeError(
+                    "InterpretedObservation.state_evidence_citation must be an ObservationCitation"
+                )
+            if self.state_evidence_citation.source_part is not self.condition_citation.source_part:
+                raise ValueError("Observation citations must use the same source part")
+        if (
+            self.condition_state
+            in (ObservationConditionState.ACTIVE, ObservationConditionState.RESOLVED)
+            and self.state_evidence_citation is None
+        ):
+            raise ValueError("active and resolved observations require state evidence")
+        if self.supersedes_observation_id is not None:
+            _required_text(
+                self.supersedes_observation_id,
+                "InterpretedObservation.supersedes_observation_id",
+            )
+            if self.supersedes_observation_id == self.observation_id:
+                raise ValueError("An observation cannot supersede itself")
+
+    def to_db_row(self) -> dict:
+        evidence = self.state_evidence_citation
+        return {
+            "observation_id": self.observation_id,
+            "signal_id": self.signal_id,
+            "condition_source_part": self.condition_citation.source_part.value,
+            "condition_literal_text": self.condition_citation.literal_text,
+            "condition_occurrence_ordinal": self.condition_citation.occurrence_ordinal,
+            "state_evidence_source_part": evidence.source_part.value if evidence else None,
+            "state_evidence_literal_text": evidence.literal_text if evidence else None,
+            "state_evidence_occurrence_ordinal": evidence.occurrence_ordinal if evidence else None,
+            "condition_state": self.condition_state.value,
+            "semantic_contract_version": self.semantic_contract_version,
+            "supersedes_observation_id": self.supersedes_observation_id,
+            "recorded_at": self.recorded_at,
+        }
+
+    @classmethod
+    def from_db_row(cls, row) -> InterpretedObservation:
+        evidence = None
+        if row["state_evidence_source_part"] is not None:
+            evidence = ObservationCitation(
+                CitationSourcePart(row["state_evidence_source_part"]),
+                row["state_evidence_literal_text"],
+                row["state_evidence_occurrence_ordinal"],
+            )
+        return cls(
+            observation_id=row["observation_id"],
+            signal_id=row["signal_id"],
+            condition_citation=ObservationCitation(
+                CitationSourcePart(row["condition_source_part"]),
+                row["condition_literal_text"],
+                row["condition_occurrence_ordinal"],
+            ),
+            condition_state=ObservationConditionState(row["condition_state"]),
+            semantic_contract_version=row["semantic_contract_version"],
+            recorded_at=row["recorded_at"],
+            state_evidence_citation=evidence,
+            supersedes_observation_id=row["supersedes_observation_id"],
+        )
+
+
+@dataclass(frozen=True)
+class ObservationRun:
+    """Immutable target-attempt provenance for an Observation V1 result."""
+
+    run_id: str
+    attempted_signal_id: str
+    attempted_condition_citation: ObservationCitation
+    attempted_semantic_contract_version: str
+    producer_kind: ObservationProducerKind
+    attempted_at: str
+    outcome: ObservationRunOutcome
+    produced_at: str | None = None
+    resulting_observation_id: str | None = None
+    producer_name: str | None = None
+    producer_revision: str | None = None
+
+    def __post_init__(self) -> None:
+        _required_text(self.run_id, "ObservationRun.run_id")
+        _required_text(self.attempted_signal_id, "ObservationRun.attempted_signal_id")
+        _required_text(
+            self.attempted_semantic_contract_version,
+            "ObservationRun.attempted_semantic_contract_version",
+        )
+        _required_text(self.attempted_at, "ObservationRun.attempted_at")
+        if not isinstance(self.attempted_condition_citation, ObservationCitation):
+            raise TypeError("ObservationRun.attempted_condition_citation must be an ObservationCitation")
+        if not isinstance(self.producer_kind, ObservationProducerKind):
+            raise TypeError("ObservationRun.producer_kind must be an ObservationProducerKind")
+        if not isinstance(self.outcome, ObservationRunOutcome):
+            raise TypeError("ObservationRun.outcome must be an ObservationRunOutcome")
+        for field_name, value in (
+            ("ObservationRun.producer_name", self.producer_name),
+            ("ObservationRun.producer_revision", self.producer_revision),
+        ):
+            if value is not None:
+                _required_text(value, field_name)
+        if self.outcome is ObservationRunOutcome.PRODUCED:
+            _required_text(self.produced_at, "ObservationRun.produced_at")
+            _required_text(
+                self.resulting_observation_id,
+                "ObservationRun.resulting_observation_id",
+            )
+        elif self.produced_at is not None or self.resulting_observation_id is not None:
+            raise ValueError("operational_failure runs cannot have a produced result")
+
+    def to_db_row(self) -> dict:
+        citation = self.attempted_condition_citation
+        return {
+            "run_id": self.run_id,
+            "attempted_signal_id": self.attempted_signal_id,
+            "attempted_condition_source_part": citation.source_part.value,
+            "attempted_condition_literal_text": citation.literal_text,
+            "attempted_condition_occurrence_ordinal": citation.occurrence_ordinal,
+            "attempted_semantic_contract_version": self.attempted_semantic_contract_version,
+            "producer_kind": self.producer_kind.value,
+            "producer_name": self.producer_name,
+            "producer_revision": self.producer_revision,
+            "attempted_at": self.attempted_at,
+            "outcome": self.outcome.value,
+            "produced_at": self.produced_at,
+            "resulting_observation_id": self.resulting_observation_id,
+        }
+
+    @classmethod
+    def from_db_row(cls, row) -> ObservationRun:
+        return cls(
+            run_id=row["run_id"],
+            attempted_signal_id=row["attempted_signal_id"],
+            attempted_condition_citation=ObservationCitation(
+                CitationSourcePart(row["attempted_condition_source_part"]),
+                row["attempted_condition_literal_text"],
+                row["attempted_condition_occurrence_ordinal"],
+            ),
+            attempted_semantic_contract_version=row["attempted_semantic_contract_version"],
+            producer_kind=ObservationProducerKind(row["producer_kind"]),
+            producer_name=row["producer_name"],
+            producer_revision=row["producer_revision"],
+            attempted_at=row["attempted_at"],
+            outcome=ObservationRunOutcome(row["outcome"]),
+            produced_at=row["produced_at"],
+            resulting_observation_id=row["resulting_observation_id"],
+        )
 
 
 # ── Entity ────────────────────────────────────────────────────────────────
