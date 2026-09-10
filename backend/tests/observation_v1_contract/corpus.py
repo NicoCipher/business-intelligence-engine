@@ -1331,6 +1331,7 @@ def validate_contract_cases(cases: tuple[ContractCase, ...]) -> list[str]:
                 ConditionState,
                 CitationExpectation | None,
                 str,
+                str | None,
             ],
             ObservationExpectation,
         ] = {}
@@ -1343,6 +1344,7 @@ def validate_contract_cases(cases: tuple[ContractCase, ...]) -> list[str]:
                 observation.condition_state,
                 observation.state_evidence_citation,
                 observation.semantic_contract_version,
+                observation.supersedes_observation_id,
             )
             prior = exact_results.get(exact_result_key)
             if prior is not None:

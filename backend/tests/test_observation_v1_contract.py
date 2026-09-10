@@ -259,11 +259,15 @@ def test_retries_can_share_one_target_and_exact_result_observation():
     } == set(multiple_targets.attempted_targets)
 
 
-def test_duplicate_exact_result_observations_are_rejected_but_corrections_are_not():
+def test_exact_result_key_includes_supersession_lineage():
     case = _CASES["OV1-RETRY-PRODUCED-CONFIRMATION"]
     assert case.expected_observations is not None
     assert case.expected_runs is not None
-    original = replace(case.expected_observations[0], observation_id="observation-a")
+    original = replace(
+        case.expected_observations[0],
+        observation_id="observation-a",
+        supersedes_observation_id="predecessor-a",
+    )
     duplicate = replace(original, observation_id="observation-b")
     duplicate_result = replace(
         case,
@@ -278,21 +282,40 @@ def test_duplicate_exact_result_observations_are_rejected_but_corrections_are_no
         in validate_contract_cases((duplicate_result,))
     )
 
-    correction = replace(
+    different_predecessor = replace(
         original,
-        observation_id="observation-correction",
-        supersedes_observation_id="observation-a",
-        condition_state=ConditionState.UNKNOWN,
+        observation_id="observation-c",
+        supersedes_observation_id="predecessor-b",
     )
-    correction_result = replace(
+    different_predecessor_result = replace(
         case,
-        expected_observations=(original, correction),
+        expected_observations=(original, different_predecessor),
         expected_runs=(
             replace(case.expected_runs[0], resulting_observation_index=0),
             replace(case.expected_runs[1], resulting_observation_index=1),
         ),
     )
-    assert validate_contract_cases((correction_result,)) == []
+    assert validate_contract_cases((different_predecessor_result,)) == []
+
+    no_predecessor = replace(original, supersedes_observation_id=None)
+    no_predecessor_result = replace(
+        case,
+        expected_observations=(no_predecessor, original),
+        expected_runs=(
+            replace(case.expected_runs[0], resulting_observation_index=0),
+            replace(case.expected_runs[1], resulting_observation_index=1),
+        ),
+    )
+    assert validate_contract_cases((no_predecessor_result,)) == []
+
+
+def test_retry_reuse_and_other_lineage_invariants_remain_valid():
+    reuse = _CASES["OV1-RETRY-PRODUCED-CONFIRMATION"]
+    assert {
+        run.resulting_observation_index
+        for run in reuse.expected_runs or ()
+        if run.outcome is RunOutcome.PRODUCED
+    } == {0}
 
     distinct_targets = _CASES["OV1-MULTIPLE-TARGETS"]
     assert validate_contract_cases((distinct_targets,)) == []
