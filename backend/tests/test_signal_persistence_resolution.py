@@ -204,6 +204,42 @@ def test_new_row_is_rolled_back_when_canonical_hydration_fails(fresh_db):
         ).fetchone()[0] == 0
 
 
+def test_hydration_failure_isolates_surrounding_inputs(fresh_db):
+    first = _signal("before-malformed", signal_id="first-id")
+    malformed = _signal("malformed-middle", signal_id="malformed-id")
+    malformed.entity_ids = "not-a-list"  # type: ignore[assignment]
+    third = _signal("after-malformed", signal_id="third-id")
+
+    result = persist_signals([first, malformed, third])
+
+    assert len(result.resolutions) == 3
+    assert [resolution.input_index for resolution in result.resolutions] == [0, 1, 2]
+    assert [resolution.status for resolution in result.resolutions] == [
+        SignalPersistenceStatus.INSERTED,
+        SignalPersistenceStatus.FAILED,
+        SignalPersistenceStatus.INSERTED,
+    ]
+    assert [resolution.dedupe_key for resolution in result.resolutions] == [
+        SignalDedupeKey("hn", "before-malformed", "business"),
+        SignalDedupeKey("hn", "malformed-middle", "business"),
+        SignalDedupeKey("hn", "after-malformed", "business"),
+    ]
+    assert result.resolutions[0].persisted_signal is not None
+    assert result.resolutions[1].persisted_signal is None
+    assert result.resolutions[2].persisted_signal is not None
+    assert result.inserted_count == 2
+
+    with database.get_connection() as conn:
+        stored_source_ids = {
+            row["source_id"]
+            for row in conn.execute(
+                """SELECT source_id FROM signals
+                   WHERE source_id IN ('before-malformed', 'malformed-middle', 'after-malformed')"""
+            )
+        }
+    assert stored_source_ids == {"before-malformed", "after-malformed"}
+
+
 def test_existing_malformed_row_is_reported_without_mutation(fresh_db):
     original = _signal("malformed-existing", signal_id="stored-malformed-id")
     row = original.to_db_row()
