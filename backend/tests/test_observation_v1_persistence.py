@@ -179,6 +179,38 @@ def test_observation_ordinals_store_positive_integers(db):
     assert tuple(row) == ("integer", "integer")
 
 
+@pytest.mark.parametrize(
+    "field",
+    ("condition_literal_text", "state_evidence_literal_text"),
+)
+def test_observation_citation_literals_reject_blob_values(db, field):
+    with database.get_connection() as conn, pytest.raises(sqlite3.IntegrityError):
+        _insert_observation(conn, **{field: b"AB"})
+
+
+def test_observation_citation_literals_store_non_empty_text_or_complete_null_support(db):
+    with database.get_connection() as conn:
+        _insert_observation(conn)
+        text_types = conn.execute(
+            """SELECT typeof(condition_literal_text), typeof(state_evidence_literal_text)
+               FROM interpreted_observations WHERE observation_id = 'observation-1'"""
+        ).fetchone()
+        assert tuple(text_types) == ("text", "text")
+
+        _insert_observation(
+            conn,
+            "unknown-without-support",
+            condition_state="unknown",
+            state_evidence_source_part=None,
+            state_evidence_literal_text=None,
+            state_evidence_occurrence_ordinal=None,
+        )
+        assert conn.execute(
+            """SELECT state_evidence_literal_text FROM interpreted_observations
+               WHERE observation_id = 'unknown-without-support'"""
+        ).fetchone()[0] is None
+
+
 def test_runs_are_append_only_and_enforce_outcome_cardinality(db):
     with database.get_connection() as conn:
         _insert_observation(conn)
@@ -244,6 +276,19 @@ def test_attempted_run_ordinal_stores_a_positive_integer(db):
                FROM observation_runs WHERE run_id = 'run-1'"""
         ).fetchone()
     assert row[0] == "integer"
+
+
+def test_attempted_run_citation_literal_rejects_a_blob_value(db):
+    with database.get_connection() as conn:
+        _insert_observation(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_run(conn, attempted_condition_literal_text=b"AB")
+
+        _insert_run(conn)
+        assert conn.execute(
+            """SELECT typeof(attempted_condition_literal_text) FROM observation_runs
+               WHERE run_id = 'run-1'"""
+        ).fetchone()[0] == "text"
 
 
 def test_citation_bearing_signals_are_protected_without_freezing_unrelated_rows(db):

@@ -521,7 +521,8 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
         condition_source_part TEXT NOT NULL
             CHECK (condition_source_part IN ('title', 'content')),
         condition_literal_text TEXT NOT NULL
-            CHECK (condition_literal_text <> ''),
+            CHECK (typeof(condition_literal_text) = 'text'
+                   AND condition_literal_text <> ''),
         condition_occurrence_ordinal INTEGER NOT NULL
             CHECK (typeof(condition_occurrence_ordinal) = 'integer'
                    AND condition_occurrence_ordinal > 0),
@@ -543,6 +544,7 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
             OR
             (state_evidence_source_part IS NOT NULL
              AND state_evidence_literal_text IS NOT NULL
+             AND typeof(state_evidence_literal_text) = 'text'
              AND state_evidence_literal_text <> ''
              AND state_evidence_occurrence_ordinal IS NOT NULL
              AND typeof(state_evidence_occurrence_ordinal) = 'integer'
@@ -570,7 +572,8 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
         attempted_condition_source_part TEXT NOT NULL
             CHECK (attempted_condition_source_part IN ('title', 'content')),
         attempted_condition_literal_text TEXT NOT NULL
-            CHECK (attempted_condition_literal_text <> ''),
+            CHECK (typeof(attempted_condition_literal_text) = 'text'
+                   AND attempted_condition_literal_text <> ''),
         attempted_condition_occurrence_ordinal INTEGER NOT NULL
             CHECK (typeof(attempted_condition_occurrence_ordinal) = 'integer'
                    AND attempted_condition_occurrence_ordinal > 0),
