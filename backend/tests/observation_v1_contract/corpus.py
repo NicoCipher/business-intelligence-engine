@@ -77,16 +77,17 @@ class ObservationExpectation:
 
 @dataclass(frozen=True)
 class RunExpectation:
+    run_id: str
     attempted_signal_id: str
     attempted_condition_citation: CitationExpectation
     producer_kind: ProducerKind
-    producer_name: str
-    producer_revision: str
     attempted_semantic_contract_version: str
     attempted_at: str
     outcome: RunOutcome
     resulting_observation_index: int | None
     produced_at: str | None
+    producer_name: str | None = None
+    producer_revision: str | None = None
 
 
 @dataclass(frozen=True)
@@ -178,18 +179,46 @@ def _produced(
     attempted_signal_id: str,
     target: CitationExpectation,
     observation_index: int,
+    *,
+    run_id: str | None = None,
+    producer_name: str | None = _FIXTURE_PRODUCER_NAME,
+    producer_revision: str | None = _FIXTURE_PRODUCER_REVISION,
 ) -> RunExpectation:
     return RunExpectation(
+        run_id=run_id or f"run-{attempted_signal_id}-{observation_index}",
         attempted_signal_id=attempted_signal_id,
         attempted_condition_citation=target,
         producer_kind=_FIXTURE_PRODUCER_KIND,
-        producer_name=_FIXTURE_PRODUCER_NAME,
-        producer_revision=_FIXTURE_PRODUCER_REVISION,
         attempted_semantic_contract_version=SEMANTIC_CONTRACT_VERSION,
         attempted_at=_FIXTURE_ATTEMPTED_AT,
         outcome=RunOutcome.PRODUCED,
         resulting_observation_index=observation_index,
         produced_at=_FIXTURE_PRODUCED_AT,
+        producer_name=producer_name,
+        producer_revision=producer_revision,
+    )
+
+
+def _operational_failure(
+    attempted_signal_id: str,
+    target: CitationExpectation,
+    *,
+    run_id: str,
+    producer_name: str | None = None,
+    producer_revision: str | None = None,
+) -> RunExpectation:
+    return RunExpectation(
+        run_id=run_id,
+        attempted_signal_id=attempted_signal_id,
+        attempted_condition_citation=target,
+        producer_kind=_FIXTURE_PRODUCER_KIND,
+        attempted_semantic_contract_version=SEMANTIC_CONTRACT_VERSION,
+        attempted_at=_FIXTURE_ATTEMPTED_AT,
+        outcome=RunOutcome.OPERATIONAL_FAILURE,
+        resulting_observation_index=None,
+        produced_at=None,
+        producer_name=producer_name,
+        producer_revision=producer_revision,
     )
 
 
@@ -524,21 +553,124 @@ CONTRACT_CASES: tuple[ContractCase, ...] = (
         (CitationExpectation(SourcePart.TITLE, "Checkout remains unavailable"),),
         (),
         (
-            RunExpectation(
+            _operational_failure(
                 "signal-failure",
                 CitationExpectation(SourcePart.TITLE, "Checkout remains unavailable"),
-                _FIXTURE_PRODUCER_KIND,
-                _FIXTURE_PRODUCER_NAME,
-                _FIXTURE_PRODUCER_REVISION,
-                SEMANTIC_CONTRACT_VERSION,
-                _FIXTURE_ATTEMPTED_AT,
-                RunOutcome.OPERATIONAL_FAILURE,
-                None,
-                None,
+                run_id="run-failure-1",
             ),
         ),
         "Operational failure retains attempted provenance and creates no semantic Observation.",
         ("NIC-5 run outcome invariant", "NIC-6 zero-result boundary"),
+    ),
+    ContractCase(
+        "OV1-RETRY-FAILURE-THEN-PRODUCED",
+        Classification.PRESERVE,
+        SignalFixture("signal-retry-failure", "Checkout remains unavailable."),
+        (CitationExpectation(SourcePart.TITLE, "Checkout remains unavailable"),),
+        (
+            _observation(
+                CitationExpectation(SourcePart.TITLE, "Checkout remains unavailable"),
+                ConditionState.ACTIVE,
+                CitationExpectation(SourcePart.TITLE, "remains unavailable"),
+            ),
+        ),
+        (
+            _operational_failure(
+                "signal-retry-failure",
+                CitationExpectation(SourcePart.TITLE, "Checkout remains unavailable"),
+                run_id="run-retry-failure-1",
+            ),
+            _produced(
+                "signal-retry-failure",
+                CitationExpectation(SourcePart.TITLE, "Checkout remains unavailable"),
+                0,
+                run_id="run-retry-failure-2",
+            ),
+        ),
+        "An operational failure may be retried against the same literal target.",
+        ("NIC-5 run outcome invariant", "NIC-6 retry boundary"),
+    ),
+    ContractCase(
+        "OV1-RETRY-PRODUCED-CONFIRMATION",
+        Classification.PRESERVE,
+        SignalFixture("signal-retry-confirmation", "Checkout remains unavailable."),
+        (CitationExpectation(SourcePart.TITLE, "Checkout remains unavailable"),),
+        (
+            _observation(
+                CitationExpectation(SourcePart.TITLE, "Checkout remains unavailable"),
+                ConditionState.ACTIVE,
+                CitationExpectation(SourcePart.TITLE, "remains unavailable"),
+            ),
+        ),
+        (
+            _produced(
+                "signal-retry-confirmation",
+                CitationExpectation(SourcePart.TITLE, "Checkout remains unavailable"),
+                0,
+                run_id="run-retry-confirmation-1",
+                producer_name=None,
+                producer_revision=None,
+            ),
+            _produced(
+                "signal-retry-confirmation",
+                CitationExpectation(SourcePart.TITLE, "Checkout remains unavailable"),
+                0,
+                run_id="run-retry-confirmation-2",
+            ),
+        ),
+        "Repeated successful attempts may confirm or reuse one exact-result Observation.",
+        ("NIC-5 produced outcome invariant", "NIC-6 exact-result reuse"),
+    ),
+    ContractCase(
+        "OV1-MULTIPLE-TARGETS-WITH-RETRY",
+        Classification.PRESERVE,
+        SignalFixture(
+            "signal-multiple-targets-retry",
+            "The homepage loads fine now, but the search feature is still broken.",
+        ),
+        (
+            CitationExpectation(SourcePart.TITLE, "The homepage loads fine now"),
+            CitationExpectation(SourcePart.TITLE, "the search feature is still broken"),
+        ),
+        (
+            _observation(
+                CitationExpectation(SourcePart.TITLE, "The homepage loads fine now"),
+                ConditionState.RESOLVED,
+                CitationExpectation(SourcePart.TITLE, "The homepage loads fine now"),
+            ),
+            _observation(
+                CitationExpectation(
+                    SourcePart.TITLE, "the search feature is still broken"
+                ),
+                ConditionState.ACTIVE,
+                CitationExpectation(
+                    SourcePart.TITLE, "the search feature is still broken"
+                ),
+            ),
+        ),
+        (
+            _operational_failure(
+                "signal-multiple-targets-retry",
+                CitationExpectation(SourcePart.TITLE, "The homepage loads fine now"),
+                run_id="run-multiple-targets-retry-1",
+            ),
+            _produced(
+                "signal-multiple-targets-retry",
+                CitationExpectation(SourcePart.TITLE, "The homepage loads fine now"),
+                0,
+                run_id="run-multiple-targets-retry-2",
+            ),
+            _produced(
+                "signal-multiple-targets-retry",
+                CitationExpectation(
+                    SourcePart.TITLE, "the search feature is still broken"
+                ),
+                1,
+                run_id="run-multiple-targets-retry-3",
+            ),
+        ),
+        "Retries on one target do not remove execution evidence for another target.",
+        ("CS-CORE-013a", "CS-CORE-013b", "NIC-6 retry boundary"),
     ),
     ContractCase(
         "OV1-WH-QUESTION",
@@ -922,6 +1054,24 @@ IMPLEMENTATION_MATRIX_CASES: tuple[ImplementationMatrixCase, ...] = (
         "Exact-result reuse creates a new run referencing the existing Observation without duplicate content.",
     ),
     ImplementationMatrixCase(
+        "MATRIX-RETRY-AFTER-OPERATIONAL-FAILURE",
+        "retry",
+        MatrixExpectation.ALLOW,
+        "A failed attempt may be retried against the same literal target.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-RETRY-SUCCESSFUL-SAME-TARGET",
+        "retry",
+        MatrixExpectation.ALLOW,
+        "A later successful attempt may confirm or reuse the exact-result Observation for the same target.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-RETRY-NO-TARGET-EQUIVALENCE",
+        "retry",
+        MatrixExpectation.REJECT,
+        "Retries do not establish semantic equivalence between differently bounded targets.",
+    ),
+    ImplementationMatrixCase(
         "MATRIX-RERUN-CORRECTION-LINEAGE",
         "rerun",
         MatrixExpectation.ALLOW,
@@ -932,6 +1082,36 @@ IMPLEMENTATION_MATRIX_CASES: tuple[ImplementationMatrixCase, ...] = (
         "rerun",
         MatrixExpectation.REJECT,
         "Interpreter selection cannot silently choose the newest producer.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-RAW-SIGNAL-ENTITY-EXTRACTION",
+        "raw_signal_processing",
+        MatrixExpectation.ALLOW,
+        "Entity extraction may continue when Observation interpretation fails.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-RAW-SIGNAL-RELATIONSHIP-EXTRACTION",
+        "raw_signal_processing",
+        MatrixExpectation.ALLOW,
+        "Relationship extraction remains independent of Observation interpretation.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-RAW-SIGNAL-DETECTOR-CORRELATION",
+        "raw_signal_processing",
+        MatrixExpectation.ALLOW,
+        "Pattern detection and Correlation remain raw-Signal paths.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-RAW-SIGNAL-UNRELATED-CONTINUES",
+        "raw_signal_processing",
+        MatrixExpectation.ALLOW,
+        "One Observation failure does not halt unrelated Signal processing.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-TARGET-BOUNDARIES-NON-EQUIVALENT",
+        "target_boundaries",
+        MatrixExpectation.ALLOW,
+        "Distinct literal target boundaries may both be retained without automatic semantic equivalence or deduplication.",
     ),
     ImplementationMatrixCase(
         "MATRIX-MIGRATION-NO-AUTOMATIC-BACKFILL",
@@ -946,10 +1126,16 @@ IMPLEMENTATION_MATRIX_CASES: tuple[ImplementationMatrixCase, ...] = (
         "Dry runs and migration checks retain no Observation or run without approved invocation.",
     ),
     ImplementationMatrixCase(
+        "MATRIX-MIGRATION-FAILED-ROLLBACK",
+        "migration",
+        MatrixExpectation.NON_PRODUCING,
+        "A failed migration or transaction leaves no partial Observation/run pair and restores pre-attempt persistence state.",
+    ),
+    ImplementationMatrixCase(
         "MATRIX-MIGRATION-HISTORICAL-REPLAY",
         "migration",
         MatrixExpectation.ALLOW,
-        "Historical Signals remain replayable from their immutable evidence.",
+        "Historical Signals remain replayable from immutable evidence only through an explicit later approved operation.",
     ),
     ImplementationMatrixCase(
         "MATRIX-NONCONSUMPTION-CORRELATION",
@@ -958,10 +1144,28 @@ IMPLEMENTATION_MATRIX_CASES: tuple[ImplementationMatrixCase, ...] = (
         "Observation has no Correlation authority before NIC-9 validation.",
     ),
     ImplementationMatrixCase(
+        "MATRIX-NONCONSUMPTION-PATTERN-DETECTOR",
+        "non_consumption",
+        MatrixExpectation.REJECT,
+        "Observation does not drive PatternDetector before later approved consumer work.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-NONCONSUMPTION-WATCH-LIST",
+        "non_consumption",
+        MatrixExpectation.REJECT,
+        "Observation does not drive the Opportunity Watch List before later approved consumer work.",
+    ),
+    ImplementationMatrixCase(
         "MATRIX-NONCONSUMPTION-PROBLEM",
         "non_consumption",
         MatrixExpectation.REJECT,
         "Observation has no Problem-matching authority before NIC-9 validation.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-NONCONSUMPTION-OPPORTUNITY",
+        "non_consumption",
+        MatrixExpectation.REJECT,
+        "Observation has no Opportunity-creation authority before later approved consumer work.",
     ),
     ImplementationMatrixCase(
         "MATRIX-NONCONSUMPTION-SCORING",
@@ -986,6 +1190,12 @@ IMPLEMENTATION_MATRIX_CASES: tuple[ImplementationMatrixCase, ...] = (
         "non_consumption",
         MatrixExpectation.REJECT,
         "Observation has no report authority before NIC-9 validation.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-NONCONSUMPTION-API",
+        "non_consumption",
+        MatrixExpectation.REJECT,
+        "Observation has no API-response authority before later approved consumer work.",
     ),
 )
 
@@ -1013,6 +1223,7 @@ def validate_contract_cases(cases: tuple[ContractCase, ...]) -> list[str]:
     """Return structural errors without calling production code."""
     errors: list[str] = []
     seen: set[str] = set()
+    seen_run_ids: set[str] = set()
     for case in cases:
         if case.case_id in seen:
             errors.append(f"{case.case_id}: duplicate case ID")
@@ -1044,39 +1255,29 @@ def validate_contract_cases(cases: tuple[ContractCase, ...]) -> list[str]:
         if case.expected_observations is None or case.expected_runs is None:
             continue
 
-        if len(case.expected_runs) != len(case.attempted_targets):
-            errors.append(
-                f"{case.case_id}: one run is required per supplied target attempt"
-            )
-
         target_set = set(case.attempted_targets)
         run_targets = [run.attempted_condition_citation for run in case.expected_runs]
         if len(target_set) != len(case.attempted_targets):
             errors.append(f"{case.case_id}: attempted targets are not unique")
-        if len(set(run_targets)) != len(run_targets):
-            errors.append(f"{case.case_id}: duplicate run for attempted target")
         if set(run_targets) != target_set:
-            errors.append(f"{case.case_id}: runs do not map one-to-one to targets")
-
-        produced_count = sum(
-            run.outcome is RunOutcome.PRODUCED for run in case.expected_runs
-        )
-        if produced_count != len(case.expected_observations):
             errors.append(
-                f"{case.case_id}: produced run/Observation cardinality differs"
+                f"{case.case_id}: each supplied target requires at least one run"
             )
         produced_indices = [
             run.resulting_observation_index
             for run in case.expected_runs
             if run.outcome is RunOutcome.PRODUCED
         ]
-        if (
-            any(index is None for index in produced_indices)
-            or len(set(produced_indices)) != len(produced_indices)
-            or set(produced_indices) != set(range(len(case.expected_observations)))
-        ):
+        valid_produced_indices = {
+            index
+            for index in produced_indices
+            if index is not None and 0 <= index < len(case.expected_observations)
+        }
+        if any(
+            index is None for index in produced_indices
+        ) or valid_produced_indices != set(range(len(case.expected_observations))):
             errors.append(
-                f"{case.case_id}: produced runs do not map one-to-one to Observations"
+                f"{case.case_id}: retained Observation lacks a matching produced run"
             )
 
         for observation in case.expected_observations:
@@ -1111,6 +1312,12 @@ def validate_contract_cases(cases: tuple[ContractCase, ...]) -> list[str]:
                     errors.append(f"{case.case_id}: state support is outside target")
 
         for run in case.expected_runs:
+            if not run.run_id:
+                errors.append(f"{case.case_id}: run lacks immutable run ID")
+            elif run.run_id in seen_run_ids:
+                errors.append(f"{case.case_id}: duplicate immutable run ID")
+            else:
+                seen_run_ids.add(run.run_id)
             if run.attempted_signal_id != case.signal.signal_id:
                 errors.append(
                     f"{case.case_id}: run attempted Signal does not match case"
@@ -1119,12 +1326,17 @@ def validate_contract_cases(cases: tuple[ContractCase, ...]) -> list[str]:
                 errors.append(f"{case.case_id}: run lacks attempted semantic contract")
             if not isinstance(run.producer_kind, ProducerKind):
                 errors.append(f"{case.case_id}: run has invalid producer kind")
-            if not run.producer_name or not run.producer_revision:
-                errors.append(f"{case.case_id}: run lacks producer provenance")
+            if run.producer_name is not None and not run.producer_name:
+                errors.append(f"{case.case_id}: run has invalid producer name")
+            if run.producer_revision is not None and not run.producer_revision:
+                errors.append(f"{case.case_id}: run has invalid producer revision")
             if not run.attempted_at:
                 errors.append(f"{case.case_id}: run lacks attempted time")
             if run.attempted_condition_citation not in target_set:
                 errors.append(f"{case.case_id}: run citation was not attempted")
+            if not isinstance(run.outcome, RunOutcome):
+                errors.append(f"{case.case_id}: run has invalid outcome")
+                continue
             if run.outcome is RunOutcome.PRODUCED:
                 if not run.produced_at:
                     errors.append(f"{case.case_id}: produced run lacks produced time")

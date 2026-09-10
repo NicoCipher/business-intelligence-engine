@@ -89,6 +89,7 @@ def test_no_model_confidence_or_downstream_authority_enters_cases():
 
 def test_run_expectations_retain_attempted_input_contract_and_outcome():
     assert {field.name for field in fields(RunExpectation)} == {
+        "run_id",
         "attempted_signal_id",
         "attempted_condition_citation",
         "producer_kind",
@@ -105,6 +106,7 @@ def test_run_expectations_retain_attempted_input_contract_and_outcome():
 def test_run_expectations_keep_producer_contract_and_timing_distinct():
     produced = _CASES["OV1-STATE-RESOLVED-SHORT-SUPPORT"].expected_runs[0]
     failure = _CASES["OV1-OPERATIONAL-FAILURE"].expected_runs[0]
+    optional_profile = _CASES["OV1-RETRY-PRODUCED-CONFIRMATION"].expected_runs[0]
 
     assert produced.producer_kind is ProducerKind.RULE
     assert produced.producer_name == "nic-7-reviewed-fixture"
@@ -115,6 +117,10 @@ def test_run_expectations_keep_producer_contract_and_timing_distinct():
     assert produced.produced_at
     assert failure.attempted_at
     assert failure.produced_at is None
+    assert failure.producer_name is None
+    assert failure.producer_revision is None
+    assert optional_profile.producer_name is None
+    assert optional_profile.producer_revision is None
 
 
 def test_overlap_inclusive_occurrence_is_canonical():
@@ -185,7 +191,7 @@ def test_one_signal_may_have_multiple_observations_from_separate_attempts():
     } == {ConditionState.ACTIVE, ConditionState.RESOLVED}
 
 
-def test_runs_and_results_map_one_to_one_to_each_attempted_target():
+def test_runs_correspond_to_targets_and_results_without_forbidding_retries():
     case = _CASES["OV1-MULTIPLE-TARGETS"]
     assert case.expected_runs is not None
     assert case.expected_observations is not None
@@ -195,9 +201,9 @@ def test_runs_and_results_map_one_to_one_to_each_attempted_target():
         expected_runs=(case.expected_runs[0], case.expected_runs[0]),
     )
     assert {
-        "OV1-MULTIPLE-TARGETS: duplicate run for attempted target",
-        "OV1-MULTIPLE-TARGETS: runs do not map one-to-one to targets",
-        "OV1-MULTIPLE-TARGETS: produced runs do not map one-to-one to Observations",
+        "OV1-MULTIPLE-TARGETS: duplicate immutable run ID",
+        "OV1-MULTIPLE-TARGETS: each supplied target requires at least one run",
+        "OV1-MULTIPLE-TARGETS: retained Observation lacks a matching produced run",
     } <= set(validate_contract_cases((duplicate_first,)))
 
     citation_not_a_target = replace(
@@ -224,8 +230,31 @@ def test_runs_and_results_map_one_to_one_to_each_attempted_target():
     )
     assert {
         "OV1-MULTIPLE-TARGETS: produced run does not match attempt",
-        "OV1-MULTIPLE-TARGETS: produced runs do not map one-to-one to Observations",
+        "OV1-MULTIPLE-TARGETS: retained Observation lacks a matching produced run",
     } <= set(validate_contract_cases((wrong_result,)))
+
+
+def test_retries_can_share_one_target_and_exact_result_observation():
+    failure_then_produced = _CASES["OV1-RETRY-FAILURE-THEN-PRODUCED"]
+    confirmation = _CASES["OV1-RETRY-PRODUCED-CONFIRMATION"]
+    multiple_targets = _CASES["OV1-MULTIPLE-TARGETS-WITH-RETRY"]
+
+    assert (
+        validate_contract_cases((failure_then_produced, confirmation, multiple_targets))
+        == []
+    )
+    assert [run.outcome for run in failure_then_produced.expected_runs or ()] == [
+        RunOutcome.OPERATIONAL_FAILURE,
+        RunOutcome.PRODUCED,
+    ]
+    assert {
+        run.resulting_observation_index
+        for run in confirmation.expected_runs or ()
+        if run.outcome is RunOutcome.PRODUCED
+    } == {0}
+    assert {
+        run.attempted_condition_citation for run in multiple_targets.expected_runs or ()
+    } == set(multiple_targets.attempted_targets)
 
 
 def test_zero_target_and_operational_failure_are_distinct():
@@ -436,17 +465,30 @@ def test_implementation_neutral_matrix_completes_nic6_scope():
         "MATRIX-ISOLATION-FAILURE-CONTINUES": MatrixExpectation.ALLOW,
         "MATRIX-ISOLATION-SIBLING-EXTRACTION": MatrixExpectation.ALLOW,
         "MATRIX-RERUN-EXACT-REUSE": MatrixExpectation.ALLOW,
+        "MATRIX-RETRY-AFTER-OPERATIONAL-FAILURE": MatrixExpectation.ALLOW,
+        "MATRIX-RETRY-SUCCESSFUL-SAME-TARGET": MatrixExpectation.ALLOW,
+        "MATRIX-RETRY-NO-TARGET-EQUIVALENCE": MatrixExpectation.REJECT,
         "MATRIX-RERUN-CORRECTION-LINEAGE": MatrixExpectation.ALLOW,
         "MATRIX-RERUN-NO-NEWEST-WINS": MatrixExpectation.REJECT,
+        "MATRIX-RAW-SIGNAL-ENTITY-EXTRACTION": MatrixExpectation.ALLOW,
+        "MATRIX-RAW-SIGNAL-RELATIONSHIP-EXTRACTION": MatrixExpectation.ALLOW,
+        "MATRIX-RAW-SIGNAL-DETECTOR-CORRELATION": MatrixExpectation.ALLOW,
+        "MATRIX-RAW-SIGNAL-UNRELATED-CONTINUES": MatrixExpectation.ALLOW,
+        "MATRIX-TARGET-BOUNDARIES-NON-EQUIVALENT": MatrixExpectation.ALLOW,
         "MATRIX-MIGRATION-NO-AUTOMATIC-BACKFILL": (MatrixExpectation.NON_PRODUCING),
         "MATRIX-MIGRATION-DRY-RUN-NONPRODUCING": (MatrixExpectation.NON_PRODUCING),
+        "MATRIX-MIGRATION-FAILED-ROLLBACK": (MatrixExpectation.NON_PRODUCING),
         "MATRIX-MIGRATION-HISTORICAL-REPLAY": MatrixExpectation.ALLOW,
         "MATRIX-NONCONSUMPTION-CORRELATION": MatrixExpectation.REJECT,
+        "MATRIX-NONCONSUMPTION-PATTERN-DETECTOR": MatrixExpectation.REJECT,
+        "MATRIX-NONCONSUMPTION-WATCH-LIST": MatrixExpectation.REJECT,
         "MATRIX-NONCONSUMPTION-PROBLEM": MatrixExpectation.REJECT,
+        "MATRIX-NONCONSUMPTION-OPPORTUNITY": MatrixExpectation.REJECT,
         "MATRIX-NONCONSUMPTION-SCORING": MatrixExpectation.REJECT,
         "MATRIX-NONCONSUMPTION-CONFIDENCE": MatrixExpectation.REJECT,
         "MATRIX-NONCONSUMPTION-FINDINGS": MatrixExpectation.REJECT,
         "MATRIX-NONCONSUMPTION-REPORTS": MatrixExpectation.REJECT,
+        "MATRIX-NONCONSUMPTION-API": MatrixExpectation.REJECT,
     }
     assert {case_id: _MATRIX[case_id].expectation for case_id in expected} == expected
 
