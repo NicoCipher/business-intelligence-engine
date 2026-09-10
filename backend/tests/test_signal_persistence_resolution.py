@@ -240,6 +240,112 @@ def test_hydration_failure_isolates_surrounding_inputs(fresh_db):
     assert stored_source_ids == {"before-malformed", "after-malformed"}
 
 
+def test_overflow_failure_isolates_surrounding_inputs(fresh_db):
+    first = _signal("before-overflow", signal_id="first-id")
+    overflow = _signal("overflow-middle", signal_id="overflow-id")
+    overflow.platform_score = 2**63
+    third = _signal("after-overflow", signal_id="third-id")
+
+    result = persist_signals([first, overflow, third])
+
+    assert [resolution.input_index for resolution in result.resolutions] == [0, 1, 2]
+    assert [resolution.status for resolution in result.resolutions] == [
+        SignalPersistenceStatus.INSERTED,
+        SignalPersistenceStatus.FAILED,
+        SignalPersistenceStatus.INSERTED,
+    ]
+    assert [resolution.dedupe_key for resolution in result.resolutions] == [
+        SignalDedupeKey("hn", "before-overflow", "business"),
+        SignalDedupeKey("hn", "overflow-middle", "business"),
+        SignalDedupeKey("hn", "after-overflow", "business"),
+    ]
+    assert result.resolutions[1].canonical_signal_id is None
+    assert result.inserted_count == 2
+
+    with database.get_connection() as conn:
+        stored_source_ids = {
+            row["source_id"]
+            for row in conn.execute(
+                """SELECT source_id FROM signals
+                   WHERE source_id IN ('before-overflow', 'overflow-middle', 'after-overflow')"""
+            )
+        }
+    assert stored_source_ids == {"before-overflow", "after-overflow"}
+
+
+@pytest.mark.parametrize("invalid_id", [None, ""])
+def test_invalid_new_id_is_rolled_back_and_does_not_stop_the_batch(fresh_db, invalid_id):
+    first = _signal("before-invalid-id", signal_id="first-id")
+    invalid = _signal("invalid-id-middle", signal_id=invalid_id)
+    third = _signal("after-invalid-id", signal_id="third-id")
+
+    result = persist_signals([first, invalid, third])
+
+    assert [resolution.input_index for resolution in result.resolutions] == [0, 1, 2]
+    assert [resolution.status for resolution in result.resolutions] == [
+        SignalPersistenceStatus.INSERTED,
+        SignalPersistenceStatus.FAILED,
+        SignalPersistenceStatus.INSERTED,
+    ]
+    assert [resolution.dedupe_key for resolution in result.resolutions] == [
+        SignalDedupeKey("hn", "before-invalid-id", "business"),
+        SignalDedupeKey("hn", "invalid-id-middle", "business"),
+        SignalDedupeKey("hn", "after-invalid-id", "business"),
+    ]
+    assert result.resolutions[1].canonical_signal_id is None
+    assert result.inserted_count == 2
+    assert all(
+        isinstance(resolution.canonical_signal_id, str)
+        and resolution.canonical_signal_id
+        for resolution in (result.resolutions[0], result.resolutions[2])
+    )
+
+    with database.get_connection() as conn:
+        stored_source_ids = {
+            row["source_id"]
+            for row in conn.execute(
+                """SELECT source_id FROM signals
+                   WHERE source_id IN ('before-invalid-id', 'invalid-id-middle', 'after-invalid-id')"""
+            )
+        }
+    assert stored_source_ids == {"before-invalid-id", "after-invalid-id"}
+
+
+@pytest.mark.parametrize("invalid_id", [None, ""])
+def test_existing_invalid_id_is_reported_without_mutation(fresh_db, invalid_id):
+    original = _signal("invalid-id-existing", signal_id=invalid_id)
+    row = original.to_db_row()
+    with database.get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO signals
+              (id, source, source_id, url, title, content,
+               platform_score, comment_count, entity_ids, tags,
+               raw_metadata, collected_at, processed, domain)
+            VALUES
+              (:id, :source, :source_id, :url, :title, :content,
+               :platform_score, :comment_count, :entity_ids, :tags,
+               :raw_metadata, :collected_at, :processed, :domain)
+            """,
+            row,
+        )
+        conn.commit()
+
+    result = persist_signals([_signal("invalid-id-existing", signal_id="new-temp-id")])
+
+    assert result.inserted_count == 0
+    assert result.existing_count == 0
+    assert result.failed_count == 1
+    failed = result.resolutions[0]
+    assert failed.dedupe_key == SignalDedupeKey("hn", "invalid-id-existing", "business")
+    assert failed.canonical_signal_id is None
+    with database.get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM signals WHERE source_id = 'invalid-id-existing'"
+        ).fetchone()
+    assert row["id"] == invalid_id
+
+
 def test_existing_malformed_row_is_reported_without_mutation(fresh_db):
     original = _signal("malformed-existing", signal_id="stored-malformed-id")
     row = original.to_db_row()
@@ -339,6 +445,15 @@ def test_resolution_rejects_invalid_status_and_canonical_signal_combinations():
             input_signal_id="temporary-id",
             dedupe_key=dedupe_key,
             status=SignalPersistenceStatus.INSERTED,
+        )
+    canonical.id = ""
+    with pytest.raises(ValueError, match="non-empty canonical Signal ID"):
+        SignalPersistenceResolution(
+            input_index=0,
+            input_signal_id="temporary-id",
+            dedupe_key=dedupe_key,
+            status=SignalPersistenceStatus.INSERTED,
+            persisted_signal=canonical,
         )
 
 

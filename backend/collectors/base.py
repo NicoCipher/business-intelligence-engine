@@ -101,6 +101,8 @@ class SignalPersistenceResolution:
             raise ValueError("successful persistence requires a canonical Signal")
         if self.failure_detail is not None:
             raise ValueError("successful persistence cannot carry failure detail")
+        if not isinstance(self.persisted_signal.id, str) or not self.persisted_signal.id:
+            raise ValueError("successful persistence requires a non-empty canonical Signal ID")
         persisted_key = SignalDedupeKey(
             source=self.persisted_signal.source,
             source_id=self.persisted_signal.source_id,
@@ -463,7 +465,7 @@ def persist_signals(signals: list[Signal]) -> SignalPersistenceResult:
                 conn.execute("RELEASE SAVEPOINT signal_persistence")
                 savepoint_active = False
                 resolutions.append(resolution)
-            except (sqlite3.Error, TypeError, ValueError) as e:
+            except (sqlite3.Error, OverflowError, TypeError, ValueError) as e:
                 if savepoint_active:
                     conn.execute("ROLLBACK TO SAVEPOINT signal_persistence")
                     conn.execute("RELEASE SAVEPOINT signal_persistence")
