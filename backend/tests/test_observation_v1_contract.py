@@ -5,20 +5,25 @@ wire the pipeline. These tests lock the production contract fixtures and the
 future enforcement matrix before implementation begins in later issues.
 """
 
-from dataclasses import fields
+from dataclasses import fields, replace
 
 from tests.condition_state_eval.dataset import CASES as NIC_17_CASES
 from tests.observation_v1_contract.corpus import (
     BOUNDARY_CASES,
     CONTRACT_CASES,
+    IMPLEMENTATION_MATRIX_CASES,
+    LINEAGE_CONTRACT_CASES,
     SEMANTIC_CONTRACT_VERSION,
     STORAGE_CONTRACT_CASES,
     BoundaryCase,
     CitationExpectation,
     Classification,
     ConditionState,
+    ContractCase,
     EnforcementLayer,
+    MatrixExpectation,
     ObservationExpectation,
+    ProducerKind,
     RunExpectation,
     RunOutcome,
     SourcePart,
@@ -32,6 +37,8 @@ from tests.semantic_eval.corpus import PRESERVE_CASE_IDS
 _CASES = {case.case_id: case for case in CONTRACT_CASES}
 _BOUNDARIES = {case.case_id: case for case in BOUNDARY_CASES}
 _STORAGE = {case.case_id: case for case in STORAGE_CONTRACT_CASES}
+_LINEAGE = {case.case_id: case for case in LINEAGE_CONTRACT_CASES}
+_MATRIX = {case.case_id: case for case in IMPLEMENTATION_MATRIX_CASES}
 
 
 def test_contract_corpus_has_no_structural_errors():
@@ -39,7 +46,16 @@ def test_contract_corpus_has_no_structural_errors():
 
 
 def test_case_ids_are_unique_across_contract_sections():
-    ids = [case.case_id for case in (*CONTRACT_CASES, *BOUNDARY_CASES)]
+    ids = [
+        case.case_id
+        for case in (
+            *CONTRACT_CASES,
+            *BOUNDARY_CASES,
+            *STORAGE_CONTRACT_CASES,
+            *LINEAGE_CONTRACT_CASES,
+            *IMPLEMENTATION_MATRIX_CASES,
+        )
+    ]
     assert len(ids) == len(set(ids))
 
 
@@ -75,10 +91,30 @@ def test_run_expectations_retain_attempted_input_contract_and_outcome():
     assert {field.name for field in fields(RunExpectation)} == {
         "attempted_signal_id",
         "attempted_condition_citation",
+        "producer_kind",
+        "producer_name",
+        "producer_revision",
         "attempted_semantic_contract_version",
+        "attempted_at",
         "outcome",
         "resulting_observation_index",
+        "produced_at",
     }
+
+
+def test_run_expectations_keep_producer_contract_and_timing_distinct():
+    produced = _CASES["OV1-STATE-RESOLVED-SHORT-SUPPORT"].expected_runs[0]
+    failure = _CASES["OV1-OPERATIONAL-FAILURE"].expected_runs[0]
+
+    assert produced.producer_kind is ProducerKind.RULE
+    assert produced.producer_name == "nic-7-reviewed-fixture"
+    assert produced.producer_revision == "fixture-r1"
+    assert produced.attempted_semantic_contract_version == SEMANTIC_CONTRACT_VERSION
+    assert produced.producer_revision != produced.attempted_semantic_contract_version
+    assert produced.attempted_at
+    assert produced.produced_at
+    assert failure.attempted_at
+    assert failure.produced_at is None
 
 
 def test_overlap_inclusive_occurrence_is_canonical():
@@ -149,6 +185,49 @@ def test_one_signal_may_have_multiple_observations_from_separate_attempts():
     } == {ConditionState.ACTIVE, ConditionState.RESOLVED}
 
 
+def test_runs_and_results_map_one_to_one_to_each_attempted_target():
+    case = _CASES["OV1-MULTIPLE-TARGETS"]
+    assert case.expected_runs is not None
+    assert case.expected_observations is not None
+
+    duplicate_first = replace(
+        case,
+        expected_runs=(case.expected_runs[0], case.expected_runs[0]),
+    )
+    assert {
+        "OV1-MULTIPLE-TARGETS: duplicate run for attempted target",
+        "OV1-MULTIPLE-TARGETS: runs do not map one-to-one to targets",
+        "OV1-MULTIPLE-TARGETS: produced runs do not map one-to-one to Observations",
+    } <= set(validate_contract_cases((duplicate_first,)))
+
+    citation_not_a_target = replace(
+        case.expected_runs[0],
+        attempted_condition_citation=CitationExpectation(
+            SourcePart.CONTENT, "homepage loads fine now"
+        ),
+    )
+    wrong_target = replace(
+        case,
+        expected_runs=(citation_not_a_target, case.expected_runs[1]),
+    )
+    assert "OV1-MULTIPLE-TARGETS: run citation was not attempted" in (
+        validate_contract_cases((wrong_target,))
+    )
+
+    produced_for_other_target = replace(
+        case.expected_runs[0],
+        resulting_observation_index=1,
+    )
+    wrong_result = replace(
+        case,
+        expected_runs=(produced_for_other_target, case.expected_runs[1]),
+    )
+    assert {
+        "OV1-MULTIPLE-TARGETS: produced run does not match attempt",
+        "OV1-MULTIPLE-TARGETS: produced runs do not map one-to-one to Observations",
+    } <= set(validate_contract_cases((wrong_result,)))
+
+
 def test_zero_target_and_operational_failure_are_distinct():
     no_target = _CASES["OV1-NO-SUPPLIED-TARGET"]
     assert no_target.attempted_targets == ()
@@ -166,6 +245,42 @@ def test_zero_target_and_operational_failure_are_distinct():
         failure.expected_runs[0].attempted_semantic_contract_version
         == SEMANTIC_CONTRACT_VERSION
     )
+
+
+def test_signal_absence_cannot_carry_observations_or_runs():
+    case = _CASES["OV1-STATE-RESOLVED-SHORT-SUPPORT"]
+    assert case.expected_observations is not None
+    assert case.expected_runs is not None
+
+    observation_without_signal = replace(case, signal=None, expected_runs=())
+    assert "OV1-STATE-RESOLVED-SHORT-SUPPORT: Observation exists without Signal" in (
+        validate_contract_cases((observation_without_signal,))
+    )
+
+    produced_run_without_signal = replace(
+        case,
+        signal=None,
+        expected_observations=(),
+    )
+    assert "OV1-STATE-RESOLVED-SHORT-SUPPORT: run exists without Signal" in (
+        validate_contract_cases((produced_run_without_signal,))
+    )
+
+    failure = _CASES["OV1-OPERATIONAL-FAILURE"]
+    assert "OV1-OPERATIONAL-FAILURE: run exists without Signal" in (
+        validate_contract_cases((replace(failure, signal=None),))
+    )
+
+    no_signal_non_result = ContractCase(
+        "OV1-NO-SIGNAL-NON-RESULT",
+        Classification.UNRESOLVED,
+        None,
+        (),
+        None,
+        None,
+        "No immutable Signal exists, so this carries no asserted Observation or run.",
+    )
+    assert validate_contract_cases((no_signal_non_result,)) == []
 
 
 def test_successful_abstention_remains_unresolved_not_unknown_or_failure():
@@ -301,6 +416,39 @@ def test_storage_matrix_covers_lineage_correspondence_and_atomicity():
     assert {
         case_id: _STORAGE[case_id].expectation for case_id in required_expectations
     } == required_expectations
+
+
+def test_correction_lineage_allows_cross_target_and_cross_signal_successors():
+    cross_target = _LINEAGE["LINEAGE-CROSS-TARGET"]
+    assert cross_target.expectation is StorageExpectation.ALLOW
+    assert cross_target.predecessor_signal_id == cross_target.successor_signal_id
+    assert cross_target.predecessor_target != cross_target.successor_target
+
+    cross_signal = _LINEAGE["LINEAGE-CROSS-SIGNAL"]
+    assert cross_signal.expectation is StorageExpectation.ALLOW
+    assert cross_signal.predecessor_signal_id != cross_signal.successor_signal_id
+
+
+def test_implementation_neutral_matrix_completes_nic6_scope():
+    expected = {
+        "MATRIX-IDENTITY-CANONICAL-SIGNAL": MatrixExpectation.ALLOW,
+        "MATRIX-IDENTITY-TEMPORARY-SIGNAL": MatrixExpectation.REJECT,
+        "MATRIX-ISOLATION-FAILURE-CONTINUES": MatrixExpectation.ALLOW,
+        "MATRIX-ISOLATION-SIBLING-EXTRACTION": MatrixExpectation.ALLOW,
+        "MATRIX-RERUN-EXACT-REUSE": MatrixExpectation.ALLOW,
+        "MATRIX-RERUN-CORRECTION-LINEAGE": MatrixExpectation.ALLOW,
+        "MATRIX-RERUN-NO-NEWEST-WINS": MatrixExpectation.REJECT,
+        "MATRIX-MIGRATION-NO-AUTOMATIC-BACKFILL": (MatrixExpectation.NON_PRODUCING),
+        "MATRIX-MIGRATION-DRY-RUN-NONPRODUCING": (MatrixExpectation.NON_PRODUCING),
+        "MATRIX-MIGRATION-HISTORICAL-REPLAY": MatrixExpectation.ALLOW,
+        "MATRIX-NONCONSUMPTION-CORRELATION": MatrixExpectation.REJECT,
+        "MATRIX-NONCONSUMPTION-PROBLEM": MatrixExpectation.REJECT,
+        "MATRIX-NONCONSUMPTION-SCORING": MatrixExpectation.REJECT,
+        "MATRIX-NONCONSUMPTION-CONFIDENCE": MatrixExpectation.REJECT,
+        "MATRIX-NONCONSUMPTION-FINDINGS": MatrixExpectation.REJECT,
+        "MATRIX-NONCONSUMPTION-REPORTS": MatrixExpectation.REJECT,
+    }
+    assert {case_id: _MATRIX[case_id].expectation for case_id in expected} == expected
 
 
 def test_frozen_semantic_baseline_remains_unchanged():

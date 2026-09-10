@@ -43,6 +43,12 @@ class RunOutcome(str, Enum):
     OPERATIONAL_FAILURE = "operational_failure"
 
 
+class ProducerKind(str, Enum):
+    HUMAN = "human"
+    RULE = "rule"
+    MODEL = "model"
+
+
 @dataclass(frozen=True)
 class SignalFixture:
     signal_id: str
@@ -73,9 +79,14 @@ class ObservationExpectation:
 class RunExpectation:
     attempted_signal_id: str
     attempted_condition_citation: CitationExpectation
+    producer_kind: ProducerKind
+    producer_name: str
+    producer_revision: str
     attempted_semantic_contract_version: str
+    attempted_at: str
     outcome: RunOutcome
     resulting_observation_index: int | None
+    produced_at: str | None
 
 
 @dataclass(frozen=True)
@@ -112,6 +123,12 @@ class StorageExpectation(str, Enum):
     ROLLBACK = "rollback"
 
 
+class MatrixExpectation(str, Enum):
+    ALLOW = "allow"
+    REJECT = "reject"
+    NON_PRODUCING = "non_producing"
+
+
 @dataclass(frozen=True)
 class StorageContractCase:
     case_id: str
@@ -121,7 +138,31 @@ class StorageContractCase:
     preserves_original: bool = False
 
 
+@dataclass(frozen=True)
+class LineageContractCase:
+    case_id: str
+    predecessor_signal_id: str
+    predecessor_target: CitationExpectation
+    successor_signal_id: str
+    successor_target: CitationExpectation
+    expectation: StorageExpectation
+
+
+@dataclass(frozen=True)
+class ImplementationMatrixCase:
+    case_id: str
+    section: str
+    expectation: MatrixExpectation
+    rationale: str
+
+
 _NIC_17 = {case.case_id: case for case in NIC_17_CASES}
+
+_FIXTURE_PRODUCER_KIND = ProducerKind.RULE
+_FIXTURE_PRODUCER_NAME = "nic-7-reviewed-fixture"
+_FIXTURE_PRODUCER_REVISION = "fixture-r1"
+_FIXTURE_ATTEMPTED_AT = "2026-09-10T00:00:00Z"
+_FIXTURE_PRODUCED_AT = "2026-09-10T00:00:01Z"
 
 
 def _nic17_signal(case_id: str) -> SignalFixture:
@@ -141,9 +182,14 @@ def _produced(
     return RunExpectation(
         attempted_signal_id=attempted_signal_id,
         attempted_condition_citation=target,
+        producer_kind=_FIXTURE_PRODUCER_KIND,
+        producer_name=_FIXTURE_PRODUCER_NAME,
+        producer_revision=_FIXTURE_PRODUCER_REVISION,
         attempted_semantic_contract_version=SEMANTIC_CONTRACT_VERSION,
+        attempted_at=_FIXTURE_ATTEMPTED_AT,
         outcome=RunOutcome.PRODUCED,
         resulting_observation_index=observation_index,
+        produced_at=_FIXTURE_PRODUCED_AT,
     )
 
 
@@ -481,8 +527,13 @@ CONTRACT_CASES: tuple[ContractCase, ...] = (
             RunExpectation(
                 "signal-failure",
                 CitationExpectation(SourcePart.TITLE, "Checkout remains unavailable"),
+                _FIXTURE_PRODUCER_KIND,
+                _FIXTURE_PRODUCER_NAME,
+                _FIXTURE_PRODUCER_REVISION,
                 SEMANTIC_CONTRACT_VERSION,
+                _FIXTURE_ATTEMPTED_AT,
                 RunOutcome.OPERATIONAL_FAILURE,
+                None,
                 None,
             ),
         ),
@@ -816,6 +867,129 @@ STORAGE_CONTRACT_CASES: tuple[StorageContractCase, ...] = (
 )
 
 
+LINEAGE_CONTRACT_CASES: tuple[LineageContractCase, ...] = (
+    LineageContractCase(
+        "LINEAGE-CROSS-TARGET",
+        "signal-lineage-shared",
+        CitationExpectation(SourcePart.TITLE, "checkout flow is failing"),
+        "signal-lineage-shared",
+        CitationExpectation(
+            SourcePart.TITLE,
+            "checkout flow is failing for returning customers",
+        ),
+        StorageExpectation.ALLOW,
+    ),
+    LineageContractCase(
+        "LINEAGE-CROSS-SIGNAL",
+        "signal-lineage-predecessor",
+        CitationExpectation(SourcePart.CONTENT, "the export remains unavailable"),
+        "signal-lineage-successor",
+        CitationExpectation(SourcePart.CONTENT, "the export is available again"),
+        StorageExpectation.ALLOW,
+    ),
+)
+
+
+IMPLEMENTATION_MATRIX_CASES: tuple[ImplementationMatrixCase, ...] = (
+    ImplementationMatrixCase(
+        "MATRIX-IDENTITY-CANONICAL-SIGNAL",
+        "identity",
+        MatrixExpectation.ALLOW,
+        "Observation uses the canonical persisted Signal identity after collector deduplication.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-IDENTITY-TEMPORARY-SIGNAL",
+        "identity",
+        MatrixExpectation.REJECT,
+        "A collector-temporary or in-memory Signal ID is not citation provenance.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-ISOLATION-FAILURE-CONTINUES",
+        "isolation",
+        MatrixExpectation.ALLOW,
+        "One target operational failure does not suppress a later target attempt on the same Signal.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-ISOLATION-SIBLING-EXTRACTION",
+        "isolation",
+        MatrixExpectation.ALLOW,
+        "Observation interpretation and Entity/Relationship Extraction remain independent siblings.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-RERUN-EXACT-REUSE",
+        "rerun",
+        MatrixExpectation.ALLOW,
+        "Exact-result reuse creates a new run referencing the existing Observation without duplicate content.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-RERUN-CORRECTION-LINEAGE",
+        "rerun",
+        MatrixExpectation.ALLOW,
+        "A correction creates an append-only successor rather than rewriting history.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-RERUN-NO-NEWEST-WINS",
+        "rerun",
+        MatrixExpectation.REJECT,
+        "Interpreter selection cannot silently choose the newest producer.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-MIGRATION-NO-AUTOMATIC-BACKFILL",
+        "migration",
+        MatrixExpectation.NON_PRODUCING,
+        "A migration alone does not create semantic Observations for historic Signals.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-MIGRATION-DRY-RUN-NONPRODUCING",
+        "migration",
+        MatrixExpectation.NON_PRODUCING,
+        "Dry runs and migration checks retain no Observation or run without approved invocation.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-MIGRATION-HISTORICAL-REPLAY",
+        "migration",
+        MatrixExpectation.ALLOW,
+        "Historical Signals remain replayable from their immutable evidence.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-NONCONSUMPTION-CORRELATION",
+        "non_consumption",
+        MatrixExpectation.REJECT,
+        "Observation has no Correlation authority before NIC-9 validation.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-NONCONSUMPTION-PROBLEM",
+        "non_consumption",
+        MatrixExpectation.REJECT,
+        "Observation has no Problem-matching authority before NIC-9 validation.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-NONCONSUMPTION-SCORING",
+        "non_consumption",
+        MatrixExpectation.REJECT,
+        "Observation has no scoring authority before NIC-9 validation.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-NONCONSUMPTION-CONFIDENCE",
+        "non_consumption",
+        MatrixExpectation.REJECT,
+        "Observation has no BIA-confidence authority before NIC-9 validation.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-NONCONSUMPTION-FINDINGS",
+        "non_consumption",
+        MatrixExpectation.REJECT,
+        "Observation has no Findings authority before NIC-9 validation.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-NONCONSUMPTION-REPORTS",
+        "non_consumption",
+        MatrixExpectation.REJECT,
+        "Observation has no report authority before NIC-9 validation.",
+    ),
+)
+
+
 def resolve_citation(
     signal: SignalFixture,
     citation: CitationExpectation,
@@ -855,6 +1029,12 @@ def validate_contract_cases(cases: tuple[ContractCase, ...]) -> list[str]:
         if case.signal is None:
             if case.attempted_targets:
                 errors.append(f"{case.case_id}: target exists without Signal")
+            if case.expected_observations:
+                errors.append(f"{case.case_id}: Observation exists without Signal")
+            if case.expected_runs:
+                errors.append(f"{case.case_id}: run exists without Signal")
+            if case.classification is Classification.PRESERVE:
+                errors.append(f"{case.case_id}: PRESERVE case lacks immutable Signal")
             continue
 
         for target in case.attempted_targets:
@@ -869,6 +1049,15 @@ def validate_contract_cases(cases: tuple[ContractCase, ...]) -> list[str]:
                 f"{case.case_id}: one run is required per supplied target attempt"
             )
 
+        target_set = set(case.attempted_targets)
+        run_targets = [run.attempted_condition_citation for run in case.expected_runs]
+        if len(target_set) != len(case.attempted_targets):
+            errors.append(f"{case.case_id}: attempted targets are not unique")
+        if len(set(run_targets)) != len(run_targets):
+            errors.append(f"{case.case_id}: duplicate run for attempted target")
+        if set(run_targets) != target_set:
+            errors.append(f"{case.case_id}: runs do not map one-to-one to targets")
+
         produced_count = sum(
             run.outcome is RunOutcome.PRODUCED for run in case.expected_runs
         )
@@ -876,8 +1065,23 @@ def validate_contract_cases(cases: tuple[ContractCase, ...]) -> list[str]:
             errors.append(
                 f"{case.case_id}: produced run/Observation cardinality differs"
             )
+        produced_indices = [
+            run.resulting_observation_index
+            for run in case.expected_runs
+            if run.outcome is RunOutcome.PRODUCED
+        ]
+        if (
+            any(index is None for index in produced_indices)
+            or len(set(produced_indices)) != len(produced_indices)
+            or set(produced_indices) != set(range(len(case.expected_observations)))
+        ):
+            errors.append(
+                f"{case.case_id}: produced runs do not map one-to-one to Observations"
+            )
 
         for observation in case.expected_observations:
+            if observation.condition_citation not in target_set:
+                errors.append(f"{case.case_id}: Observation target was not attempted")
             target_range = resolve_citation(case.signal, observation.condition_citation)
             if target_range is None:
                 errors.append(f"{case.case_id}: condition citation does not resolve")
@@ -913,7 +1117,17 @@ def validate_contract_cases(cases: tuple[ContractCase, ...]) -> list[str]:
                 )
             if not run.attempted_semantic_contract_version:
                 errors.append(f"{case.case_id}: run lacks attempted semantic contract")
+            if not isinstance(run.producer_kind, ProducerKind):
+                errors.append(f"{case.case_id}: run has invalid producer kind")
+            if not run.producer_name or not run.producer_revision:
+                errors.append(f"{case.case_id}: run lacks producer provenance")
+            if not run.attempted_at:
+                errors.append(f"{case.case_id}: run lacks attempted time")
+            if run.attempted_condition_citation not in target_set:
+                errors.append(f"{case.case_id}: run citation was not attempted")
             if run.outcome is RunOutcome.PRODUCED:
+                if not run.produced_at:
+                    errors.append(f"{case.case_id}: produced run lacks produced time")
                 index = run.resulting_observation_index
                 if index is None or not 0 <= index < len(case.expected_observations):
                     errors.append(
@@ -929,6 +1143,11 @@ def validate_contract_cases(cases: tuple[ContractCase, ...]) -> list[str]:
                     errors.append(
                         f"{case.case_id}: produced run does not match attempt"
                     )
-            elif run.resulting_observation_index is not None:
-                errors.append(f"{case.case_id}: failure run references an Observation")
+            else:
+                if run.resulting_observation_index is not None:
+                    errors.append(
+                        f"{case.case_id}: failure run references an Observation"
+                    )
+                if run.produced_at is not None:
+                    errors.append(f"{case.case_id}: failure run has produced time")
     return errors
