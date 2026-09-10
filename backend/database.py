@@ -517,9 +517,9 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS interpreted_observations (
         observation_id TEXT NOT NULL PRIMARY KEY
-            CHECK (typeof(observation_id) = 'text'),
+            CHECK (typeof(observation_id) = 'text' AND observation_id <> ''),
         signal_id TEXT NOT NULL
-            CHECK (typeof(signal_id) = 'text')
+            CHECK (typeof(signal_id) = 'text' AND signal_id <> '')
             REFERENCES signals(id) ON DELETE RESTRICT,
         condition_source_part TEXT NOT NULL
             CHECK (typeof(condition_source_part) = 'text'
@@ -545,7 +545,8 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
                    AND semantic_contract_version <> ''),
         supersedes_observation_id TEXT
             CHECK (supersedes_observation_id IS NULL
-                   OR typeof(supersedes_observation_id) = 'text')
+                   OR (typeof(supersedes_observation_id) = 'text'
+                       AND supersedes_observation_id <> ''))
             REFERENCES interpreted_observations(observation_id) ON DELETE RESTRICT,
         recorded_at TEXT NOT NULL
             CHECK (typeof(recorded_at) = 'text' AND recorded_at <> ''),
@@ -579,9 +580,10 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
     """,
     """
     CREATE TABLE IF NOT EXISTS observation_runs (
-        run_id TEXT NOT NULL PRIMARY KEY CHECK (typeof(run_id) = 'text'),
+        run_id TEXT NOT NULL PRIMARY KEY
+            CHECK (typeof(run_id) = 'text' AND run_id <> ''),
         attempted_signal_id TEXT NOT NULL
-            CHECK (typeof(attempted_signal_id) = 'text')
+            CHECK (typeof(attempted_signal_id) = 'text' AND attempted_signal_id <> '')
             REFERENCES signals(id) ON DELETE RESTRICT,
         attempted_condition_source_part TEXT NOT NULL
             CHECK (typeof(attempted_condition_source_part) = 'text'
@@ -614,7 +616,8 @@ _OBSERVATION_V1_DDL_STATEMENTS = (
         )),
         resulting_observation_id TEXT
             CHECK (resulting_observation_id IS NULL
-                   OR typeof(resulting_observation_id) = 'text')
+                   OR (typeof(resulting_observation_id) = 'text'
+                       AND resulting_observation_id <> ''))
             REFERENCES interpreted_observations(observation_id) ON DELETE RESTRICT,
         CHECK (
             (outcome = 'produced'

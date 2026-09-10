@@ -243,6 +243,19 @@ def test_observation_optional_text_fields_accept_approved_nulls(db):
         )
 
 
+@pytest.mark.parametrize("field", ("observation_id", "signal_id"))
+def test_observation_required_identifier_fields_reject_empty_text(db, field):
+    with database.get_connection() as conn, pytest.raises(sqlite3.IntegrityError):
+        _insert_observation(conn, **{field: ""})
+
+
+def test_observation_optional_lineage_reference_accepts_null_but_rejects_empty_text(db):
+    with database.get_connection() as conn:
+        _insert_observation(conn, supersedes_observation_id=None)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_observation(conn, "empty-lineage", supersedes_observation_id="")
+
+
 def test_runs_are_append_only_and_enforce_outcome_cardinality(db):
     with database.get_connection() as conn:
         _insert_observation(conn)
@@ -358,6 +371,28 @@ def test_run_optional_text_fields_accept_approved_nulls(db):
             produced_at=None,
             resulting_observation_id=None,
         )
+
+
+@pytest.mark.parametrize("field", ("run_id", "attempted_signal_id"))
+def test_run_required_identifier_fields_reject_empty_text(db, field):
+    with database.get_connection() as conn:
+        _insert_observation(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_run(conn, **{field: ""})
+
+
+def test_run_optional_result_reference_accepts_null_but_rejects_empty_text(db):
+    with database.get_connection() as conn:
+        _insert_run(
+            conn,
+            "failure-without-result",
+            outcome="operational_failure",
+            produced_at=None,
+            resulting_observation_id=None,
+        )
+        _insert_observation(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_run(conn, "produced-empty-result", resulting_observation_id="")
 
 
 def test_citation_bearing_signals_are_protected_without_freezing_unrelated_rows(db):
