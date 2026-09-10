@@ -59,12 +59,14 @@ def test_case_ids_are_unique_across_contract_sections():
     assert len(ids) == len(set(ids))
 
 
-def test_semantic_core_contains_only_approved_fields():
+def test_observation_expectations_keep_approved_semantics_and_lineage():
     assert {field.name for field in fields(ObservationExpectation)} == {
         "condition_citation",
         "condition_state",
         "state_evidence_citation",
         "semantic_contract_version",
+        "observation_id",
+        "supersedes_observation_id",
     }
     assert {field.name for field in fields(CitationExpectation)} == {
         "source_part",
@@ -255,6 +257,45 @@ def test_retries_can_share_one_target_and_exact_result_observation():
     assert {
         run.attempted_condition_citation for run in multiple_targets.expected_runs or ()
     } == set(multiple_targets.attempted_targets)
+
+
+def test_duplicate_exact_result_observations_are_rejected_but_corrections_are_not():
+    case = _CASES["OV1-RETRY-PRODUCED-CONFIRMATION"]
+    assert case.expected_observations is not None
+    assert case.expected_runs is not None
+    original = replace(case.expected_observations[0], observation_id="observation-a")
+    duplicate = replace(original, observation_id="observation-b")
+    duplicate_result = replace(
+        case,
+        expected_observations=(original, duplicate),
+        expected_runs=(
+            replace(case.expected_runs[0], resulting_observation_index=0),
+            replace(case.expected_runs[1], resulting_observation_index=1),
+        ),
+    )
+    assert (
+        "OV1-RETRY-PRODUCED-CONFIRMATION: duplicate exact-result Observation expectation"
+        in validate_contract_cases((duplicate_result,))
+    )
+
+    correction = replace(
+        original,
+        observation_id="observation-correction",
+        supersedes_observation_id="observation-a",
+        condition_state=ConditionState.UNKNOWN,
+    )
+    correction_result = replace(
+        case,
+        expected_observations=(original, correction),
+        expected_runs=(
+            replace(case.expected_runs[0], resulting_observation_index=0),
+            replace(case.expected_runs[1], resulting_observation_index=1),
+        ),
+    )
+    assert validate_contract_cases((correction_result,)) == []
+
+    distinct_targets = _CASES["OV1-MULTIPLE-TARGETS"]
+    assert validate_contract_cases((distinct_targets,)) == []
 
 
 def test_zero_target_and_operational_failure_are_distinct():
@@ -477,8 +518,19 @@ def test_implementation_neutral_matrix_completes_nic6_scope():
         "MATRIX-TARGET-BOUNDARIES-NON-EQUIVALENT": MatrixExpectation.ALLOW,
         "MATRIX-MIGRATION-NO-AUTOMATIC-BACKFILL": (MatrixExpectation.NON_PRODUCING),
         "MATRIX-MIGRATION-DRY-RUN-NONPRODUCING": (MatrixExpectation.NON_PRODUCING),
-        "MATRIX-MIGRATION-FAILED-ROLLBACK": (MatrixExpectation.NON_PRODUCING),
+        "MATRIX-MIGRATION-FAILED-ROLLBACK": MatrixExpectation.ROLLBACK_PRESERVES,
         "MATRIX-MIGRATION-HISTORICAL-REPLAY": MatrixExpectation.ALLOW,
+        "MATRIX-FRESH-INIT-SCHEMA-CONTRACT": (
+            MatrixExpectation.ESTABLISHES_SCHEMA_CONTRACT
+        ),
+        "MATRIX-FRESH-INIT-NONPRODUCING": MatrixExpectation.NON_PRODUCING,
+        "MATRIX-UPGRADE-SCHEMA-CONTRACT": (
+            MatrixExpectation.ESTABLISHES_SCHEMA_CONTRACT
+        ),
+        "MATRIX-UPGRADE-PRESERVES-INTELLIGENCE": (
+            MatrixExpectation.PRESERVES_EXISTING_STATE
+        ),
+        "MATRIX-UPGRADE-FAILURE-ROLLBACK": MatrixExpectation.ROLLBACK_PRESERVES,
         "MATRIX-NONCONSUMPTION-CORRELATION": MatrixExpectation.REJECT,
         "MATRIX-NONCONSUMPTION-PATTERN-DETECTOR": MatrixExpectation.REJECT,
         "MATRIX-NONCONSUMPTION-WATCH-LIST": MatrixExpectation.REJECT,

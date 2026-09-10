@@ -73,6 +73,8 @@ class ObservationExpectation:
     condition_state: ConditionState
     state_evidence_citation: CitationExpectation | None
     semantic_contract_version: str = SEMANTIC_CONTRACT_VERSION
+    observation_id: str | None = None
+    supersedes_observation_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +130,9 @@ class MatrixExpectation(str, Enum):
     ALLOW = "allow"
     REJECT = "reject"
     NON_PRODUCING = "non_producing"
+    PRESERVES_EXISTING_STATE = "preserves_existing_state"
+    ROLLBACK_PRESERVES = "rollback_preserves"
+    ESTABLISHES_SCHEMA_CONTRACT = "establishes_schema_contract"
 
 
 @dataclass(frozen=True)
@@ -226,8 +231,17 @@ def _observation(
     target: CitationExpectation,
     state: ConditionState,
     support: CitationExpectation | None,
+    *,
+    observation_id: str | None = None,
+    supersedes_observation_id: str | None = None,
 ) -> ObservationExpectation:
-    return ObservationExpectation(target, state, support)
+    return ObservationExpectation(
+        target,
+        state,
+        support,
+        observation_id=observation_id,
+        supersedes_observation_id=supersedes_observation_id,
+    )
 
 
 _CS003_TARGET = CitationExpectation(
@@ -1128,14 +1142,44 @@ IMPLEMENTATION_MATRIX_CASES: tuple[ImplementationMatrixCase, ...] = (
     ImplementationMatrixCase(
         "MATRIX-MIGRATION-FAILED-ROLLBACK",
         "migration",
-        MatrixExpectation.NON_PRODUCING,
-        "A failed migration or transaction leaves no partial Observation/run pair and restores pre-attempt persistence state.",
+        MatrixExpectation.ROLLBACK_PRESERVES,
+        "Given pre-existing intelligence state X, a failed migration restores X; it creates no Observation/run, leaves no partial mutation, and retains no half-applied schema/data transition.",
     ),
     ImplementationMatrixCase(
         "MATRIX-MIGRATION-HISTORICAL-REPLAY",
         "migration",
         MatrixExpectation.ALLOW,
         "Historical Signals remain replayable from immutable evidence only through an explicit later approved operation.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-FRESH-INIT-SCHEMA-CONTRACT",
+        "fresh_initialization",
+        MatrixExpectation.ESTABLISHES_SCHEMA_CONTRACT,
+        "An empty database establishes Observation/run storage, non-null identities, append-only enforcement, required uniqueness/indexes, and Signal FK/restrict semantics.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-FRESH-INIT-NONPRODUCING",
+        "fresh_initialization",
+        MatrixExpectation.NON_PRODUCING,
+        "Fresh initialization fabricates no semantic Observation merely by creating storage.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-UPGRADE-SCHEMA-CONTRACT",
+        "upgrade_migration",
+        MatrixExpectation.ESTABLISHES_SCHEMA_CONTRACT,
+        "An upgrade from the pre-Observation schema establishes the same Observation/run structures, constraints, and indexes as fresh initialization.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-UPGRADE-PRESERVES-INTELLIGENCE",
+        "upgrade_migration",
+        MatrixExpectation.PRESERVES_EXISTING_STATE,
+        "Existing Signals, Problems, Opportunities, and intelligence remain preserved without automatic historical semantic backfill; the upgrade is replay-safe/idempotent.",
+    ),
+    ImplementationMatrixCase(
+        "MATRIX-UPGRADE-FAILURE-ROLLBACK",
+        "upgrade_migration",
+        MatrixExpectation.ROLLBACK_PRESERVES,
+        "A failed upgrade restores the pre-upgrade state without partial Observation/run records or mutation of existing intelligence.",
     ),
     ImplementationMatrixCase(
         "MATRIX-NONCONSUMPTION-CORRELATION",
@@ -1280,9 +1324,32 @@ def validate_contract_cases(cases: tuple[ContractCase, ...]) -> list[str]:
                 f"{case.case_id}: retained Observation lacks a matching produced run"
             )
 
+        exact_results: dict[
+            tuple[
+                str,
+                CitationExpectation,
+                ConditionState,
+                CitationExpectation | None,
+                str,
+            ],
+            ObservationExpectation,
+        ] = {}
         for observation in case.expected_observations:
             if observation.condition_citation not in target_set:
                 errors.append(f"{case.case_id}: Observation target was not attempted")
+            exact_result_key = (
+                case.signal.signal_id,
+                observation.condition_citation,
+                observation.condition_state,
+                observation.state_evidence_citation,
+                observation.semantic_contract_version,
+            )
+            prior = exact_results.get(exact_result_key)
+            if prior is not None:
+                errors.append(
+                    f"{case.case_id}: duplicate exact-result Observation expectation"
+                )
+            exact_results[exact_result_key] = observation
             target_range = resolve_citation(case.signal, observation.condition_citation)
             if target_range is None:
                 errors.append(f"{case.case_id}: condition citation does not resolve")
