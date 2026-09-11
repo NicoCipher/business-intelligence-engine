@@ -23,17 +23,19 @@ Do not code from chat memory, an old handoff, or an issue title alone.
    - `docs/ARCHITECTURE.md` for current implementation shape and known implementation constraints.
    - `docs/SCHEMA.md` plus `backend/database.py` for persistence and migration truth.
    - `docs/adr/` for bounded accepted decisions and their supersession history.
-   - `docs/rfc/` for larger architecture proposals/decisions; check each document's status before treating it as implemented.
+   - `docs/rfc/` for larger architecture proposals/decisions; check each document's status and explicit supersession declarations before deciding which text governs.
    - `docs/HANDOFF.md` for orientation only. It can lag `main`; verify repository state and the current Linear issue before acting on its "next" instructions.
 4. Inspect the implementation and relevant tests. Tests describe expected implementation behavior but do not outrank architecture.
 
-If sources conflict, do not quietly choose the one that makes the requested implementation easiest. Resolve the conflict by authority and freshness, and surface a real architecture contradiction before proceeding.
+If sources conflict, do not quietly choose the one that makes the requested implementation easiest. Resolve the conflict by authority, explicit supersession, and freshness, and surface a real architecture contradiction before proceeding.
 
 ## 2. Authority and scope
 
-Architectural authority follows the repository's governance model:
+Architectural authority follows the repository's governance model, with explicit supersession taking precedence over the text it replaces:
 
-`Architecture Specification → Architectural Invariants/Handbook → accepted ADR/RFC decisions → implementation → tests`
+`latest accepted explicit supersession for the affected scope → Architecture Specification / Architectural Invariants / Handbook → other accepted ADR/RFC decisions → implementation → tests`
+
+An accepted ADR/RFC does **not** automatically outrank the architecture as a whole. It takes precedence only where it explicitly supersedes, corrects, or replaces an earlier decision. Outside that declared scope, the remaining canonical architecture continues to govern.
 
 Current-state questions require an additional freshness rule: current `main`, current schema code, and the authoritative current task outrank stale handoffs, chats, historical commits, and old implementation notes.
 
