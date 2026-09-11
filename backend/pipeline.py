@@ -324,7 +324,8 @@ def _run_domain(
     logger.info("[%s] collected %d signals this run", domain.id, len(domain_signals))
 
     if not dry_run and domain_signals:
-        run_result.signals_persisted = persist_signals(domain_signals)
+        persistence_result = persist_signals(domain_signals)
+        run_result.signals_persisted = persistence_result.inserted_count
         logger.info(
             "[%s] persisted %d/%d signals (rest were duplicates)",
             domain.id, run_result.signals_persisted, len(domain_signals),
