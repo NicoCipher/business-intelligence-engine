@@ -34,7 +34,7 @@ def db(monkeypatch, tmp_path):
         conn.execute("""INSERT INTO signals
           (id, source, source_id, title, content, entity_ids, tags, raw_metadata, collected_at, domain)
           VALUES ('canonical-1', 'rss', 'source-1', 'Condition aa aa',
-          'The condition remains active today.', '[]', '[]', '{}', 'now', 'business')""")
+          'The condition remains active today. aa aa', '[]', '[]', '{}', 'now', 'business')""")
         conn.execute("""INSERT INTO signals
           (id, source, source_id, title, content, entity_ids, tags, raw_metadata, collected_at, domain)
           VALUES ('canonical-2', 'rss', 'source-2', 'Other condition',
@@ -209,3 +209,121 @@ def test_competing_file_backed_attempts_reuse_one_observation(db):
     second.join()
     assert sorted(item.created for item in results) == [False, True]
     assert counts() == (1, 2)
+
+
+@pytest.mark.parametrize("column", ["title", "content"])
+def test_blob_canonical_citation_text_is_a_service_error_without_retained_state(db, column):
+    with database.get_connection() as conn:
+        conn.execute(
+            f"UPDATE signals SET {column} = ? WHERE id = 'canonical-1'",
+            (sqlite3.Binary(b"not text"),),
+        )
+        conn.commit()
+    with pytest.raises(ObservationServiceError):
+        produced()
+    with pytest.raises(ObservationServiceError):
+        persist_operational_failure(run())
+    assert counts() == (0, 0)
+
+
+def test_resolved_requires_support_separately_from_active(db):
+    with pytest.raises(ObservationServiceError):
+        produced(state=ObservationConditionState.RESOLVED, evidence=None)
+    assert counts() == (0, 0)
+
+
+def test_repeated_literal_evidence_uses_selected_positions_for_containment(db):
+    target = citation("aa", CitationSourcePart.TITLE, 1)
+    evidence = citation("aa", CitationSourcePart.TITLE, 2)
+    with pytest.raises(ObservationServiceError):
+        produced(target=target, evidence=evidence)
+    assert counts() == (0, 0)
+
+
+def test_unknown_without_evidence_exactly_reuses_the_retained_observation(db):
+    first = produced(state=ObservationConditionState.UNKNOWN, evidence=None)
+    reused = produced("ignored", "run-2", state=ObservationConditionState.UNKNOWN, evidence=None)
+    assert first.created and not reused.created
+    assert reused.observation.observation_id == first.observation.observation_id
+    assert counts() == (1, 2)
+
+
+def test_exact_key_boundaries_cover_valid_citation_and_evidence_changes(db):
+    base = result(
+        target=citation("aa aa", CitationSourcePart.TITLE),
+        evidence=citation("aa", CitationSourcePart.TITLE, 1),
+    )
+    persist_produced(base, run(target=base.condition_citation), produced_at="produced")
+    variants = (
+        # Condition source part, literal, and ordinal.
+        result("source", target=citation("aa aa", CitationSourcePart.CONTENT), evidence=citation("aa", CitationSourcePart.CONTENT)),
+        result("literal", target=citation("aa", CitationSourcePart.TITLE), evidence=citation("aa", CitationSourcePart.TITLE)),
+        result("ordinal", target=citation("aa", CitationSourcePart.TITLE, 2), evidence=citation("aa", CitationSourcePart.TITLE, 2)),
+        # Evidence source part, literal, and ordinal (each remains valid).
+        result("evidence-source", target=citation("aa aa", CitationSourcePart.CONTENT), evidence=citation("aa aa", CitationSourcePart.CONTENT)),
+        result("evidence-literal", target=citation("aa aa", CitationSourcePart.TITLE), evidence=citation("aa aa", CitationSourcePart.TITLE)),
+        result("evidence-ordinal", target=citation("aa aa", CitationSourcePart.TITLE), evidence=citation("aa", CitationSourcePart.TITLE, 2)),
+    )
+    for index, variant in enumerate(variants, start=2):
+        persisted = persist_produced(
+            variant,
+            run(f"run-{index}", target=variant.condition_citation),
+            produced_at="produced",
+        )
+        assert persisted.created
+    assert counts() == (1 + len(variants), 1 + len(variants))
+
+
+def test_root_and_correction_have_distinct_exact_keys_and_correction_reuses(db):
+    root = produced("root", "root-run")
+    correction = result(
+        "correction", target=citation("condition remains active"), evidence=citation("active"),
+        supersedes_observation_id=root.observation.observation_id,
+    )
+    first_correction = persist_produced(
+        correction, run("correction-run", target=correction.condition_citation), produced_at="produced"
+    )
+    repeated = result(
+        "ignored", target=citation("condition remains active"), evidence=citation("active"),
+        supersedes_observation_id=root.observation.observation_id,
+    )
+    reused = persist_produced(
+        repeated, run("correction-run-2", target=repeated.condition_citation), produced_at="produced"
+    )
+    assert root.created and first_correction.created and not reused.created
+    assert reused.observation.observation_id == first_correction.observation.observation_id
+    assert counts() == (2, 3)
+
+
+def test_reuse_and_operational_failure_duplicate_run_ids_leave_state_unchanged(db):
+    produced("observation", "duplicate")
+    with pytest.raises(sqlite3.IntegrityError):
+        produced("ignored", "duplicate")
+    assert counts() == (1, 1)
+    with pytest.raises(sqlite3.IntegrityError):
+        persist_operational_failure(run("duplicate"))
+    assert counts() == (1, 1)
+
+
+def test_unrelated_observation_id_collision_never_attaches_a_run_to_it(db):
+    original = produced("collision", "original-run")
+    candidate = result(
+        "collision", target=citation("aa", CitationSourcePart.TITLE),
+        evidence=citation("aa", CitationSourcePart.TITLE),
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        persist_produced(candidate, run("candidate-run", target=candidate.condition_citation), produced_at="produced")
+    assert counts() == (1, 1)
+    assert original.observation.observation_id == "collision"
+
+
+def test_backward_lineage_cycle_attempt_preserves_existing_rows(db):
+    root = produced("root", "root-run")
+    successor = result(
+        "successor", supersedes_observation_id=root.observation.observation_id,
+    )
+    persist_produced(successor, run("successor-run", target=successor.condition_citation), produced_at="produced")
+    cycle = result("root", supersedes_observation_id="successor")
+    with pytest.raises(ObservationLineageConflict):
+        persist_produced(cycle, run("cycle-run", target=cycle.condition_citation), produced_at="produced")
+    assert counts() == (2, 2)

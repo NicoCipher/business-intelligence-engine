@@ -89,6 +89,10 @@ def _hydrate_canonical_signal(conn: sqlite3.Connection, signal_id: str) -> Signa
     ).fetchone()
     if row is None:
         raise ObservationServiceError("canonical persisted Signal does not exist")
+    if not isinstance(row["id"], str) or not row["id"]:
+        raise ObservationServiceError("canonical persisted Signal has no valid identity")
+    if not isinstance(row["title"], str) or not isinstance(row["content"], str):
+        raise ObservationServiceError("canonical persisted Signal citation text is not text")
     try:
         signal = Signal(
             id=row["id"], source=row["source"], source_id=row["source_id"],
@@ -98,8 +102,6 @@ def _hydrate_canonical_signal(conn: sqlite3.Connection, signal_id: str) -> Signa
             raw_metadata=json.loads(row["raw_metadata"]), collected_at=row["collected_at"],
             processed=row["processed"], domain=row["domain"],
         )
-        if not isinstance(signal.id, str) or not signal.id:
-            raise ObservationServiceError("canonical persisted Signal has no valid identity")
         return signal
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ObservationServiceError("canonical persisted Signal is not hydratable") from error
