@@ -1,59 +1,69 @@
 # BIA Project Handoff
 
-Updated 2026-09-06 through `4e10b8bb299b62e5d6fc28bd14e4a4c8b74f5273` (PR #15 merged).
+Updated 2026-09-27 against current `main` at `09c1a6f37b97f480c1407a5ec39cee5e830374f2`.
 
-This file is the **current orientation handoff**, not the full historical diary. The previous long-form handoff remains preserved in git history. For deeper detail, use:
+This file is the **current orientation handoff**, not a historical diary. When this handoff, an old chat, an older commit, or another document conflicts with the live repository or Linear, verify current `main` and the authoritative Linear issue before acting.
 
-- `docs/ARCHITECTURE.md` — current architecture and boundaries
-- `docs/SCHEMA.md` — schema and migration history
-- `docs/adr/` — bounded architectural decisions
-- `docs/rfc/` — pipeline-level architecture proposals/decisions
+Useful references:
+
+- `docs/ARCHITECTURE.md` — implemented architecture and responsibility boundaries
+- `docs/architecture/INTERPRETED_OBSERVATION_V1_FIELD_DISPOSITION_AND_INVARIANTS.md` — approved Observation V1 contract
+- `docs/architecture/OBSERVATION_V1_BACKEND_INTEGRATION_PLAN.md` — approved backend integration design
+- `docs/adr/` — accepted architectural decisions
+- `docs/rfc/` — pipeline-level proposals and decisions
 - `docs/experiments/` — semantic experiment evidence
-- Linear project `BIA` — current sequencing, blockers, and active issue state
+- Linear project `BIA` — current sequencing, blockers, and issue state
+- `backend/database.py` — current schema authority when schema docs disagree
 
-When this handoff, an old chat, or a historical commit conflicts with the current repository or Linear, **verify current `main` and the authoritative Linear issue before acting**.
+> Documentation drift note: `backend/database.py` currently declares **schema v11**, while `docs/SCHEMA.md` still says v9. Treat the code as authoritative until the schema history document is refreshed.
 
 ---
 
 ## 1. Current Position
 
-BIA is past the basic-backend stage.
+BIA is past the basic-backend stage and is now in the **Semantic Understanding Foundation** phase.
 
-The collection, persistence, scheduling, canonical Problem memory, Opportunity generation, change detection, reporting, and internal Operations Console foundations exist and are working. The main architectural gap is now **semantic interpretation of evidence**: BIA still reasons too directly from raw Signal text in important places, which can confuse what a source says with what that source is actually allowed to prove.
+The collection, persistence, scheduling, canonical Problem memory, Opportunity generation, change detection, reporting, internal Operations Console, and durable SQLite snapshot foundations already exist.
 
-The Greenhouse production false positive exposed this clearly. Job-posting boilerplate such as hiring language, salary text, and enterprise/B2B vocabulary can resemble customer demand to the current raw-text Opportunity gate even though a job listing is evidence of employer/labor investment, not direct customer pain or willingness to pay.
+The central architecture problem is no longer “collect more data.” It is:
 
-The project is therefore at the transition from:
+> **What is each piece of evidence actually saying, and what is BIA allowed to infer from it?**
 
-`deterministic evidence pipeline`
+The project is therefore moving from:
 
-into:
+`raw Signal text → deterministic heuristics → intelligence`
 
-`evidence-aware semantic intelligence`
+toward:
+
+`Signal → InterpretedObservation → validated reasoning → downstream intelligence`
 
 without turning BIA into an LLM wrapper.
+
+The Greenhouse false-positive incident demonstrated why this boundary matters: source text can contain business-looking vocabulary without proving customer pain, demand, willingness to pay, or an Opportunity.
 
 ---
 
 ## 2. Authoritative Repository State
 
-Before this documentation refresh, authoritative `main` is:
+Current `main`:
 
-`4e10b8bb299b62e5d6fc28bd14e4a4c8b74f5273`
+`09c1a6f37b97f480c1407a5ec39cee5e830374f2`
 
-That commit is the merge of PR #15:
+Latest main commit:
 
-`fix(opportunity-engine): temporary Greenhouse origination containment`
+`fix(security): patch Next.js AVIF RCE`
 
-PR #15's hosted backend CI run #57 passed on the merge candidate with:
+Important merged semantic-foundation commits before it include:
 
-- **989 collected tests**
-- **989 passed**
-- Python 3.11
+- `a5af927bdb0a24e1a6f2d9aa9d94831db9ff68ab` — BIA-56 / BIA-8.1, immutable Observation persistence
+- `16269e9560f24308611769365b51912952c6b08b` — BIA-57 / BIA-8.2, canonical persisted Signal identity
+- PR #20 — Observation V1 contract corpus / BIA-7
 
-Schema is **v10**.
+Current schema version in `backend/database.py` is **v11**.
 
-The project remains a **single-operator** system. Do not silently introduce users, tenants, RBAC, OAuth, or multi-user ownership into existing tables without an explicit architecture decision.
+The project remains **single-operator**. Do not introduce users, tenants, RBAC, OAuth, or multi-user ownership into existing state without an explicit architecture decision.
+
+The Python backend and Next.js Operations Console now live in the same repository.
 
 ---
 
@@ -61,7 +71,7 @@ The project remains a **single-operator** system. Do not silently introduce user
 
 ### Collection
 
-The canonical pipeline has collectors for:
+The canonical backend has collectors for:
 
 - Hacker News
 - RSS
@@ -70,20 +80,21 @@ The canonical pipeline has collectors for:
 - Stack Exchange
 - Greenhouse Jobs
 - SEC EDGAR Form 8-K / 8-K/A
-- Reddit collector code exists, but live Reddit validation/usable production collection remains an operational gap
 
-Collectors produce immutable `Signal` evidence. Collection-time tags and metadata must remain factual/source-derived; collectors must not manufacture downstream business meaning.
+Reddit collector code exists, but dependable live Reddit production collection remains an operational gap.
+
+Collectors produce immutable `Signal` evidence. Collection-time metadata must remain factual/source-derived; collectors must not manufacture downstream business meaning.
 
 ### Durable operation
 
 BIA has:
 
-- adaptive per-source/per-domain scheduling via `collector_state`
-- outcome-aware failure/backoff/quota handling
-- hourly GitHub Actions heartbeat
-- canonical SQLite snapshot continuity using `bia-database-canonical`
+- adaptive source/domain scheduling
+- failure/backoff/quota handling
+- hourly GitHub Actions collection heartbeat
+- canonical SQLite snapshot continuity
 - pipeline/report locking and snapshot safety
-- failure isolation so one collector/stage failure does not silently corrupt unrelated state
+- failure isolation between collectors and stages
 
 ### Knowledge and memory
 
@@ -96,11 +107,11 @@ BIA has:
 - Problem lifecycle and trend axes
 - deterministic correlation hardening
 
-Problems are the persistent intelligence memory. Opportunities remain dated assessments linked to Problems, with the narrow pre-existing human-review `Opportunity.status` mutation as the known exception to otherwise historical Opportunity immutability.
+Problems are the long-lived intelligence memory. Opportunities are dated assessments attached to Problems.
 
 ### Change intelligence
 
-BIA produces and exposes `change_events` and tracks the operator's acknowledgement watermark through `operator_state`.
+BIA produces `change_events` and maintains the operator acknowledgement watermark through `operator_state`.
 
 Existing read-side includes:
 
@@ -110,287 +121,270 @@ Existing read-side includes:
 
 ### Operations Console
 
-The Next.js internal console includes the existing Overview, Signals, Problems, Opportunities, Reports, and System surfaces.
+The internal Next.js console includes:
 
-Collector operations are exposed by the actual current endpoint:
+- Overview
+- Signals
+- Problems
+- Opportunities
+- Reports
+- System
+
+Collector operations are exposed through:
 
 `GET /api/v1/system/collectors`
 
-Do **not** use the old stale `/api/v1/system/collector-operations` path that appeared in earlier handoff revisions.
-
-The console remains intended for private/single-operator use. Do not treat it as a public multi-user application without a separate deployment/auth design.
+The console remains a private/single-operator surface, not a public multi-user product.
 
 ---
 
-## 4. Semantic Understanding Work Completed
+## 4. Semantic Understanding Work Already Completed
 
-The controlled Condition State sequence was intentionally separated from production BIA semantics.
+The controlled Condition State experiment established evidence for designing a production interpretation layer without granting an external model production authority.
 
-### NIC-15 — experiment contract
+Completed foundation work includes:
 
-Defined the narrow Condition State task and evaluation rules.
+- **BIA-15** — Condition State experiment contract
+- **BIA-17** — 44-case evaluation corpus
+- **BIA-18** — deterministic rules baseline
+- **BIA-19** — external-model comparison
+- **BIA-20** — evidence review
+- **BIA-5** — production Observation V1 data contract
+- **BIA-6** — Observation V1 backend integration design
+- **BIA-7** — production Observation V1 contract tests
+- **BIA-8.1 / BIA-56** — Observation persistence and immutable models
+- **BIA-8.2 / BIA-57** — canonical persisted Signal identity
 
-### NIC-17 — evaluation corpus
+The accepted Gemini experiment remains **offline/shadow evidence only**. It did not select a production model or give model confidence the meaning of BIA confidence.
 
-Built the 44-case dataset:
-
-- 32 Core
-- 12 Adversarial
-- 41 scored
-- 3 diagnostic
-
-### NIC-18 — frozen rules baseline
-
-Implemented the deterministic `rules-v1` reference baseline. It is a comparison baseline only, not the production interpreter.
-
-### NIC-19 — external model comparison
-
-Completed and merged at:
-
-`d865ae8f8f7ccffea78fcb7c22021876d5ff0118`
-
-The accepted Gemini experiment remains **offline/shadow evidence only**. Model output did not gain production authority.
-
-Accepted experiment evidence includes two same-configuration runs with 44/44 raw tuple agreement, 41 scored cases, 31 correct, zero critical active/resolved inversions, and ten expected-unknown over-assertions. There is no reproducibly materialized holdout; do not fabricate or reconstruct one.
-
-### NIC-20 — evidence review
-
-Completed and merged via PR #14 at:
-
-`4efaacc152fda0f39b85c963b9c1ffe301a0873e`
-
-Canonical review:
-
-`docs/experiments/nic-20/CONDITION_STATE_EVIDENCE_REVIEW.md`
-
-NIC-20 gives **GO for NIC-5 design only**.
-
-It does **not** select a production model, promote Gemini, grant model confidence the meaning of BIA confidence, or give Condition State authority over Correlation, Problem identity, contradiction reasoning, scoring, Findings, or Opportunities.
-
-Key supported implications include:
-
-- one Signal may need zero or more interpreted observations
-- literal evidence traceability is important
-- `active | resolved | unknown` is sufficient only for the tested pre-segmented task, not all future semantic claims
-- temporal/recurrence language should be preserved before inventing normalized counters or transitions
-- semantic `unknown` must remain distinct from operational failure
-- attribution/conflicting language must not be collapsed into false certainty
-
-Important unresolved areas include attribution/questions, abstention semantics, automatic segmentation, time/recurrence normalization, cross-source contradiction/source authority, and absent holdout evidence.
-
----
-
-## 5. Greenhouse False-Positive Containment
-
-### NIC-30 / PR #15 — completed
-
-Production evidence showed Greenhouse job postings could originate Opportunities from job-template vocabulary alone.
-
-PR #15 added a **temporary, Greenhouse-only origination containment**:
-
-- `greenhouse_jobs` cannot independently satisfy the Opportunity business-signal origination gate
-- Greenhouse signals remain in clustering
-- Greenhouse remains in cluster counts/source structure
-- Greenhouse remains in scoring after a legitimate cluster qualifies
-- Greenhouse remains in `signal_ids`, persistence, canonicalization, and Problem evidence
-- a genuine non-Greenhouse qualifying signal can still originate a mixed cluster containing Greenhouse evidence
-- `OpportunityScorer` is intentionally unchanged
-
-This is containment, **not** the permanent evidence semantics architecture.
-
-The unresolved scoring limitation is important: once a mixed cluster legitimately qualifies, Greenhouse text can still influence its score because the scorer continues to read the full cluster.
-
-### Remaining leak: NIC-31 — active
-
-PR #15 also made `build_watch_list()` exclude clusters already diagnosed as:
-
-`no_originating_business_signal`
-
-and added the human-readable rejection label:
-
-`no qualifying originating business evidence`
-
-However, `PatternDetector.diagnose()` still checks diagnostic size/source rules **before** the origination-policy diagnostic gate:
-
-1. `too_small`
-2. `single_source`
-3. origination eligibility
-4. scoring
-
-Therefore a Greenhouse-only cluster with fewer than 5 signals may be labelled `too_small` or `single_source` before it can receive `no_originating_business_signal`. The Watch List can then re-evaluate that rejected raw text through its normal business-keyword fallback and surface it as a founder-facing candidate.
-
-This is tracked in Linear as:
-
-**NIC-31 — Prevent Greenhouse small clusters from re-entering the Opportunity Watch List**
-
-Status: **In Progress**  
-Priority: **High**
-
-NIC-31 is the current active mission and blocks NIC-5.
-
-Required bounded fix:
-
-- in `PatternDetector.diagnose()`, clusters with zero origin-eligible signals must receive `no_originating_business_signal` before `too_small` / `single_source`
-- this precedence adjustment is diagnostic/reporting coherence only; do not change `detect()` / `detect_and_persist()` persistence semantics
-- the Watch List must continue treating `no_originating_business_signal` as a hard admission exclusion
-- `watch_list.py` remains source-blind; do not add `greenhouse_jobs` policy there
-- preserve genuine non-Greenhouse `too_small` / `single_source` Watch List behavior
-
-Do not expand NIC-31 into scoring redesign, source-capability architecture, schema work, or NIC-5 implementation.
-
----
-
-## 6. Next Semantic Roadmap
-
-The authoritative immediate sequence is:
-
-`NIC-31 → NIC-5 → NIC-6 → NIC-7 → NIC-8 → NIC-9 → NIC-10 → NIC-11 → NIC-12`
-
-### NIC-5 — Define production Observation V1 data contract
-
-**Design only.** No schema migration or implementation.
-
-Define the smallest permanent `InterpretedObservation` contract justified by evidence.
-
-Existing boundaries to preserve unless evidence demonstrates otherwise:
+Core Observation V1 boundaries now established include:
 
 - interpretation derives from immutable Signals
-- interpretation is independent of Entity/Relationship Extraction
 - one Signal may produce zero or more observations
-- evidence spans preserve traceability
-- downstream code must not repeatedly reinterpret raw text
-- relevance, support/contradiction, Problem identity, scoring, Findings, and Correlation remain downstream responsibilities
-- do not add fields because an external model happened to return them
-- C2/C4 remain Correlation problems unless evidence demonstrates otherwise
+- literal evidence/citations must remain traceable to persisted Signal text
+- semantic result and operational failure are different things
+- corrections are historical/immutable rather than destructive rewrites
+- Entity/Relationship extraction remains a sibling concern, not the Observation layer
+- relevance, support/contradiction, Problem identity, scoring, Findings, and Opportunity decisions remain downstream responsibilities
+- Observation output must not gain downstream production authority merely because a producer generated it
 
-NIC-5 must explicitly evaluate, not assume, concepts such as condition state, multiple observations, temporal scope, attribution, recurrence, `topic_key`, and generic fact/assertion classification.
+---
 
-### NIC-6 — backend integration design
+## 5. Current Active Mission — BIA-58 / BIA-8.3
 
-Design storage/transience, versioning, replay/reprocessing, pipeline position, provenance, failure isolation, migration/backfill behavior, and interpreter approval semantics.
+The current active implementation issue is:
 
-No implementation.
+**BIA-58 — BIA-8.3: Implement Observation validation and persistence service**
 
-### NIC-7 — production Observation evaluation contract
+Status in Linear: **In Progress**
 
-Add reviewed evaluation cases for only the semantics actually approved in NIC-5/NIC-6. Preserve existing semantic controls and explicitly distinguish supported behavior from known limitations.
+Current implementation is in draft PR **#26**:
 
-### NIC-8 — implementation
+`feat(bia-58): add observation validation and persistence service`
 
-Implement the approved production-compatible Observation V1 path.
+Branch head recorded in the PR:
 
-Observation output must remain isolated from production downstream intelligence decisions until measured.
+`7b49cbf246f29d23ebb4851756b81dd63cfb4e29`
 
-### NIC-9 — trust gate
+The PR is **not merged into main**.
 
-Measure the real implementation. Do not tune the implementation merely to improve the reported evaluation result.
+Its bounded scope is to:
 
-Decision must be one of:
+- validate Observation citations against canonical persisted Signal title/content
+- enforce exact evidence occurrence/support containment rules
+- support exact-result reuse
+- preserve immutable correction lineage
+- persist Observation result/run state atomically
+- keep operational failures separate from semantic results
+- remain producer-neutral
 
-- approved for next downstream design stage
-- needs correction and re-test
-- must remain isolated
+Explicitly **out of scope for BIA-58**:
 
-### NIC-10 → NIC-12
+- pipeline activation
+- automatic target discovery
+- production producer selection
+- downstream consumption of Observations
+- scoring redesign
+- Problem/Opportunity redesign
+- LLM promotion
 
-After Observation V1 is measured:
+The PR reports:
 
-- NIC-10 reconciles RFC-002 with the evidence-interpretation boundary
-- NIC-11 designs Investigation → Findings V1
-- NIC-12 designs contradiction-aware Analysis confidence semantics
+- 29 focused BIA-58 tests passed
+- 302 related tests passed
+- 1,127 backend tests passed, 2 skipped
+- scoped Ruff passed
+- `git diff --check` passed
+- schema remains v11
 
-Do not jump directly from Observation to scoring/recommendations without these gates.
+Treat those as PR verification claims until the actual diff/CI is independently reviewed.
+
+---
+
+## 6. Immediate Semantic Sequence
+
+The authoritative active sequence is:
+
+`BIA-58 / 8.3 → BIA-59 / 8.4 → BIA-60 / 8.5 → BIA-61 / 8.6 → BIA-62 / 8.7 → BIA-9`
+
+### BIA-59 / BIA-8.4
+
+Add the producer-neutral registry and supplied target-attempt boundary.
+
+Do not choose a production interpretation model here.
+
+### BIA-60 / BIA-8.5
+
+Integrate Observation as a **shadow pipeline sibling**.
+
+Observations may be generated and stored, but must remain isolated from existing downstream intelligence decisions.
+
+### BIA-61 / BIA-8.6
+
+Select and integrate the production Observation producer only after the producer-neutral infrastructure and shadow boundary exist.
+
+Selection must follow evidence and evaluation, not convenience or vendor preference.
+
+### BIA-62 / BIA-8.7
+
+Verify the complete Observation V1 production path and hand off to BIA-9.
+
+### BIA-9
+
+Validate the real Observation V1 implementation before downstream use.
+
+The trust-gate outcome must be evidence-based. Observation does not become authoritative merely because the pipeline runs successfully.
+
+After BIA-9, the planned semantic sequence is:
+
+`BIA-10 → BIA-11 → BIA-12`
+
+- **BIA-10** — reconcile RFC-002 with the evidence-interpretation boundary
+- **BIA-11** — design Investigation → Findings V1
+- **BIA-12** — design contradiction-aware Analysis confidence semantics
+
+Do not jump directly from Observation into scoring/recommendations.
 
 ---
 
 ## 7. Architecture Boundary to Protect
 
-The intended direction is:
+The intended direction remains approximately:
 
-`Signal → sibling Knowledge Extraction + Evidence Interpretation → Correlation → Problem → Investigation → Findings → Analysis → Opportunity → Change Detection / Advisory → Report`
+`Signal → [Knowledge Extraction + Evidence Interpretation] → Correlation → Problem → Investigation → Findings → Analysis → Opportunity → Change Detection / Advisory → Report`
 
-The exact RFC-001 transition is not fully implemented yet, but the responsibility boundaries matter now.
+The current production system has not completed that full transition yet. Existing downstream components still contain raw-text heuristics that predate Observation V1.
+
+The important invariant is:
+
+> **BIA must control what each piece of evidence is allowed to prove.**
 
 BIA should own:
 
 - evidence
 - provenance
-- memory
-- deterministic state
+- durable memory
+- deterministic system state
 - evaluation
 - architecture boundaries
-- downstream decision rules
+- downstream decision authority
 
-Models may propose interpretations. They do not become truth merely because they are confident, repeatable, or agree with another model.
+Models may propose interpretations. They do not become truth because they are confident, repeatable, or agree with another model.
 
-A source constrains what evidence may reasonably prove, but individual Signals still require interpretation. Do not hard-wire a permanent one-source-one-meaning ontology.
-
-The central semantic discipline is:
-
-> BIA must control what each piece of evidence is allowed to prove.
+A source constrains what evidence may reasonably prove, but do not hard-wire a permanent one-source-one-meaning ontology.
 
 ---
 
-## 8. Engineering Governance
+## 8. Machine Learning / LLM Position
 
-Canonical operating rule:
+No production deep-learning or backpropagation training loop is currently implemented or approved.
 
-> **No agent gets authority merely because it wrote the code, wrote the test, or produced a green report. Evidence passes through independent gates before BIA changes.**
+That is intentional.
 
-For architecture-sensitive work use:
+The current priority is to build trustworthy semantic representation and provenance first. A future learned scoring/ranking system would need an explicit feedback/outcome architecture so BIA can distinguish a prediction from whether that prediction was later useful or correct.
 
-1. Mission selected from authoritative roadmap/Linear.
-2. Authoritative state check: current `main`, relevant ADR/RFC/HANDOFF, schema history, implementation, tests, and issue dependencies.
-3. Architecture/spec review: smallest acceptable behavior, explicit non-goals, risks, invariants, acceptance criteria. No implementation during architecture-only phases.
-4. Independent challenge: another reviewer/model/session actively tries to break the proposal before coding.
-5. Implementation against the approved contract. Tests are part of the contract, not the whole contract.
-6. Verification: focused tests, full regression, relevant migration/snapshot/frontend gates, diff-scope check, CI.
-7. Independent final review of the actual raw diff and CI output.
-8. User merge decision.
+Do not add neural-network training simply because PyTorch can be served behind FastAPI.
 
-Do not trust implementation self-reports in place of inspecting the actual diff and CI.
+Likewise, do not make BIA dependent on an LLM before the Observation boundary, evaluation gates, and downstream authority rules are stable.
 
-Mechanical/bounded tasks can use a lighter version of this flow. Semantic architecture such as NIC-5 should use the full challenge/review sequence.
+Current principle:
+
+`strong deterministic/evidence architecture first → measured model assistance second → learned behavior only when outcomes justify it`
 
 ---
 
-## 9. Known Open Work Outside the Immediate Semantic Chain
+## 9. Greenhouse Containment Status
 
-These remain real but are not the active priority unless explicitly re-prioritized:
+The Greenhouse production false-positive work is no longer the active blocker.
 
-- alert delivery and actual `watchlists` / `alert_rules` consumers remain undesigned
-- dedicated Change Events browse UI remains optional/deferred; backend read contract already exists
-- `GET /reports` still lacks the small domain-filter parity improvement
-- Business-specific narrative logic remains in parts of `explainer/*`
+Completed:
+
+- **BIA-30** — contain Greenhouse job-posting false-positive Opportunity origination
+- **BIA-31** — prevent Greenhouse small clusters from re-entering the Opportunity Watch List
+
+The containment remains intentionally narrow. It is not the permanent evidence-semantics architecture.
+
+Known limitation still worth remembering: once a mixed cluster legitimately qualifies, legacy scoring can still read the full cluster, including Greenhouse text. Do not quietly reinterpret the temporary containment as a complete source-authority solution.
+
+---
+
+## 10. Known Open Work Outside the Immediate Chain
+
+Real but not the current priority unless explicitly re-prioritized:
+
+- Reddit live validation / dependable production collection
+- actual `watchlists` / `alert_rules` consumers and alert delivery
+- dedicated Change Events browse UI
+- small `GET /reports` domain-filter parity gap
+- Business-specific narrative logic still present in parts of `explainer/*`
 - RFC-001 constitutional pipeline transition is not fully implemented
-- Reddit live validation remains unresolved
-- multi-tenancy remains a future architecture decision, not current implementation scope
-- evidence-quality weighting and deeper relationship hierarchy remain gated by demonstrated need/data
+- multi-tenancy remains a future architecture decision
+- evidence-quality weighting remains gated by demonstrated data/need
+- deeper relationship hierarchy remains gated by demonstrated multi-hop evidence
+- Outcome/feedback architecture for future machine learning has not yet been designed
 
-Do not add more collectors merely to increase source count while the evidence-semantics boundary is still being established.
-
----
-
-## 10. Operational Notes
-
-- Canonical persistence authority is the SQLite snapshot artifact path already established by NIC-13.
-- SEC EDGAR collection requires `SEC_EDGAR_USER_AGENT`; workflow secret wiring has been fixed. If production behavior is in question, verify a natural scheduled run rather than assuming configuration from code alone.
-- Google Trends depends on `pytrends` and has historically been the least reliable external source; do not treat fixture success as proof of provider stability.
-- Reddit remains the largest missing direct community/problem-demand source operationally, but source expansion is secondary to semantic correctness right now.
-- `watchlists` and `alert_rules` are schema foundations only; do not claim alert delivery exists.
+Do not add more collectors merely to increase source count while the semantic evidence boundary is still being established.
 
 ---
 
-## 11. Immediate Handoff Instruction
+## 11. Repository / Documentation Drift to Watch
 
-If continuing the project now:
+Current known drift:
 
-1. Read **NIC-31** in Linear.
-2. Verify current `main` before coding.
-3. Fix only the Greenhouse small-cluster diagnostic/reporting precedence leak.
-4. Run focused detector/explainer tests and the full backend suite.
-5. Review the actual diff independently before merge.
-6. Close NIC-31 only after the fix is merged and verified.
-7. Then begin **NIC-5 design**, not implementation.
+- `docs/SCHEMA.md` says v9, but `backend/database.py` is v11
+- `docs/HANDOFF.md` was previously frozen at 2026-09-06 and incorrectly listed BIA-31 as active
+- PR #23 (`docs: define shared Codex and Claude engineering contract`) is still open; the expanded repo-wide agent contract is therefore not yet part of current `main`
 
-Do not skip NIC-31, and do not start permanent Observation implementation before NIC-5 → NIC-6 → NIC-7 have completed their design/evaluation gates.
+Do not assume an open PR is repository authority.
+
+---
+
+## 12. Engineering Governance
+
+For architecture-sensitive work:
+
+1. Select the mission from current Linear/repository state.
+2. Verify current `main`, relevant architecture docs, schema/code, tests, and issue dependencies.
+3. Keep the implementation bounded to the accepted contract and explicit non-goals.
+4. Challenge architecture separately from implementation.
+5. Verify focused tests plus full relevant regression.
+6. Inspect the actual diff and CI; do not accept an implementation self-report as proof.
+7. Preserve the user's merge decision.
+
+Mechanical fixes can use a lighter process. Semantic architecture and trust-boundary work should use the full review sequence.
+
+---
+
+## 13. Immediate Handoff Instruction
+
+If continuing BIA now:
+
+1. Open **BIA-58** and draft PR **#26**.
+2. Compare PR #26 against current `main` and the approved Observation V1 contract/integration plan.
+3. Independently review the actual diff, especially citation validation, atomicity, result reuse, correction lineage, and failure semantics.
+4. Verify the reported test/CI results.
+5. Keep the PR producer-neutral and prevent downstream Observation consumption.
+6. Merge only after review.
+7. Then continue **BIA-59 / BIA-8.4**, followed by BIA-60, BIA-61, BIA-62, and the BIA-9 trust gate.
+
+Do not begin BIA-10/11/12, model-dependent intelligence, or machine-learning feedback loops before the Observation V1 path is implemented and measured.
