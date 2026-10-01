@@ -163,6 +163,17 @@ def load_canonical_persisted_signal(signal_id: str) -> Signal:
         return _hydrate_canonical_signal(conn, signal_id)
 
 
+def validate_observation_target_citation(
+    signal: Signal, citation: ObservationCitation
+) -> None:
+    """Require one supplied target citation to resolve in the canonical Signal."""
+    if not isinstance(signal, Signal):
+        raise TypeError("signal must be a Signal")
+    if not isinstance(citation, ObservationCitation):
+        raise TypeError("citation must be an ObservationCitation")
+    _resolve(signal, citation)
+
+
 def _validate_citations(signal: Signal, condition: ObservationCitation,
                         evidence: ObservationCitation | None,
                         state: ObservationConditionState) -> None:
