@@ -58,6 +58,54 @@ class ObservationPersistenceResult:
     created: bool
 
 
+# BIA-59 — producer authorization boundary.
+#
+# AuthorizedObservationAttempt lives here, not in
+# observation_producer_registry.py, specifically so that module can
+# depend on this one without this one depending back on it -- it is a
+# fact about what persist_produced()/persist_operational_failure()
+# require, which is this module's responsibility to define, not the
+# registry's. See docs/architecture/
+# OBSERVATION_V1_PRODUCER_REGISTRY_AND_TARGET_ATTEMPT_BOUNDARY.md.
+#
+# _ISSUE_TOKEN and _issue_authorized_attempt() are private by
+# convention, exactly like _resolve(), _find_exact(), and the other
+# single-underscore helpers already in this file. Constructing
+# AuthorizedObservationAttempt without the token raises; reaching past
+# the leading underscore to obtain or fabricate one is a deliberate,
+# greppable act, not an accident. This is not a security boundary --
+# see the architecture doc's "trust boundary" section for what is and
+# is not actually guaranteed.
+_ISSUE_TOKEN = object()
+
+
+@dataclass(frozen=True)
+class AuthorizedObservationAttempt:
+    """Proof that a run attempt was checked against the producer
+    registry's policy. The only supported way to obtain one is
+    observation_producer_registry.authorize_attempt().
+    """
+
+    run: ObservationRunInput
+    _token: object = None
+
+    def __post_init__(self) -> None:
+        if self._token is not _ISSUE_TOKEN:
+            raise TypeError(
+                "AuthorizedObservationAttempt must not be constructed directly; "
+                "use observation_producer_registry.authorize_attempt()."
+            )
+
+
+def _issue_authorized_attempt(run: ObservationRunInput) -> AuthorizedObservationAttempt:
+    """Internal factory for AuthorizedObservationAttempt. Not part of
+    the public API of this module -- called only by
+    observation_producer_registry.authorize_attempt() after a
+    successful policy check.
+    """
+    return AuthorizedObservationAttempt(run, _token=_ISSUE_TOKEN)
+
+
 def _source_text(signal: Signal, citation: ObservationCitation) -> str:
     return signal.title if citation.source_part is CitationSourcePart.TITLE else signal.content
 
@@ -188,9 +236,21 @@ def _insert_run(conn: sqlite3.Connection, run: ObservationRun) -> None:
     )
 
 
-def persist_produced(result: ObservationResultInput, run: ObservationRunInput,
+def persist_produced(result: ObservationResultInput,
+                     authorized: AuthorizedObservationAttempt,
                      *, produced_at: str) -> ObservationPersistenceResult:
-    """Persist one explicit semantic result, reusing exact immutable results."""
+    """Persist one explicit semantic result, reusing exact immutable results.
+
+    authorized must come from observation_producer_registry.authorize_attempt();
+    see AuthorizedObservationAttempt above for why this is required rather
+    than a raw ObservationRunInput.
+    """
+    if not isinstance(authorized, AuthorizedObservationAttempt):
+        raise ObservationServiceError(
+            "persist_produced requires an AuthorizedObservationAttempt from "
+            "observation_producer_registry.authorize_attempt(), not a raw ObservationRunInput"
+        )
+    run = authorized.run
     if result.canonical_signal_id != run.attempted_signal_id:
         raise ObservationServiceError("produced run must attempt the result's canonical Signal")
     if result.condition_citation != run.attempted_condition_citation:
@@ -235,8 +295,19 @@ def persist_produced(result: ObservationResultInput, run: ObservationRunInput,
             raise
 
 
-def persist_operational_failure(run: ObservationRunInput) -> ObservationRun:
-    """Retain a valid attempted target without creating semantic output."""
+def persist_operational_failure(authorized: AuthorizedObservationAttempt) -> ObservationRun:
+    """Retain a valid attempted target without creating semantic output.
+
+    authorized must come from observation_producer_registry.authorize_attempt();
+    see AuthorizedObservationAttempt above for why this is required rather
+    than a raw ObservationRunInput.
+    """
+    if not isinstance(authorized, AuthorizedObservationAttempt):
+        raise ObservationServiceError(
+            "persist_operational_failure requires an AuthorizedObservationAttempt "
+            "from observation_producer_registry.authorize_attempt(), not a raw ObservationRunInput"
+        )
+    run = authorized.run
     with database.get_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         try:
