@@ -44,13 +44,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from models import ObservationProducerKind, Signal
+from models import (
+    ObservationProducerKind,
+    ObservationRun,
+    ObservationRunOutcome,
+    Signal,
+)
 from observation_service import (
     AuthorizedObservationAttempt,
     ObservationResultInput,
     ObservationRunInput,
     ObservationServiceError,
     _issue_authorized_attempt,
+    load_canonical_persisted_signal,
 )
 
 
@@ -188,6 +194,26 @@ class ObservationProducerRegistry:
 PRODUCER_REGISTRY = ObservationProducerRegistry(())
 
 
+def _validate_run_input(run: ObservationRunInput) -> None:
+    """Apply the complete retained-run structural contract before execution.
+
+    ObservationRunInput is intentionally a lightweight transport object. Before
+    issuing a capability, reuse ObservationRun's canonical model validation so
+    a producer cannot run for an attempt that could never be retained.
+    """
+    ObservationRun(
+        run_id=run.run_id,
+        attempted_signal_id=run.attempted_signal_id,
+        attempted_condition_citation=run.attempted_condition_citation,
+        attempted_semantic_contract_version=run.attempted_semantic_contract_version,
+        producer_kind=run.producer_kind,
+        producer_name=run.producer_name,
+        producer_revision=run.producer_revision,
+        attempted_at=run.attempted_at,
+        outcome=ObservationRunOutcome.OPERATIONAL_FAILURE,
+    )
+
+
 def authorize_attempt(
     registry: ObservationProducerRegistry, run: ObservationRunInput
 ) -> AuthorizedObservationAttempt:
@@ -203,6 +229,7 @@ def authorize_attempt(
         raise TypeError("registry must be an ObservationProducerRegistry")
     if not isinstance(run, ObservationRunInput):
         raise TypeError("run must be an ObservationRunInput")
+    _validate_run_input(run)
     profile = registry.profile_for(
         run.producer_kind, run.producer_name, run.producer_revision
     )
@@ -245,6 +272,11 @@ def invoke_authorized_producer(
         raise ObservationServiceError(
             "authorized producer attempt must receive its canonical Signal"
         )
+    canonical_signal = load_canonical_persisted_signal(run.attempted_signal_id)
+    if signal != canonical_signal:
+        raise ObservationServiceError(
+            "supplied Signal must equal the canonical persisted Signal"
+        )
     producer_identity = (
         producer.producer_kind,
         producer.producer_name,
@@ -259,7 +291,7 @@ def invoke_authorized_producer(
         raise ObservationProducerNotAuthorized(
             "supplied producer identity does not match the authorized attempt"
         )
-    result = producer.produce(signal, run)
+    result = producer.produce(canonical_signal, run)
     if not isinstance(result, ObservationResultInput):
         raise ObservationServiceError(
             "ObservationProducer.produce() must return an ObservationResultInput"
