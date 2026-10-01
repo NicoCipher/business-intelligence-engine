@@ -272,11 +272,6 @@ def invoke_authorized_producer(
         raise ObservationServiceError(
             "authorized producer attempt must receive its canonical Signal"
         )
-    canonical_signal = load_canonical_persisted_signal(run.attempted_signal_id)
-    if signal != canonical_signal:
-        raise ObservationServiceError(
-            "supplied Signal must equal the canonical persisted Signal"
-        )
     producer_identity = (
         producer.producer_kind,
         producer.producer_name,
@@ -290,6 +285,11 @@ def invoke_authorized_producer(
     if producer_identity != attempted_identity:
         raise ObservationProducerNotAuthorized(
             "supplied producer identity does not match the authorized attempt"
+        )
+    canonical_signal = load_canonical_persisted_signal(run.attempted_signal_id)
+    if signal != canonical_signal:
+        raise ObservationServiceError(
+            "supplied Signal must equal the canonical persisted Signal"
         )
     result = producer.produce(canonical_signal, run)
     if not isinstance(result, ObservationResultInput):
