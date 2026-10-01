@@ -155,6 +155,14 @@ def _hydrate_canonical_signal(conn: sqlite3.Connection, signal_id: str) -> Signa
         raise ObservationServiceError("canonical persisted Signal is not hydratable") from error
 
 
+def load_canonical_persisted_signal(signal_id: str) -> Signal:
+    """Load the canonical SQLite-backed Signal for producer interpretation."""
+    if not isinstance(signal_id, str) or not signal_id:
+        raise ObservationServiceError("canonical persisted Signal ID must be non-empty")
+    with database.get_connection() as conn:
+        return _hydrate_canonical_signal(conn, signal_id)
+
+
 def _validate_citations(signal: Signal, condition: ObservationCitation,
                         evidence: ObservationCitation | None,
                         state: ObservationConditionState) -> None:
