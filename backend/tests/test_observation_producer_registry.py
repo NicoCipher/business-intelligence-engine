@@ -158,6 +158,16 @@ def test_registry_never_selects_newest_contract_implicitly():
         authorize_attempt(registry, run_input(version="condition-state/v999"))
 
 
+def test_authorize_attempt_rejects_non_contract_shapes():
+    with pytest.raises(TypeError, match="ObservationProducerRegistry"):
+        authorize_attempt(object(), run_input())  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="ObservationRunInput"):
+        authorize_attempt(
+            ObservationProducerRegistry((profile(),)),
+            object(),  # type: ignore[arg-type]
+        )
+
+
 def test_authorized_attempt_cannot_be_constructed_directly_or_leak_issue_token():
     with pytest.raises(TypeError):
         AuthorizedObservationAttempt(run=run_input())
@@ -267,3 +277,29 @@ def test_invocation_rejects_signal_identity_mismatch_before_producer_runs():
     )
     with pytest.raises(ObservationServiceError, match="canonical Signal"):
         invoke_authorized_producer(_TestProducer(), signal, authorized)
+
+
+def test_invocation_rejects_non_signal_and_non_result_shapes():
+    registry = ObservationProducerRegistry((profile(),))
+    authorized = authorize_attempt(registry, run_input())
+
+    with pytest.raises(TypeError, match="canonical persisted Signal"):
+        invoke_authorized_producer(
+            _TestProducer(),
+            object(),  # type: ignore[arg-type]
+            authorized,
+        )
+
+    class WrongResult(_TestProducer):
+        def produce(self, signal: Signal, run: ObservationRunInput):
+            return object()
+
+    signal = Signal(
+        source="rss",
+        source_id="source-1",
+        title="Condition",
+        content="The condition remains active today.",
+        id="canonical-1",
+    )
+    with pytest.raises(ObservationServiceError, match="ObservationResultInput"):
+        invoke_authorized_producer(WrongResult(), signal, authorized)
