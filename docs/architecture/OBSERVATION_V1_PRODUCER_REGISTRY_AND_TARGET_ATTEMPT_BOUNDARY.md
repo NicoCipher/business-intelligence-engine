@@ -124,21 +124,28 @@ BIA-59 selects no implementation. The caller supplies the producer explicitly.
 
 1. the caller supplied an `AuthorizedObservationAttempt`;
 2. the supplied Signal ID equals the authorized attempted Signal ID;
-3. the supplied producer's exact `(kind, name, revision)` identity equals the
+3. that Signal is field-equivalent to the canonical SQLite-backed Signal loaded
+   for the attempted ID, preventing a transient/mutated same-ID object from
+   becoming interpretation evidence;
+4. the supplied producer's exact `(kind, name, revision)` identity equals the
    identity authorized in the run.
 
-Only then is `producer.produce()` invoked.
+Only then is `producer.produce()` invoked, and it receives the canonical
+SQLite-backed Signal rather than trusting the caller's object.
 
 The helper does not catch producer failures, choose retry behavior, persist failure
 runs, or select a fallback producer. Those concerns remain with a future caller.
 
 ## 6. Canonical Signal rule
 
-The producer seam expects the canonical persisted Signal, not a collector-temporary
-copy.
+The producer seam requires the canonical persisted Signal, not merely a
+collector-temporary or mutated object that reuses the same ID.
 
 BIA-57 already provides this boundary through
 `SignalPersistenceResolution.persisted_signal`, which is hydrated from SQLite.
+BIA-59 also re-loads the attempted Signal at invocation and rejects a supplied
+Signal that is not field-equivalent to that canonical row, so the producer cannot
+interpret transient same-ID text.
 
 The BIA-59 execution test deliberately exercises:
 
@@ -152,6 +159,11 @@ collected Signal
 ```
 
 BIA-59 does not wire this flow into the production pipeline.
+
+Authorization also applies the complete `ObservationRun` structural model
+validation before issuing a capability. Empty run IDs, Signal IDs, contract
+versions, timestamps, or supplied producer metadata therefore fail before a
+producer can execute or incur side effects.
 
 ## 7. Registry identity
 
@@ -260,7 +272,9 @@ BIA-59 tests cover:
 - test-only producer execution through the authorized boundary;
 - canonical Signal identity from BIA-57;
 - producer identity mismatch rejection;
-- canonical Signal mismatch rejection.
+- canonical Signal ID mismatch rejection;
+- transient/mutated same-ID Signal rejection against the SQLite-backed row;
+- malformed run-input rejection before capability issuance.
 
 Existing BIA-58 persistence, exact-reuse, lineage, atomicity, and concurrency behavior
 must remain unchanged.
