@@ -277,7 +277,9 @@ def test_test_only_producer_executes_through_authorized_service_boundary(
     assert persisted.run.producer_name == "reviewed"
 
 
-def test_invocation_rejects_transient_signal_with_canonical_id(monkeypatch, tmp_path):
+def test_invocation_rehydrates_canonical_signal_instead_of_trusting_same_id_transient(
+    monkeypatch, tmp_path
+):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "bia.db")
     database.initialize()
     stored = Signal(
@@ -297,11 +299,23 @@ def test_invocation_rejects_transient_signal_with_canonical_id(monkeypatch, tmp_
         content="The condition remains active for a different reason.",
         id="canonical-1",
     )
+
+    class CapturingProducer(_TestProducer):
+        seen_content: str | None = None
+
+        def produce(
+            self, signal: Signal, run: ObservationRunInput
+        ) -> ObservationResultInput:
+            self.seen_content = signal.content
+            return super().produce(signal, run)
+
+    producer = CapturingProducer()
     registry = ObservationProducerRegistry((profile(),))
     authorized = authorize_attempt(registry, run_input())
+    result = invoke_authorized_producer(producer, transient, authorized)
 
-    with pytest.raises(ObservationServiceError, match="canonical persisted Signal"):
-        invoke_authorized_producer(_TestProducer(), transient, authorized)
+    assert result.canonical_signal_id == "canonical-1"
+    assert producer.seen_content == "The condition remains active today."
 
 
 def test_invocation_rejects_unresolvable_target_before_producer_runs(
