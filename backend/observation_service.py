@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass
 
 import database
 from models import (
@@ -87,10 +87,10 @@ class AuthorizedObservationAttempt:
     """
 
     run: ObservationRunInput
-    _token: object = None
+    _token: InitVar[object]
 
-    def __post_init__(self) -> None:
-        if self._token is not _ISSUE_TOKEN:
+    def __post_init__(self, _token: object) -> None:
+        if _token is not _ISSUE_TOKEN:
             raise TypeError(
                 "AuthorizedObservationAttempt must not be constructed directly; "
                 "use observation_producer_registry.authorize_attempt()."
