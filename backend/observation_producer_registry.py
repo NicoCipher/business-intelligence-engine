@@ -199,7 +199,13 @@ def authorize_attempt(
     rejected attempt; retaining one would put an unapproved producer
     identity into the same table this gate exists to keep clean.
     """
-    profile = registry.profile_for(run.producer_kind, run.producer_name, run.producer_revision)
+    if not isinstance(registry, ObservationProducerRegistry):
+        raise TypeError("registry must be an ObservationProducerRegistry")
+    if not isinstance(run, ObservationRunInput):
+        raise TypeError("run must be an ObservationRunInput")
+    profile = registry.profile_for(
+        run.producer_kind, run.producer_name, run.producer_revision
+    )
     if profile is None:
         raise ObservationProducerNotAuthorized(
             f"producer not authorized: kind={run.producer_kind!r} "
@@ -232,6 +238,8 @@ def invoke_authorized_producer(
             "invoke_authorized_producer requires an AuthorizedObservationAttempt "
             "from authorize_attempt()"
         )
+    if not isinstance(signal, Signal):
+        raise TypeError("signal must be a canonical persisted Signal")
     run = authorized.run
     if signal.id != run.attempted_signal_id:
         raise ObservationServiceError(
@@ -251,4 +259,9 @@ def invoke_authorized_producer(
         raise ObservationProducerNotAuthorized(
             "supplied producer identity does not match the authorized attempt"
         )
-    return producer.produce(signal, run)
+    result = producer.produce(signal, run)
+    if not isinstance(result, ObservationResultInput):
+        raise ObservationServiceError(
+            "ObservationProducer.produce() must return an ObservationResultInput"
+        )
+    return result
