@@ -124,11 +124,11 @@ BIA-59 selects no implementation. The caller supplies the producer explicitly.
 
 1. the caller supplied an `AuthorizedObservationAttempt`;
 2. the supplied Signal ID equals the authorized attempted Signal ID;
-3. that Signal is field-equivalent to the canonical SQLite-backed Signal loaded
+3. the supplied producer's exact `(kind, name, revision)` identity equals the
+   identity authorized in the run, before any producer-side DB work;
+4. that Signal is field-equivalent to the canonical SQLite-backed Signal loaded
    for the attempted ID, preventing a transient/mutated same-ID object from
-   becoming interpretation evidence;
-4. the supplied producer's exact `(kind, name, revision)` identity equals the
-   identity authorized in the run.
+   becoming interpretation evidence.
 
 Only then is `producer.produce()` invoked, and it receives the canonical
 SQLite-backed Signal rather than trusting the caller's object.
