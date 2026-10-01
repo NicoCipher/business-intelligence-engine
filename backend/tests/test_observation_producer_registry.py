@@ -303,6 +303,46 @@ def test_invocation_rejects_transient_signal_with_canonical_id(monkeypatch, tmp_
         invoke_authorized_producer(_TestProducer(), transient, authorized)
 
 
+def test_invocation_rejects_unresolvable_target_before_producer_runs(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "bia.db")
+    database.initialize()
+    stored = Signal(
+        source="rss",
+        source_id="source-1",
+        title="Condition",
+        content="The condition remains active today.",
+        id="canonical-1",
+    )
+    resolution = persist_signals([stored]).resolutions[0]
+    canonical = resolution.persisted_signal
+    assert canonical is not None
+
+    class NeverCalledProducer(_TestProducer):
+        called = False
+
+        def produce(
+            self, signal: Signal, run: ObservationRunInput
+        ) -> ObservationResultInput:
+            self.called = True
+            raise AssertionError("producer must not run for an invalid supplied target")
+
+    producer = NeverCalledProducer()
+    registry = ObservationProducerRegistry((profile(),))
+    invalid_target = ObservationCitation(
+        CitationSourcePart.CONTENT, "condition remains active", 2
+    )
+    authorized = authorize_attempt(
+        registry,
+        run_input(signal_id=canonical.id, target=invalid_target),
+    )
+
+    with pytest.raises(ObservationServiceError, match="occurrence does not exist"):
+        invoke_authorized_producer(producer, canonical, authorized)
+    assert not producer.called
+
+
 def test_invocation_rejects_actual_producer_identity_mismatch():
     class WrongRevision(_TestProducer):
         producer_revision = "r2"
