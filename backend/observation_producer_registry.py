@@ -288,10 +288,6 @@ def invoke_authorized_producer(
             "supplied producer identity does not match the authorized attempt"
         )
     canonical_signal = load_canonical_persisted_signal(run.attempted_signal_id)
-    if signal != canonical_signal:
-        raise ObservationServiceError(
-            "supplied Signal must equal the canonical persisted Signal"
-        )
     validate_observation_target_citation(
         canonical_signal, run.attempted_condition_citation
     )
