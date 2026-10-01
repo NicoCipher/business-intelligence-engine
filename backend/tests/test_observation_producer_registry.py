@@ -20,9 +20,9 @@ from models import (
 from observation_producer_registry import (
     PRODUCER_REGISTRY,
     ApprovedProducerProfile,
+    ObservationProducer,
     ObservationProducerNotAuthorized,
     ObservationProducerRegistry,
-    ObservationProducer,
     authorize_attempt,
     invoke_authorized_producer,
 )
