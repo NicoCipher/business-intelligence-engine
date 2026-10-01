@@ -155,7 +155,7 @@ class ObservationProducerRegistry:
                     "ObservationProducerRegistry.profiles entries must be "
                     "ApprovedProducerProfile values"
                 )
-            key = (profile.producer_kind, profile.producer_name, producer.producer_revision)
+            key = (profile.producer_kind, profile.producer_name, profile.producer_revision)
             if key in seen:
                 raise ValueError(
                     f"duplicate producer profile: {key!r}"
