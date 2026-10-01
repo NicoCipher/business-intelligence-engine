@@ -57,11 +57,12 @@ def run_input(
     revision: str | None = "r1",
     version: str = CONTRACT_V1,
     signal_id: str = "canonical-1",
+    target: ObservationCitation | None = None,
 ) -> ObservationRunInput:
     return ObservationRunInput(
         "run-1",
         signal_id,
-        citation(),
+        target or citation(),
         version,
         kind,
         "attempted",
