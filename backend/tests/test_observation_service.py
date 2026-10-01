@@ -30,7 +30,6 @@ from observation_service import (
     persist_produced,
 )
 
-
 # BIA-59: every persist_produced()/persist_operational_failure() call now
 # requires an AuthorizedObservationAttempt. This fixture registry approves
 # exactly the producer identity the run() helper below always uses, plus
