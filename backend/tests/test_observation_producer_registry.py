@@ -158,9 +158,17 @@ def test_registry_never_selects_newest_contract_implicitly():
         authorize_attempt(registry, run_input(version="condition-state/v999"))
 
 
-def test_authorized_attempt_cannot_be_constructed_directly():
+def test_authorized_attempt_cannot_be_constructed_directly_or_leak_issue_token():
     with pytest.raises(TypeError):
         AuthorizedObservationAttempt(run=run_input())
+    with pytest.raises(TypeError):
+        AuthorizedObservationAttempt(run=run_input(), _token=object())
+
+    authorized = authorize_attempt(
+        ObservationProducerRegistry((profile(),)),
+        run_input(),
+    )
+    assert "_token" not in vars(authorized)
 
 
 class _TestProducer:
