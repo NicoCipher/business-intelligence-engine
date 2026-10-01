@@ -334,7 +334,7 @@ def test_invocation_rejects_signal_identity_mismatch_before_producer_runs():
         invoke_authorized_producer(_TestProducer(), signal, authorized)
 
 
-def test_invocation_rejects_non_signal_and_non_result_shapes():
+def test_invocation_rejects_non_signal_and_non_result_shapes(monkeypatch, tmp_path):
     registry = ObservationProducerRegistry((profile(),))
     authorized = authorize_attempt(registry, run_input())
 
@@ -349,6 +349,8 @@ def test_invocation_rejects_non_signal_and_non_result_shapes():
         def produce(self, signal: Signal, run: ObservationRunInput):
             return object()
 
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "bia.db")
+    database.initialize()
     signal = Signal(
         source="rss",
         source_id="source-1",
@@ -356,5 +358,8 @@ def test_invocation_rejects_non_signal_and_non_result_shapes():
         content="The condition remains active today.",
         id="canonical-1",
     )
+    resolution = persist_signals([signal]).resolutions[0]
+    canonical = resolution.persisted_signal
+    assert canonical is not None
     with pytest.raises(ObservationServiceError, match="ObservationResultInput"):
-        invoke_authorized_producer(WrongResult(), signal, authorized)
+        invoke_authorized_producer(WrongResult(), canonical, authorized)
