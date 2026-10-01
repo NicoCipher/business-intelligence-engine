@@ -34,7 +34,6 @@ from observation_service import (
     persist_produced,
 )
 
-
 CONTRACT_V1 = "condition-state/v1"
 
 
