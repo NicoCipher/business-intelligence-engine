@@ -1,4 +1,4 @@
-"""Tests for BIA-59 -- the producer registry and authorization boundary."""
+"""Tests for BIA-59 producer authorization and supplied target execution."""
 
 import sys
 from dataclasses import FrozenInstanceError
@@ -35,150 +35,227 @@ from observation_service import (
 )
 
 
-def citation(text="condition remains active"):
+CONTRACT_V1 = "condition-state/v1"
+
+
+def citation(text: str = "condition remains active") -> ObservationCitation:
     return ObservationCitation(CitationSourcePart.CONTENT, text)
 
 
-def rule_profile(name="reviewed", revision="r1", versions=("condition-state/v1",)):
-    return ApprovedProducerProfile(
-        ObservationProducerKind.RULE, name, revision, frozenset(versions)
-    )
+def profile(
+    kind: ObservationProducerKind = ObservationProducerKind.RULE,
+    name: str | None = "reviewed",
+    revision: str | None = "r1",
+    versions: tuple[str, ...] = (CONTRACT_V1,),
+) -> ApprovedProducerProfile:
+    return ApprovedProducerProfile(kind, name, revision, frozenset(versions))
 
 
-def human_profile(name="operator", versions=("condition-state/v1",)):
-    return ApprovedProducerProfile(
-        ObservationProducerKind.HUMAN, name, None, frozenset(versions)
-    )
-
-
-def run_input(kind=ObservationProducerKind.RULE, name="reviewed", revision="r1",
-              version="condition-state/v1", signal_id="canonical-1"):
+def run_input(
+    *,
+    kind: ObservationProducerKind = ObservationProducerKind.RULE,
+    name: str | None = "reviewed",
+    revision: str | None = "r1",
+    version: str = CONTRACT_V1,
+    signal_id: str = "canonical-1",
+) -> ObservationRunInput:
     return ObservationRunInput(
-        "run-1", signal_id, citation(), version, kind, "attempted", name, revision,
+        "run-1",
+        signal_id,
+        citation(),
+        version,
+        kind,
+        "attempted",
+        name,
+        revision,
     )
 
 
-# --- Production registry starts empty -------------------------------------
-
-def test_production_registry_ships_empty():
+def test_production_registry_ships_empty_and_authorizes_nothing():
     assert PRODUCER_REGISTRY.profiles == ()
-    assert PRODUCER_REGISTRY.profile_for(ObservationProducerKind.RULE, "anything", "anything") is None
-
-
-def test_production_registry_authorizes_nothing():
+    assert PRODUCER_REGISTRY.profile_for(
+        ObservationProducerKind.RULE, "reviewed", "r1"
+    ) is None
     with pytest.raises(ObservationProducerNotAuthorized):
         authorize_attempt(PRODUCER_REGISTRY, run_input())
 
 
-# --- Registry construction / immutability ----------------------------------
-
-def test_registry_is_frozen():
-    registry = ObservationProducerRegistry((rule_profile(),))
+def test_registry_and_profiles_are_deeply_immutable():
+    approved = profile()
+    registry = ObservationProducerRegistry((approved,))
     with pytest.raises(FrozenInstanceError):
         registry.profiles = ()
-
-
-def test_profile_is_frozen():
-    profile = rule_profile()
     with pytest.raises(FrozenInstanceError):
-        profile.producer_name = "other"
-
-
-def test_registry_rejects_mutable_profile_container():
+        approved.producer_name = "other"
     with pytest.raises(TypeError, match="immutable tuple"):
-        ObservationProducerRegistry([rule_profile()])  # type: ignore[arg-type]
-
-
-def test_registry_rejects_non_profile_entries():
+        ObservationProducerRegistry([approved])  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="ApprovedProducerProfile"):
         ObservationProducerRegistry((object(),))  # type: ignore[arg-type]
 
 
-def test_duplicate_profile_rejected_at_construction():
-    with pytest.raises(ValueError):
-        ObservationProducerRegistry((rule_profile(), rule_profile()))
+def test_duplicate_identity_is_rejected_even_if_contract_sets_differ():
+    with pytest.raises(ValueError, match="duplicate producer profile"):
+        ObservationProducerRegistry((
+            profile(versions=(CONTRACT_V1,)),
+            profile(versions=("condition-state/v2",)),
+        ))
 
 
-def test_profile_for_linear_lookup():
-    registry = ObservationProducerRegistry((rule_profile(), human_profile()))
-    assert registry.profile_for(ObservationProducerKind.RULE, "reviewed", "r1") is not None
-    assert registry.profile_for(ObservationProducerKind.HUMAN, "operator", None) is not None
-    assert registry.profile_for(ObservationProducerKind.MODEL, "reviewed", "r1") is None
+def test_optional_name_and_revision_are_exact_values_not_wildcards():
+    registry = ObservationProducerRegistry((
+        profile(name=None, revision=None),
+    ))
+    assert registry.profile_for(ObservationProducerKind.RULE, None, None) is not None
+    assert registry.profile_for(
+        ObservationProducerKind.RULE, "reviewed", None
+    ) is None
+    assert registry.profile_for(
+        ObservationProducerKind.RULE, None, "r1"
+    ) is None
 
-
-# --- Identity policy ---------------------------------------------------------
-
-def test_given_name_or_revision_must_be_non_empty_if_provided():
-    # BIA-6 ("name/revision when defined by the approved profile") makes
-    # these fields optional per-profile, not mandatory per kind -- but a
-    # value that IS supplied still can't be an empty string.
-    with pytest.raises(ValueError):
-        ApprovedProducerProfile(ObservationProducerKind.RULE, "", "r1", frozenset({"condition-state/v1"}))
-    with pytest.raises(ValueError):
-        ApprovedProducerProfile(ObservationProducerKind.RULE, "reviewed", "", frozenset({"condition-state/v1"}))
-
-
-def test_no_kind_based_identity_requirement_rule_and_model_may_have_null_name_or_revision():
-    # The authoritative contract imposes no blanket "RULE/MODEL always
-    # need a revision" rule -- whether a profile uses None is a property
-    # of that specific profile, not of its kind.
-    rule_no_revision = ApprovedProducerProfile(
-        ObservationProducerKind.RULE, "reviewed", None, frozenset({"condition-state/v1"})
+    human_with_revision = profile(
+        kind=ObservationProducerKind.HUMAN,
+        name="operator",
+        revision="rev-a",
     )
-    assert rule_no_revision.producer_revision is None
-    model_no_name_or_revision = ApprovedProducerProfile(
-        ObservationProducerKind.MODEL, None, None, frozenset({"condition-state/v1"})
-    )
-    assert model_no_name_or_revision.producer_name is None
-    assert model_no_name_or_revision.producer_revision is None
+    assert human_with_revision.producer_revision == "rev-a"
 
 
-def test_human_profile_may_have_a_revision_if_the_profile_declares_one():
-    # Likewise, nothing in this module forbids a HUMAN profile from
-    # declaring a revision -- that would be an unusual profile to
-    # register, but it is not this module's call to reject it.
-    profile = ApprovedProducerProfile(
-        ObservationProducerKind.HUMAN, "operator", "r1", frozenset({"condition-state/v1"})
-    )
-    assert profile.producer_revision == "r1"
-
-
-def test_human_profile_allows_null_revision():
-    profile = human_profile()
-    assert profile.producer_revision is None
-
-
-def test_profile_requires_nonempty_contract_versions():
+def test_supplied_optional_metadata_must_be_nonempty_when_present():
     with pytest.raises(ValueError):
-        ApprovedProducerProfile(ObservationProducerKind.RULE, "reviewed", "r1", frozenset())
+        profile(name="")
+    with pytest.raises(ValueError):
+        profile(revision="")
+    with pytest.raises(ValueError):
+        profile(versions=())
 
 
-# --- authorize_attempt() -----------------------------------------------------
+def test_authorization_requires_exact_identity_and_contract_version():
+    registry = ObservationProducerRegistry((
+        profile(versions=(CONTRACT_V1, "condition-state/v2")),
+    ))
+    authorized = authorize_attempt(registry, run_input())
+    assert isinstance(authorized, AuthorizedObservationAttempt)
 
-def test_authorized_rule_attempt_succeeds():
-    registry = ObservationProducerRegistry((rule_profile(),))
-    attempt = authorize_attempt(registry, run_input())
-    assert isinstance(attempt, AuthorizedObservationAttempt)
-    assert attempt.run.producer_name == "reviewed"
-
-
-def test_unknown_kind_name_revision_combination_rejected():
-    registry = ObservationProducerRegistry((rule_profile(),))
     with pytest.raises(ObservationProducerNotAuthorized):
-        authorize_attempt(registry, run_input(name="unlisted"))
+        authorize_attempt(registry, run_input(name="other"))
     with pytest.raises(ObservationProducerNotAuthorized):
-        authorize_attempt(registry, run_input(revision="unlisted"))
+        authorize_attempt(registry, run_input(revision="r2"))
     with pytest.raises(ObservationProducerNotAuthorized):
-        authorize_attempt(registry, run_input(kind=ObservationProducerKind.MODEL))
-
-
-def test_unlisted_contract_version_rejected_for_known_producer():
-    registry = ObservationProducerRegistry((rule_profile(versions=("condition-state/v1",)),))
+        authorize_attempt(
+            registry,
+            run_input(kind=ObservationProducerKind.MODEL),
+        )
     with pytest.raises(ObservationProducerNotAuthorized):
-        authorize_attempt(registry, run_input(version="condition-state/v2"))
+        authorize_attempt(registry, run_input(version="condition-state/v3"))
 
 
-def test_none_is_an_explicit_match_value_not_a_wildcard():
-    # A profile declaring producer_revision=None approves only attempts
-    # that also supply None -- it does not approve "any revision".
-    # Symmetrically, a profile declare¡È„½¹É•Ñ”É•Ù¥Í¥½¸‘½•Ì¹½Ð(€€€€Œµ…Ñ …¸…ÑÑ•µÁÐÑ¡…ÐÍÕÁÁ±¥•Ì9½¹”¸(€€€É•¥ÍÑÉä€ô=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•ÉI•¥ÍÑÉä  (€€€€€€€ÁÁÉ½Ù•‘AÉ½‘Õ•ÉAÉ½™¥±” (€€€€€€€€€€€=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•É-¥¹¹IU1°€‰É•Ù¥•Ý•ˆ°9½¹”°™É½é•¹Í•Ð¡ì‰½¹‘¥Ñ¥½¸µÍÑ…Ñ”½ØÄ‰ô¤(€€€€€€€€¤°(€€€€¤¤(€€€…ÍÍ•ÉÐÉ•¥ÍÑÉä¹ÁÉ½™¥±•}™½È¡=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•É-¥¹¹IU1°€‰É•Ù¥•Ý•ˆ°9½¹”¤¥Ì¹½Ð9½¹”(€€€…ÍÍ•ÉÐÉ•¥ÍÑÉä¹ÁÉ½™¥±•}™½È¡=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•É-¥¹¹IU1°€‰É•Ù¥•Ý•ˆ°€‰ÈÄˆ¤¥Ì9½¹”((€€€½Ñ¡•É}É•¥ÍÑÉä€ô=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•ÉI•¥ÍÑÉä ¡ÉÕ±•}ÁÉ½™¥±”¡É•Ù¥Í¥½¸ô‰ÈÄˆ¤°¤¤(€€€…ÍÍ•ÉÐ½Ñ¡•É}É•¥ÍÑÉä¹ÁÉ½™¥±•}™½È¡=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•É-¥¹¹IU1°€‰É•Ù¥•Ý•ˆ°€‰ÈÄˆ¤¥Ì¹½Ð9½¹”(€€€…ÍÍ•ÉÐ½Ñ¡•É}É•¥ÍÑÉä¹ÁÉ½™¥±•}™½È¡=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•É-¥¹¹IU1°€‰É•Ù¥•Ý•ˆ°9½¹”¤¥Ì9½¹”(()‘•˜Ñ•ÍÑ}¡Õµ…¹}…ÑÑ•µÁÑ}Ý¥Ñ¡}¹Õ±±}É•Ù¥Í¥½¹}ÍÕ••‘Ì ¤è(€€€É•¥ÍÑÉä€ô=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•ÉI•¥ÍÑÉä ¡¡Õµ…¹}ÁÉ½™¥±” ¤°¤¤(€€€…ÑÑ•µÁÐ€ô…ÕÑ¡½É¥é•}…ÑÑ•µÁÐ (€€€€€€€É•¥ÍÑÉä°ÉÕ¹}¥¹ÁÕÐ¡­¥¹õ=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•É-¥¹¹!U58°¹…µ”ô‰½Á•É…Ñ½Èˆ°É•Ù¥Í¥½¸õ9½¹”¤(€€€€¤(€€€…ÍÍ•ÉÐ…ÑÑ•µÁÐ¹ÉÕ¸¹ÁÉ½‘Õ•É}É•Ù¥Í¥½¸¥Ì9½¹”(()‘•˜Ñ•ÍÑ}¡Õµ…¹}…ÑÑ•µÁÑ}ÍÕÁÁ±å¥¹}…}É•Ù¥Í¥½¹}¥Í}É•©•Ñ• ¤è(€€€€Œ!U58µ­¥¹ÉÕ¸…ÑÑ•µÁÐÝ¥Ñ „¹½¸µ¹Õ±°É•Ù¥Í¥½¸µ…Ñ¡•Ì¹¼ÁÉ½™¥±”(€€€€Œ€¡ÁÉ½™¥±•}™½È­•åÌ½¸Ñ¡”•á…ÐÑÕÁ±”°…¹Ñ¡”½¹±äÉ•¥ÍÑ•É•!U58(€€€€ŒÁÉ½™¥±”¡…ÌÁÉ½‘Õ•É}É•Ù¥Í¥½¸õ9½¹”¤€´´É•©•Ñ•Ñ¡”Í…µ”Ý…ä…¹ä(€€€€Œ½Ñ¡•ÈÕ¹±¥ÍÑ•¥‘•¹Ñ¥Ñä¥Ì°¹½ÐÙ¥„„Í•Á…É…Ñ”½‘”Á…Ñ ¸(€€€É•¥ÍÑÉä€ô=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•ÉI•¥ÍÑÉä ¡¡Õµ…¹}ÁÉ½™¥±” ¤°¤¤(€€€Ý¥Ñ ÁåÑ•ÍÐ¹É…¥Í•Ì¡=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•É9½ÑÕÑ¡½É¥é•¤è(€€€€€€€…ÕÑ¡½É¥é•}…ÑÑ•µÁÐ (€€€€€€€€€€€É•¥ÍÑÉä°ÉÕ¹}¥¹ÁÕÐ¡­¥¹õ=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•É-¥¹¹!U58°¹…µ”ô‰½Á•É…Ñ½Èˆ°É•Ù¥Í¥½¸ô‰ØÄˆ¤(€€€€€€€€¤(((Œ€´´´	åÁ…ÍÌÕ…É½¸Ñ¡”…Á…‰¥±¥ÑäÑåÁ”¥ÑÍ•±˜€´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´()‘•˜Ñ•ÍÑ}…ÕÑ¡½É¥é•‘}½‰Í•ÉÙ…Ñ¥½¹}…ÑÑ•µÁÑ}…¹¹½Ñ}‰•}½¹ÍÑÉÕÑ•‘}‘¥É•Ñ±ä ¤è(€€€Ý¥Ñ ÁåÑ•ÍÐ¹É…¥Í•Ì¡QåÁ•ÉÉ½È¤è(€€€€€€€ÕÑ¡½É¥é•‘=‰Í•ÉÙ…Ñ¥½¹ÑÑ•µÁÐ¡ÉÕ¸õÉÕ¹}¥¹ÁÕÐ ¤¤(((Œ€´´´AÉ½‘Õ•È¥¹Ñ•É™…”€¼ÍÕÁÁ±¥•Ñ…É•Ð•á•ÕÑ¥½¸€´´´´´´´´´´´´´´´´´´´´´´´´´´´()±…ÍÌ}Q•ÍÑAÉ½‘Õ•Èè(€€€ÁÉ½‘Õ•É}­¥¹€ô=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•É-¥¹¹IU1(€€€ÁÉ½‘Õ•É}¹…µ”€ô€‰É•Ù¥•Ý•ˆ(€€€ÁÉ½‘Õ•É}É•Ù¥Í¥½¸€ô€‰ÈÄˆ((€€€‘•˜ÁÉ½‘Õ” (€€€€€€€Í•±˜°Í¥¹…°èM¥¹…°°ÉÕ¸è=‰Í•ÉÙ…Ñ¥½¹IÕ¹%¹ÁÕÐ(€€€€¤€´ø=‰Í•ÉÙ…Ñ¥½¹I•ÍÕ±Ñ%¹ÁÕÐè(€€€€€€€É•ÑÕÉ¸=‰Í•ÉÙ…Ñ¥½¹I•ÍÕ±Ñ%¹ÁÕÐ (€€€€€€€€€€€½‰Í•ÉÙ…Ñ¥½¹}¥ô‰ÁÉ½‘Õ•Èµ½‰Í•ÉÙ…Ñ¥½¸ˆ°(€€€€€€€€€€€…¹½¹¥…±}Í¥¹…±}¥õÍ¥¹…°¹¥°(€€€€€€€€€€€½¹‘¥Ñ¥½¹}¥Ñ…Ñ¥½¸õÉÕ¸¹…ÑÑ•µÁÑ•‘}½¹‘¥Ñ¥½¹}¥Ñ…Ñ¥½¸°(€€€€€€€€€€€½¹‘¥Ñ¥½¹}ÍÑ…Ñ”õ=‰Í•ÉÙ…Ñ¥½¹½¹‘¥Ñ¥½¹MÑ…Ñ”¹Q%Y°(€€€€€€€€€€€Í•µ…¹Ñ¥}½¹ÑÉ…Ñ}Ù•ÉÍ¥½¸õÉÕ¸¹…ÑÑ•µÁÑ•‘}Í•µ…¹Ñ¥}½¹ÑÉ…Ñ}Ù•ÉÍ¥½¸°(€€€€€€€€€€€É•½É‘•‘}…Ðô‰É•½É‘•ˆ°(€€€€€€€€€€€ÍÑ…Ñ•}•Ù¥‘•¹•}¥Ñ…Ñ¥½¸õ=‰Í•ÉÙ…Ñ¥½¹¥Ñ…Ñ¥½¸ (€€€€€€€€€€€€€€€¥Ñ…Ñ¥½¹M½ÕÉ•A…ÉÐ¹=9Q9P°€‰…Ñ¥Ù”ˆ(€€€€€€€€€€€€¤°(€€€€€€€€¤(()‘•˜Ñ•ÍÑ}Ñ•ÍÑ}½¹±å}ÁÉ½‘Õ•É}•á•ÕÑ•Í}Ñ¡É½Õ¡}…ÕÑ¡½É¥é•‘}Í•ÉÙ¥•}‰½Õ¹‘…Éä (€€€µ½¹­•åÁ…Ñ °ÑµÁ}Á…Ñ (¤è(€€€µ½¹­•åÁ…Ñ ¹Í•Ñ…ÑÑÈ¡‘…Ñ…‰…Í”°€‰	}AQ ˆ°ÑµÁ}Á…Ñ €¼€‰‰¥„¹‘ˆˆ¤(€€€‘…Ñ…‰…Í”¹¥¹¥Ñ¥…±¥é” ¤(€€€½±±•Ñ•€ôM¥¹…° (€€€€€€€Í½ÕÉ”ô‰ÉÍÌˆ°(€€€€€€€Í½ÕÉ•}¥ô‰Í½ÕÉ”´Äˆ°(€€€€€€€Ñ¥Ñ±”ô‰½¹‘¥Ñ¥½¸ˆ°(€€€€€€€½¹Ñ•¹Ðô‰Q¡”½¹‘¥Ñ¥½¸É•µ…¥¹Ì…Ñ¥Ù”Ñ½‘…ä¸ˆ°(€€€€€€€¥ô‰½±±•Ñ½ÈµÑ•µÁ½É…Éäµ¥ˆ°(€€€€¤(€€€É•Í½±ÕÑ¥½¸€ôÁ•ÉÍ¥ÍÑ}Í¥¹…±Ì¡m½±±•Ñ•‘t¤¹É•Í½±ÕÑ¥½¹ÍlÁt(€€€Í¥¹…°€ôÉ•Í½±ÕÑ¥½¸¹Á•ÉÍ¥ÍÑ•‘}Í¥¹…°(€€€…ÍÍ•ÉÐÍ¥¹…°¥Ì¹½Ð9½¹”((€€€É•¥ÍÑÉä€ô=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•ÉI•¥ÍÑÉä ¡ÉÕ±•}ÁÉ½™¥±” ¤°¤¤(€€€…ÕÑ¡½É¥é•€ô…ÕÑ¡½É¥é•}…ÑÑ•µÁÐ (€€€€€€€É•¥ÍÑÉä°ÉÕ¹}¥¹ÁÕÐ¡Í¥¹…±}¥õÍ¥¹…°¹¥¤(€€€€€¤(€€€ÁÉ½‘Õ•Èè=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•È€ô}Q•ÍÑAÉ½‘Õ•È ¤(€€€É•ÍÕ±Ð€ô¥¹Ù½­•}…ÕÑ¡½É¥é•‘}ÁÉ½‘Õ•È¡ÁÉ½‘Õ•È°Í¥¹…°°…ÕÑ¡½É¥é•¤(€€€Á•ÉÍ¥ÍÑ•€ôÁ•ÉÍ¥ÍÑ}ÁÉ½‘Õ•¡É•ÍÕ±Ð°…ÕÑ¡½É¥é•°ÁÉ½‘Õ•‘}…Ðô‰ÁÉ½‘Õ•ˆ¤((€€€…ÍÍ•ÉÐÁ•ÉÍ¥ÍÑ•¹É•…Ñ•(€€€…ÍÍ•ÉÐÁ•ÉÍ¥ÍÑ•¹½‰Í•ÉÙ…Ñ¥½¸¹½‰Í•ÉÙ…Ñ¥½¹}¥€ôô€‰ÁÉ½‘Õ•Èµ½‰Í•ÉÙ…Ñ¥½¸ˆ(€€€…ÍÍ•ÉÐÁ•ÉÍ¥ÍÑ•¹ÉÕ¸¹ÁÉ½‘Õ•É}¹…µ”€ôô€‰É•Ù¥•Ý•ˆ(()‘•˜Ñ•ÍÑ}¥¹Ù½…Ñ¥½¹}É•©•ÑÍ}ÁÉ½‘Õ•É}¥‘•¹Ñ¥Ñå}µ¥Íµ…Ñ  ¤è(€€€±…ÍÌ]É½¹AÉ½‘Õ•È¡}Q•ÍÑAÉ½‘Õ•È¤è(€€€€€€€ÁÉ½‘Õ•É}É•Ù¥Í¥½¸€ô€‰ÈÈˆ((€€€É•¥ÍÑÉä€ô=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•ÉI•¥ÍÑÉä ¡ÉÕ±•}ÁÉ½™¥±” ¤°¤¤(€€€…ÕÑ¡½É¥é•€ô…ÕÑ¡½É¥é•}…ÑÑ•µÁÐ¡É•¥ÍÑÉä°ÉÕ¹}¥¹ÁÕÐ ¤¤(€€€Í¥¹…°€ôM¥¹…° (€€€€€€€Í½ÕÉ”ô‰ÉÍÌˆ°(€€€€€€€Í½ÕÉ•}¥ô‰Í½ÕÉ”´Äˆ°(€€€€€€€Ñ¥Ñ±”ô‰½¹‘¥Ñ¥½¸ˆ°(€€€€€€€½¹Ñ•¹Ðô‰Q¡”½¹‘¥Ñ¥½¸É•µ…¥¹Ì…Ñ¥Ù”Ñ½‘…ä¸ˆ°(€€€€€€€¥ô‰…¹½¹¥…°´Äˆ°(€€€€¤(€€€Ý¥Ñ ÁåÑ•ÍÐ¹É…¥Í•Ì¡=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•É9½ÑÕÑ¡½É¥é•¤è(€€€€€€€¥¹Ù½­•}…ÕÑ¡½É¥é•‘}ÁÉ½‘Õ•È¡]É½¹AÉ½‘Õ•È ¤°Í¥¹…°°…ÕÑ¡½É¥é•¤(()‘•˜Ñ•ÍÑ}¥¹Ù½…Ñ¥½¹}É•©•ÑÍ}¹½¹…¹½¹¥…±}Í¥¹…±}¥‘•¹Ñ¥Ñä ¤è(€€€É•¥ÍÑÉä€ô=‰Í•ÉÙ…Ñ¥½¹AÉ½‘Õ•ÉI•¥ÍÑÉä ¡ÉÕ±•}ÁÉ½™¥±” ¤°¤¤(€€€…ÕÑ¡½É¥é•€ô…ÕÑ¡½É¥é•}…ÑÑ•µÁÐ¡É•¥ÍÑÉä°ÉÕ¹}¥¹ÁÕÐ ¤¤(€€€Í¥¹…°€ôM¥¹…° (€€€€€€€Í½ÕÉ”ô‰ÉÍÌˆ°(€€€€€€€Í½ÕÉ•}¥ô‰Í½ÕÉ”´Èˆ°(€€€€€€€Ñ¥Ñ±”ô‰½¹‘¥Ñ¥½¸ˆ°(€€€€€€€½¹Ñ•¹Ðô‰Q¡”½¹‘¥Ñ¥½¸É•µ…¥¹Ì…Ñ¥Ù”Ñ½‘…ä¸ˆ°(€€€€€€€¥ô‰ÝÉ½¹œµÍ¥¹…°ˆ°(€€€€¤(€€€Ý¥Ñ ÁåÑ•ÍÐ¹É…¥Í•Ì¡=‰Í•ÉÙ…Ñ¥½¹M•ÉÙ¥•ÉÉ½È°µ…Ñ ô‰…¹½¹¥…°M¥¹…°ˆ¤è(€€€€€€€¥¹Ù½­•}…ÕÑ¡½É¥é•‘}ÁÉ½‘Õ•È¡}Q•ÍÑAÉ½‘Õ•È ¤°Í¥¹…°°…ÕÑ¡½É¥é•¤(
+def test_registry_never_selects_newest_contract_implicitly():
+    registry = ObservationProducerRegistry((
+        profile(versions=(CONTRACT_V1, "condition-state/v2")),
+    ))
+    with pytest.raises(ObservationProducerNotAuthorized):
+        authorize_attempt(registry, run_input(version="condition-state/v999"))
+
+
+def test_authorized_attempt_cannot_be_constructed_directly():
+    with pytest.raises(TypeError):
+        AuthorizedObservationAttempt(run=run_input())
+
+
+class _TestProducer:
+    producer_kind = ObservationProducerKind.RULE
+    producer_name = "reviewed"
+    producer_revision = "r1"
+
+    def produce(
+        self,
+        signal: Signal,
+        run: ObservationRunInput,
+    ) -> ObservationResultInput:
+        return ObservationResultInput(
+            observation_id="producer-observation",
+            canonical_signal_id=signal.id,
+            condition_citation=run.attempted_condition_citation,
+            condition_state=ObservationConditionState.ACTIVE,
+            semantic_contract_version=run.attempted_semantic_contract_version,
+            recorded_at="recorded",
+            state_evidence_citation=ObservationCitation(
+                CitationSourcePart.CONTENT, "active"
+            ),
+        )
+
+
+def test_test_only_producer_executes_through_authorized_service_boundary(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "bia.db")
+    database.initialize()
+
+    stored = Signal(
+        source="rss",
+        source_id="source-1",
+        title="Condition",
+        content="The condition remains active today.",
+        id="canonical-1",
+    )
+    first = persist_signals([stored]).resolutions[0]
+    assert first.persisted_signal is not None
+
+    duplicate = Signal(
+        source="rss",
+        source_id="source-1",
+        title="Recollected title that must not become provenance",
+        content="Recollected content",
+        id="collector-temporary-id",
+    )
+    resolution = persist_signals([duplicate]).resolutions[0]
+    signal = resolution.persisted_signal
+    assert signal is not None
+    assert signal.id == "canonical-1"
+    assert signal.content == "The condition remains active today."
+
+    registry = ObservationProducerRegistry((profile(),))
+    authorized = authorize_attempt(
+        registry,
+        run_input(signal_id=signal.id),
+    )
+    producer: ObservationProducer = _TestProducer()
+    result = invoke_authorized_producer(producer, signal, authorized)
+    persisted = persist_produced(result, authorized, produced_at="produced")
+
+    assert persisted.created
+    assert persisted.observation.signal_id == "canonical-1"
+    assert persisted.run.producer_name == "reviewed"
+
+
+def test_invocation_rejects_actual_producer_identity_mismatch():
+    class WrongRevision(_TestProducer):
+        producer_revision = "r2"
+
+    registry = ObservationProducerRegistry((profile(),))
+    authorized = authorize_attempt(registry, run_input())
+    signal = Signal(
+        source="rss",
+        source_id="source-1",
+        title="Condition",
+        content="The condition remains active today.",
+        id="canonical-1",
+    )
+    with pytest.raises(ObservationProducerNotAuthorized):
+        invoke_authorized_producer(WrongRevision(), signal, authorized)
+
+
+def test_invocation_rejects_signal_identity_mismatch_before_producer_runs():
+    registry = ObservationProducerRegistry((profile(),))
+    authorized = authorize_attempt(registry, run_input())
+    signal = Signal(
+        source="rss",
+        source_id="source-2",
+        title="Condition",
+        content="The condition remains active today.",
+        id="not-canonical-1",
+    )
+    with pytest.raises(ObservationServiceError, match="canonical Signal"):
+        invoke_authorized_producer(_TestProducer(), signal, authorized)
