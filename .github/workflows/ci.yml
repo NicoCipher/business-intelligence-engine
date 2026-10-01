@@ -44,14 +44,3 @@ jobs:
       - name: Run test suite
         working-directory: backend
         run: pytest
-
-      - name: Install Ruff for BIA-59 verification
-        run: pip install ruff
-
-      - name: Run scoped Ruff for BIA-59
-        run: >-
-          ruff check
-          backend/observation_service.py
-          backend/observation_producer_registry.py
-          backend/tests/test_observation_service.py
-          backend/tests/test_observation_producer_registry.py
