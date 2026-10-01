@@ -129,6 +129,35 @@ def test_supplied_optional_metadata_must_be_nonempty_when_present():
         profile(versions=())
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    (
+        ("run_id", ""),
+        ("attempted_signal_id", ""),
+        ("attempted_semantic_contract_version", ""),
+        ("attempted_at", ""),
+        ("producer_name", ""),
+        ("producer_revision", ""),
+    ),
+)
+def test_authorization_rejects_malformed_run_before_issuing_capability(field, value):
+    registry = ObservationProducerRegistry((profile(),))
+    values = {
+        "run_id": "run-1",
+        "attempted_signal_id": "canonical-1",
+        "attempted_condition_citation": citation(),
+        "attempted_semantic_contract_version": CONTRACT_V1,
+        "producer_kind": ObservationProducerKind.RULE,
+        "attempted_at": "attempted",
+        "producer_name": "reviewed",
+        "producer_revision": "r1",
+    }
+    values[field] = value
+    malformed = ObservationRunInput(**values)
+    with pytest.raises((TypeError, ValueError)):
+        authorize_attempt(registry, malformed)
+
+
 def test_authorization_requires_exact_identity_and_contract_version():
     registry = ObservationProducerRegistry((
         profile(versions=(CONTRACT_V1, "condition-state/v2")),
@@ -245,6 +274,33 @@ def test_test_only_producer_executes_through_authorized_service_boundary(
     assert persisted.created
     assert persisted.observation.signal_id == "canonical-1"
     assert persisted.run.producer_name == "reviewed"
+
+
+def test_invocation_rejects_transient_signal_with_canonical_id(monkeypatch, tmp_path):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "bia.db")
+    database.initialize()
+    stored = Signal(
+        source="rss",
+        source_id="source-1",
+        title="Condition",
+        content="The condition remains active today.",
+        id="canonical-1",
+    )
+    resolution = persist_signals([stored]).resolutions[0]
+    assert resolution.persisted_signal is not None
+
+    transient = Signal(
+        source="rss",
+        source_id="source-1",
+        title="Condition",
+        content="The condition remains active for a different reason.",
+        id="canonical-1",
+    )
+    registry = ObservationProducerRegistry((profile(),))
+    authorized = authorize_attempt(registry, run_input())
+
+    with pytest.raises(ObservationServiceError, match="canonical persisted Signal"):
+        invoke_authorized_producer(_TestProducer(), transient, authorized)
 
 
 def test_invocation_rejects_actual_producer_identity_mismatch():
