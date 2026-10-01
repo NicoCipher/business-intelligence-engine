@@ -149,9 +149,17 @@ BIA-59 re-loads the attempted Signal at invocation and passes that stored object
 to the producer, so transient same-ID caller text can never become interpretation
 evidence. This deliberately avoids comparing unrelated mutable operational fields
 such as `processed`; canonicalization, not caller-object equality, is the invariant.
-Before invocation it resolves the attempted
-condition citation against that canonical Signal using BIA-58's citation semantics;
-a nonexistent literal or occurrence is not an admitted producer target.
+Before invocation it resolves the attempted condition citation against that
+canonical Signal using BIA-58's citation semantics; a nonexistent literal or
+occurrence is not an admitted producer target.
+
+This is deliberately a **preflight use of BIA-58's existing resolver**, not a
+second citation-validation implementation and not a replacement for BIA-58's
+transactional checks. `persist_produced()` and
+`persist_operational_failure()` must still re-validate inside their own
+transactions because persistence integrity cannot rely on an earlier application
+check. The preflight exists only to avoid invoking a potentially costly producer
+for a target BIA already knows cannot be retained.
 
 The BIA-59 execution test deliberately exercises:
 
@@ -242,6 +250,20 @@ Python cannot make internal code cryptographically unable to bypass this convent
 Deliberate code could import private symbols or write directly to SQLite. Such bypass
 is visibly intentional and greppable; BIA-59 does not claim to prevent hostile
 internal code.
+
+### Run identity is not reserved by BIA-59
+
+`run_id` is structurally validated before authorization, but BIA-59 does not
+preflight or reserve uniqueness in `observation_runs`. A standalone existence
+check before producer invocation would have a TOCTOU race and would duplicate a
+database primary-key invariant without making it authoritative. Reserving a run ID
+before execution would require a new retained attempt lifecycle/state and is outside
+this task's approved scope.
+
+BIA-58 therefore remains the authority for retained `run_id` uniqueness at
+persistence time. The future BIA-60 orchestration layer must mint fresh run IDs for
+each supplied attempt. If BIA later needs pre-execution reservation, that requires
+an explicit lifecycle design rather than a race-prone BIA-59 lookup.
 
 ## 11. Failure semantics
 
