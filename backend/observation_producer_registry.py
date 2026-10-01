@@ -57,6 +57,7 @@ from observation_service import (
     ObservationServiceError,
     _issue_authorized_attempt,
     load_canonical_persisted_signal,
+    validate_observation_target_citation,
 )
 
 
@@ -291,6 +292,9 @@ def invoke_authorized_producer(
         raise ObservationServiceError(
             "supplied Signal must equal the canonical persisted Signal"
         )
+    validate_observation_target_citation(
+        canonical_signal, run.attempted_condition_citation
+    )
     result = producer.produce(canonical_signal, run)
     if not isinstance(result, ObservationResultInput):
         raise ObservationServiceError(
