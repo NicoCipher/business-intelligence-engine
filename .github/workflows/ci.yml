@@ -50,7 +50,7 @@ jobs:
 
       - name: Run scoped Ruff for BIA-59
         run: >-
-          ruff check
+          ruff check --diff
           backend/observation_service.py
           backend/observation_producer_registry.py
           backend/tests/test_observation_service.py
