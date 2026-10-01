@@ -126,13 +126,12 @@ BIA-59 selects no implementation. The caller supplies the producer explicitly.
 2. the supplied Signal ID equals the authorized attempted Signal ID;
 3. the supplied producer's exact `(kind, name, revision)` identity equals the
    identity authorized in the run, before any producer-side DB work;
-4. that Signal is field-equivalent to the canonical SQLite-backed Signal loaded
-   for the attempted ID, preventing a transient/mutated same-ID object from
-   becoming interpretation evidence;
+4. the canonical SQLite-backed Signal is rehydrated for the attempted ID, so
+   transient/mutated caller text is never interpretation evidence;
 5. the supplied condition citation resolves at the requested literal occurrence
    in that canonical Signal.
 
-Only then is `producer.produce()` invoked, and it receives the canonical
+Only then is `producer.produce()` invoked, and it receives the freshly rehydrated
 SQLite-backed Signal rather than trusting the caller's object. Invalid supplied
 targets therefore fail before a producer can incur model cost or other side effects.
 
@@ -146,9 +145,11 @@ collector-temporary or mutated object that reuses the same ID.
 
 BIA-57 already provides this boundary through
 `SignalPersistenceResolution.persisted_signal`, which is hydrated from SQLite.
-BIA-59 also re-loads the attempted Signal at invocation and rejects a supplied
-Signal that is not field-equivalent to that canonical row, so the producer cannot
-interpret transient same-ID text. Before invocation it resolves the attempted
+BIA-59 re-loads the attempted Signal at invocation and passes that stored object
+to the producer, so transient same-ID caller text can never become interpretation
+evidence. This deliberately avoids comparing unrelated mutable operational fields
+such as `processed`; canonicalization, not caller-object equality, is the invariant.
+Before invocation it resolves the attempted
 condition citation against that canonical Signal using BIA-58's citation semantics;
 a nonexistent literal or occurrence is not an admitted producer target.
 
@@ -278,7 +279,8 @@ BIA-59 tests cover:
 - canonical Signal identity from BIA-57;
 - producer identity mismatch rejection;
 - canonical Signal ID mismatch rejection;
-- transient/mutated same-ID Signal rejection against the SQLite-backed row;
+- transient/mutated same-ID caller Signal is replaced by the SQLite-backed row
+  before producer execution;
 - malformed run-input rejection before capability issuance;
 - unresolved target-citation rejection before producer invocation.
 
