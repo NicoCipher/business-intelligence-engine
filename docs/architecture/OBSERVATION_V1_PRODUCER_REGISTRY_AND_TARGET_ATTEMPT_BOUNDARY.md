@@ -128,10 +128,13 @@ BIA-59 selects no implementation. The caller supplies the producer explicitly.
    identity authorized in the run, before any producer-side DB work;
 4. that Signal is field-equivalent to the canonical SQLite-backed Signal loaded
    for the attempted ID, preventing a transient/mutated same-ID object from
-   becoming interpretation evidence.
+   becoming interpretation evidence;
+5. the supplied condition citation resolves at the requested literal occurrence
+   in that canonical Signal.
 
 Only then is `producer.produce()` invoked, and it receives the canonical
-SQLite-backed Signal rather than trusting the caller's object.
+SQLite-backed Signal rather than trusting the caller's object. Invalid supplied
+targets therefore fail before a producer can incur model cost or other side effects.
 
 The helper does not catch producer failures, choose retry behavior, persist failure
 runs, or select a fallback producer. Those concerns remain with a future caller.
@@ -145,7 +148,9 @@ BIA-57 already provides this boundary through
 `SignalPersistenceResolution.persisted_signal`, which is hydrated from SQLite.
 BIA-59 also re-loads the attempted Signal at invocation and rejects a supplied
 Signal that is not field-equivalent to that canonical row, so the producer cannot
-interpret transient same-ID text.
+interpret transient same-ID text. Before invocation it resolves the attempted
+condition citation against that canonical Signal using BIA-58's citation semantics;
+a nonexistent literal or occurrence is not an admitted producer target.
 
 The BIA-59 execution test deliberately exercises:
 
@@ -274,7 +279,8 @@ BIA-59 tests cover:
 - producer identity mismatch rejection;
 - canonical Signal ID mismatch rejection;
 - transient/mutated same-ID Signal rejection against the SQLite-backed row;
-- malformed run-input rejection before capability issuance.
+- malformed run-input rejection before capability issuance;
+- unresolved target-citation rejection before producer invocation.
 
 Existing BIA-58 persistence, exact-reuse, lineage, atomicity, and concurrency behavior
 must remain unchanged.
