@@ -16,6 +16,11 @@ from models import (
     ObservationConditionState,
     ObservationProducerKind,
 )
+from observation_producer_registry import (
+    ApprovedProducerProfile,
+    ObservationProducerRegistry,
+    authorize_attempt,
+)
 from observation_service import (
     ObservationLineageConflict,
     ObservationResultInput,
@@ -24,6 +29,21 @@ from observation_service import (
     persist_operational_failure,
     persist_produced,
 )
+
+# BIA-59: every persist_produced()/persist_operational_failure() call now
+# requires an AuthorizedObservationAttempt. This fixture registry approves
+# exactly the producer identity the run() helper below always uses, plus
+# the one alternate contract version test_exact_key_boundaries_do_not_reuse
+# constructs directly -- it exists only here, is never assigned to the
+# production observation_producer_registry.PRODUCER_REGISTRY, and has no
+# bearing on BIA-58's own persistence/validation/lineage behavior, which
+# this file otherwise still exercises exactly as before.
+_TEST_PRODUCER_REGISTRY = ObservationProducerRegistry((
+    ApprovedProducerProfile(
+        ObservationProducerKind.RULE, "reviewed", "r1",
+        frozenset({"condition-state/v1", "condition-state/v2"}),
+    ),
+))
 
 
 @pytest.fixture
@@ -48,10 +68,11 @@ def citation(text, part=CitationSourcePart.CONTENT, occurrence=1):
 
 
 def run(run_id="run-1", signal_id="canonical-1", target=None):
-    return ObservationRunInput(
+    raw = ObservationRunInput(
         run_id, signal_id, target or citation("condition remains active"), "condition-state/v1",
         ObservationProducerKind.RULE, "attempted", "reviewed", "r1",
     )
+    return authorize_attempt(_TEST_PRODUCER_REGISTRY, raw)
 
 
 _DEFAULT_EVIDENCE = object()
@@ -149,7 +170,10 @@ def test_exact_key_boundaries_do_not_reuse(db, change):
     second = result("observation-2", **change)
     second_run = run("run-2", target=second.condition_citation)
     if "semantic_contract_version" in change:
-        second_run = ObservationRunInput("run-2", "canonical-1", second.condition_citation, "condition-state/v2", ObservationProducerKind.RULE, "attempted")
+        second_run = authorize_attempt(
+            _TEST_PRODUCER_REGISTRY,
+            ObservationRunInput("run-2", "canonical-1", second.condition_citation, "condition-state/v2", ObservationProducerKind.RULE, "attempted", "reviewed", "r1"),
+        )
     assert persist_produced(second, second_run, produced_at="produced").created
 
 
